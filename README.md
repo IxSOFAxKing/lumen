@@ -32,10 +32,66 @@ Lumen is a self-hosted web app that plays your **Plex library** and your **IPTV 
 
 ## Quick start
 
+### Option A: copy and paste a compose file (no clone needed)
+
+Create a folder (for example `~/lumen`), save the following as `docker-compose.yml` in it, and edit the values marked "change me". Docker builds the image straight from this GitHub repository.
+
+```yaml
+services:
+  lumen:
+    build: https://github.com/IxSOFAxKing/lumen.git#main
+    image: lumen:latest
+    container_name: lumen
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - TZ=America/New_York        # change me: your time zone (used by the TV guide and recordings)
+      - APP_PASSWORD=changeme      # change me: login password (leave empty to disable login)
+      - HW_ACCEL=none              # none | vaapi | qsv | nvenc (can also be changed in Settings)
+    volumes:
+      - ./config:/config           # database, settings and EPG cache
+      - ./recordings:/recordings   # DVR recordings
+    tmpfs:
+      - /transcode:size=4g         # transcoding scratch space in RAM
+
+    # --- Intel / AMD GPU (VAAPI or Quick Sync): uncomment these two lines ---
+    # devices:
+    #   - /dev/dri:/dev/dri
+
+    # --- NVIDIA GPU (needs the NVIDIA Container Toolkit): uncomment this block ---
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu, video, compute, utility]
+```
+
+Then start it from that folder:
+
 ```bash
-git clone <this repo> lumen && cd lumen
 docker compose up -d --build
 ```
+
+To update to the latest version later:
+
+```bash
+docker compose build --pull --no-cache && docker compose up -d
+```
+
+### Option B: clone the repository
+
+```bash
+git clone https://github.com/IxSOFAxKing/lumen.git && cd lumen
+```
+
+```bash
+docker compose up -d --build
+```
+
+### First-time setup
 
 Open **http://SERVER-IP:8080**, then go to **Settings**:
 1. **Plex** → *Sign in with Plex* (or connect manually with URL + token).
