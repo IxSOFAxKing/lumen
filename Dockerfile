@@ -26,12 +26,19 @@ RUN apt-get update \
  && apt-get purge -y gnupg && apt-get autoremove -y \
  && rm -rf /var/lib/apt/lists/*
 
+LABEL org.opencontainers.image.title="Lumen" \
+      org.opencontainers.image.description="Plex + IPTV web player with TV guide, DVR and hardware transcoding" \
+      org.opencontainers.image.source="https://github.com/IxSOFAxKing/lumen"
+
 WORKDIR /app
+COPY docker/entrypoint.sh /usr/local/bin/lumen-entrypoint
 COPY --from=deps /app/server/node_modules ./server/node_modules
 COPY server ./server
 COPY web ./web
 
 ENV NODE_ENV=production \
+    PUID=0 \
+    PGID=0 \
     PORT=8080 \
     DATA_DIR=/config \
     RECORDINGS_DIR=/recordings \
@@ -43,5 +50,5 @@ ENV NODE_ENV=production \
 VOLUME ["/config", "/recordings", "/transcode"]
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD curl -fsS http://127.0.0.1:${PORT}/api/health || exit 1
-ENTRYPOINT ["/usr/bin/tini", "--"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/lumen-entrypoint"]
 CMD ["node", "--no-warnings=ExperimentalWarning", "server/src/index.js"]

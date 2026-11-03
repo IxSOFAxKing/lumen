@@ -32,20 +32,21 @@ Lumen is a self-hosted web app that plays your **Plex library** and your **IPTV 
 
 ## Quick start
 
-### Option A: copy and paste a compose file (no clone needed)
+Lumen is published as a ready-made image at **`ghcr.io/ixsofaxking/lumen`** for `amd64` and `arm64`, so you deploy it like Sonarr or Radarr: one compose file, `docker compose pull`, done.
 
-Create a folder (for example `~/lumen`), save the following as `docker-compose.yml` in it, and edit the values marked "change me". Docker builds the image straight from this GitHub repository.
+Create a folder (for example `~/lumen`) and save this as `docker-compose.yml`:
 
 ```yaml
 services:
   lumen:
-    build: https://github.com/IxSOFAxKing/lumen.git#main
-    image: lumen:latest
+    image: ghcr.io/ixsofaxking/lumen:latest
     container_name: lumen
     restart: unless-stopped
     ports:
       - "8080:8080"
     environment:
+      - PUID=1000                  # your user id   (run `id` on the host)
+      - PGID=1000                  # your group id
       - TZ=America/New_York        # change me: your time zone (used by the TV guide and recordings)
       - APP_PASSWORD=changeme      # change me: login password (leave empty to disable login)
       - HW_ACCEL=none              # none | vaapi | qsv | nvenc (can also be changed in Settings)
@@ -69,23 +70,27 @@ services:
     #           capabilities: [gpu, video, compute, utility]
 ```
 
-Then start it from that folder:
+Start it from that folder:
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
-To update to the latest version later:
+Update to the latest version:
 
 ```bash
-docker compose build --pull --no-cache && docker compose up -d
+docker compose pull && docker compose up -d
 ```
 
-### Option B: clone the repository
+Image tags: `latest` (newest build from `main`), version tags such as `1.0.0` / `1.0` for releases, and `sha-xxxxxxx` for a specific commit. Portainer, Unraid, Dockge and similar tools work with the same compose file.
+
+### Building from source instead
 
 ```bash
 git clone https://github.com/IxSOFAxKing/lumen.git && cd lumen
 ```
+
+In `docker-compose.yml`, comment out the `image:` line and uncomment `build: .`, then:
 
 ```bash
 docker compose up -d --build
@@ -105,17 +110,10 @@ Set `APP_PASSWORD` in `docker-compose.yml` if the app is reachable by anyone oth
 The image ships **jellyfin-ffmpeg**, which includes VAAPI, QSV (with the Intel media driver) and NVENC support.
 
 ### Intel (Quick Sync / VAAPI) or AMD (VAAPI)
-```bash
-docker compose -f docker-compose.yml -f docker-compose.intel.yml up -d --build
-```
-This passes `/dev/dri` into the container. In **Settings → Transcoding**, pick **VAAPI** (Intel or AMD) or **Intel QSV**. The "Detected hardware" panel shows which render devices and encoders were found.
+Uncomment the `devices: - /dev/dri:/dev/dri` lines in your compose file (or add `-f docker-compose.intel.yml` when using the repo's files). This passes the GPU into the container, and Lumen automatically joins the group that owns it, so it works with any `PUID`/`PGID`. In **Settings → Transcoding**, pick **VAAPI** (Intel or AMD) or **Intel QSV**. The "Detected hardware" panel shows which render devices and encoders were found.
 
 ### NVIDIA
-Install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) on the host, then:
-```bash
-docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d --build
-```
-Then select **NVIDIA NVENC** in Settings.
+Install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) on the host, uncomment the NVIDIA `deploy:` block in your compose file (or add `-f docker-compose.nvidia.yml` when using the repo's files), then select **NVIDIA NVENC** in Settings.
 
 ### Plex content
 By default Plex content is transcoded by **your Plex Media Server**. That handles subtitle burn-in and uses Plex's own hardware acceleration, which requires Plex Pass. If you don't have Plex Pass, set *Transcoder for Plex content* to **Lumen built-in** so Lumen's GPU pipeline does the work instead.
@@ -124,6 +122,7 @@ By default Plex content is transcoded by **your Plex Media Server**. That handle
 
 | Variable | Default | Description |
 |---|---|---|
+| `PUID` / `PGID` | `0` (root) | User and group the app runs as; files in `/config` and `/recordings` are owned by them |
 | `APP_PASSWORD` | *(empty)* | Require a password to use the app |
 | `HW_ACCEL` | `none` | Default accel: `none`, `vaapi`, `qsv`, `nvenc` (also changeable in the UI) |
 | `VAAPI_DEVICE` | `/dev/dri/renderD128` | Render node for VAAPI |
