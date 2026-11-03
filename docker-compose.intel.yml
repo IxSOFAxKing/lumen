@@ -1,0 +1,9 @@
+# Intel / AMD GPU (VAAPI or Quick Sync).
+# Usage: docker compose -f docker-compose.yml -f docker-compose.intel.yml up -d
+services:
+  lumen:
+    environment:
+      - HW_ACCEL=vaapi               # or qsv for Intel Quick Sync
+      - VAAPI_DEVICE=/dev/dri/renderD128
+    devices:
+      - /dev/dri:/dev/dri

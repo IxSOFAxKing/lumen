@@ -1,0 +1,23 @@
+services:
+  lumen:
+    build: .
+    image: lumen:latest
+    container_name: lumen
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - TZ=America/New_York          # your timezone (used for the TV guide / recordings)
+      - APP_PASSWORD=                # set a password to require login (recommended if exposed)
+      - HW_ACCEL=none                # default accel: none | vaapi | qsv | nvenc  (can be changed in Settings)
+      # - VAAPI_DEVICE=/dev/dri/renderD128
+    volumes:
+      - ./config:/config             # database, settings, EPG cache
+      - ./recordings:/recordings     # DVR recordings
+    tmpfs:
+      - /transcode:size=4g           # transcoder scratch space in RAM (remove to use disk)
+
+    # ---- Intel (VAAPI / Quick Sync) or AMD (VAAPI) hardware transcoding ----
+    # Uncomment to pass your GPU into the container, then pick VAAPI/QSV in Settings → Transcoding.
+    # devices:
+    #   - /dev/dri:/dev/dri
