@@ -14,6 +14,24 @@ export function verify(url, ua, s) {
   return typeof s === 'string' && s.length === expect.length && crypto.timingSafeEqual(Buffer.from(s), Buffer.from(expect));
 }
 
+/** Signed, cached image proxy URL for remote artwork (channel logos, posters). */
+export function imgUrl(u) {
+  if (typeof u !== 'string' || !/^https?:\/\//i.test(u)) return u;
+  return `/api/img?${new URLSearchParams({ u, s: sign('img|' + u) })}`;
+}
+export function verifyImg(u, s) {
+  const expect = sign('img|' + u);
+  return typeof s === 'string' && s.length === expect.length && crypto.timingSafeEqual(Buffer.from(s), Buffer.from(expect));
+}
+
+const IMG_KEYS = new Set(['logo', 'poster', 'cover', 'cover_big', 'movie_image', 'image', 'backdrop_path', 'stream_icon', 'icon']);
+/** Deep-walk an API payload and route remote artwork through the image cache. */
+export function proxyImages(v, key) {
+  if (Array.isArray(v)) return v.map(x => proxyImages(x, key));
+  if (v && typeof v === 'object') { const o = {}; for (const [k, x] of Object.entries(v)) o[k] = proxyImages(x, k); return o; }
+  return IMG_KEYS.has(key) ? imgUrl(v) : v;
+}
+
 export function rewritePlaylist(text, baseUrl, ua) {
   const abs = u => new URL(u, baseUrl).toString();
   return text.split(/\r?\n/).map(line => {

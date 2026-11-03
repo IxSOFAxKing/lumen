@@ -43,6 +43,8 @@ const P = {
   next: '<path d="M5 5v14l10-7zM18 5v14"/>',
   prev: '<path d="M19 5v14L9 12zM6 5v14"/>',
   logout: '<path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 16l-4-4 4-4M6 12h11"/>',
+  chevl: '<path d="m15 5-7 7 7 7"/>', chevr: '<path d="m9 5 7 7-7 7"/>',
+  grip: '<circle cx="9" cy="6" r="1.3" fill="currentColor"/><circle cx="15" cy="6" r="1.3" fill="currentColor"/><circle cx="9" cy="12" r="1.3" fill="currentColor"/><circle cx="15" cy="12" r="1.3" fill="currentColor"/><circle cx="9" cy="18" r="1.3" fill="currentColor"/><circle cx="15" cy="18" r="1.3" fill="currentColor"/>',
   plex: '<path d="M7 3h5l6 9-6 9H7l6-9z" fill="currentColor" stroke="none"/>',
 };
 

@@ -89,8 +89,8 @@ export async function syncProvider(id) {
   const info = await testXtream(p);
   const [liveCats, live, vodCats, vod, serCats, series] = await Promise.all([
     xtream(p, 'get_live_categories'), xtream(p, 'get_live_streams'),
-    xtream(p, 'get_vod_categories').catch(() => []), xtream(p, 'get_vod_streams').catch(() => []),
-    xtream(p, 'get_series_categories').catch(() => []), xtream(p, 'get_series').catch(() => []),
+    p.vod_enabled ? xtream(p, 'get_vod_categories').catch(() => []) : [], p.vod_enabled ? xtream(p, 'get_vod_streams').catch(() => []) : [],
+    p.series_enabled ? xtream(p, 'get_series_categories').catch(() => []) : [], p.series_enabled ? xtream(p, 'get_series').catch(() => []) : [],
   ]);
   const { hiddenCats, hiddenCh } = preserveHidden(p.id);
   tx(() => {

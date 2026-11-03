@@ -1,4 +1,4 @@
-import { card, h } from './ui.js';
+import { card, h, hrow } from './ui.js';
 import { plexImg } from './api.js';
 import { go } from './app.js';
 import { playPlex } from './playback.js';
@@ -30,4 +30,4 @@ export function plexCard(m, { wide = false, forcePlay = false } = {}) {
   return card({ img, title, sub, progress, wide: useWide, onClick, corner: unwatched > 0 ? String(unwatched) : null, played, placeholder: title });
 }
 
-export function plexRow(items, opts) { return h('div', { class: 'hrow' }, items.map(m => plexCard(m, opts))); }
+export function plexRow(items, opts) { return hrow(items.map(m => plexCard(m, opts))); }

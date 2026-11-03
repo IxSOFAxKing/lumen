@@ -94,7 +94,7 @@ export function confirmDialog(title, text, { okLabel = 'OK', danger = false } = 
 // ---------- Cards ----------
 export function card({ img, title, sub, progress, corner, onClick, wide, square, placeholder, played }) {
   const art = h('div', { class: 'art' },
-    img ? h('img', { src: img, loading: 'lazy', alt: '', onError: e => { e.target.replaceWith(h('div', { class: 'ph' }, placeholder || title || '')); } })
+    img ? h('img', { src: img, loading: 'lazy', decoding: 'async', alt: '', onLoad: e => e.target.classList.add('loaded'), onError: e => { e.target.replaceWith(h('div', { class: 'ph' }, placeholder || title || '')); } })
       : h('div', { class: 'ph' }, placeholder || title || ''),
     h('div', { class: 'play-ov', html: icon('play') }),
     corner ? h('div', { class: 'corner' }, corner) : null,
@@ -107,7 +107,58 @@ export function card({ img, title, sub, progress, corner, onClick, wide, square,
 export function section(title, content, more) {
   return h('div', {}, h('h2', { class: 'sec' }, title, more ? h('a', { class: 'more', href: more }, 'See all ›') : null), content);
 }
-export const hrow = items => h('div', { class: 'hrow' }, items);
+/** Horizontal carousel row with hover arrows (scrollbars are hidden). */
+export function hrow(items) {
+  const row = h('div', { class: 'hrow' }, items);
+  const page = dir => row.scrollBy({ left: dir * Math.max(300, row.clientWidth * 0.85), behavior: 'smooth' });
+  const l = h('button', { class: 'arrow l', 'aria-label': 'Scroll left', html: icon('chevl'), onClick: () => page(-1) });
+  const r = h('button', { class: 'arrow r', 'aria-label': 'Scroll right', html: icon('chevr'), onClick: () => page(1) });
+  const update = () => {
+    l.disabled = row.scrollLeft < 8;
+    r.disabled = row.scrollLeft + row.clientWidth >= row.scrollWidth - 8;
+  };
+  row.addEventListener('scroll', update, { passive: true });
+  requestAnimationFrame(update);
+  setTimeout(update, 400);
+  return h('div', { class: 'carousel' }, l, row, r);
+}
+
+/** Placeholder rows shown while content loads. */
+export function skeletonRows(n = 2, { wide = false } = {}) {
+  return Array.from({ length: n }, () => h('div', {}, h('div', { class: 'skel skel-title' }),
+    h('div', { class: `skel-row ${wide ? 'wide' : ''}` }, Array.from({ length: 10 }, () => h('div', { class: 'skel' })))));
+}
+
+/**
+ * Auto-rotating hero banner.
+ * slides: [{ art, kicker, title, meta: [], summary, play: fn, playLabel, info: fn }]
+ */
+export function heroCarousel(slides, { interval = 8000 } = {}) {
+  if (!slides.length) return h('div');
+  let idx = 0, timer = null;
+  const els = slides.map((s, i) => h('div', { class: `slide ${i === 0 ? 'on' : ''}` },
+    h('img', { class: 'bgimg', src: s.art, alt: '', loading: i < 2 ? 'eager' : 'lazy', decoding: 'async' }),
+    h('div', { class: 'info' },
+      s.kicker ? h('div', { class: 'kicker' }, s.kicker) : null,
+      h('h1', {}, s.title),
+      s.meta?.length ? h('div', { class: 'meta' }, s.meta.filter(Boolean).map(m => h('span', {}, m))) : null,
+      s.summary ? h('div', { class: 'sum' }, s.summary) : null,
+      h('div', { class: 'row wrap' },
+        s.play ? btn(s.playLabel || 'Play', s.play, { cls: 'primary', iconName: 'play' }) : null,
+        s.info ? btn('More info', s.info, { iconName: 'info' }) : null))));
+  const dots = h('div', { class: 'dots' }, slides.map((_, i) => h('i', { class: i === 0 ? 'on' : '', onClick: () => show(i) })));
+  const root = h('div', { class: 'hero-car', onMouseenter: () => clearInterval(timer), onMouseleave: () => start() }, els, dots,
+    slides.length > 1 ? h('button', { class: 'nav l', 'aria-label': 'Previous', html: icon('chevl'), onClick: () => show(idx - 1) }) : null,
+    slides.length > 1 ? h('button', { class: 'nav r', 'aria-label': 'Next', html: icon('chevr'), onClick: () => show(idx + 1) }) : null);
+  function show(i) {
+    idx = (i + slides.length) % slides.length;
+    els.forEach((e, j) => e.classList.toggle('on', j === idx));
+    [...dots.children].forEach((d, j) => d.classList.toggle('on', j === idx));
+  }
+  function start() { clearInterval(timer); if (slides.length > 1) timer = setInterval(() => { if (!document.hidden && root.isConnected) show(idx + 1); else if (!root.isConnected) clearInterval(timer); }, interval); }
+  start();
+  return root;
+}
 
 export function logo(src, name) {
   const box = h('div', { class: 'logo' });

@@ -57,6 +57,28 @@ export async function plexFetch(path, { params = {}, method = 'GET', headers = {
   try { return JSON.parse(text); } catch { return { raw: text }; }
 }
 
+// ---------- response cache (stale-while-revalidate) ----------
+const cache = new Map();
+/** Cached GET for browse endpoints. Serves stale data instantly and refreshes it in the background. */
+export async function plexCached(path, opts = {}, ttl = 60000) {
+  const key = path + '|' + JSON.stringify(opts.params || {}) + '|' + JSON.stringify(opts.headers || {});
+  const hit = cache.get(key);
+  const now = Date.now();
+  if (hit && now - hit.t < ttl) return hit.v;
+  if (hit && now - hit.t < 15 * 60000) {
+    if (!hit.refreshing) {
+      hit.refreshing = true;
+      plexFetch(path, opts).then(v => cache.set(key, { v, t: Date.now() })).catch(() => { hit.refreshing = false; });
+    }
+    return hit.v;
+  }
+  const v = await plexFetch(path, opts);
+  cache.set(key, { v, t: now });
+  if (cache.size > 400) cache.delete(cache.keys().next().value);
+  return v;
+}
+export function clearPlexCache() { cache.clear(); }
+
 // ---------- plex.tv account helpers (PIN login + server discovery) ----------
 
 export async function createPin() {

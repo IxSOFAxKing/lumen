@@ -359,7 +359,7 @@ class Player {
     let idx = target !== undefined ? target : (z.index + dir + z.channels.length) % z.channels.length;
     const ch = z.channels[idx];
     z.index = idx;
-    this.titleEl.textContent = `${ch.num ?? ''} ${ch.name}`;
+    this.titleEl.textContent = ch.name;
     this.showBanner(ch);
     clearTimeout(this.zapT);
     this.zapT = setTimeout(async () => {
@@ -378,7 +378,7 @@ class Player {
     const pct = now ? Math.min(100, ((nowS() - now.start) / (now.stop - now.start)) * 100) : 0;
     this.bannerEl = h('div', { class: 'p-banner' }, logo(ch.logo, ch.name),
       h('div', { class: 'grow' },
-        h('div', { class: 'chn' }, `${ch.num ?? ''}  ${ch.name}`),
+        h('div', { class: 'chn' }, ch.name),
         h('div', { class: 'now' }, now?.title || 'No programme information'),
         now ? h('div', { class: 'progress' }, h('i', { style: { width: `${pct}%` } })) : null,
         h('div', { class: 'chn' }, now ? `${fmtTime(now.start)} – ${fmtTime(now.stop)}` : '', next ? `   ·   Next: ${fmtTime(next.start)} ${next.title}` : '')));
@@ -462,6 +462,7 @@ class Player {
     if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {});
     this.engine?.destroy();
     releaseDesc(this.desc);
+    api.clearCache();
     this.el.remove();
     if (current === this) current = null;
     if (!fromHistory && history.state?.player) history.back();

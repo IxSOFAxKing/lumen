@@ -117,6 +117,11 @@ CREATE TABLE IF NOT EXISTS reminders (
 );
 `);
 
+// ---- migrations ----
+const provCols = db.prepare('PRAGMA table_info(providers)').all().map(c => c.name);
+if (!provCols.includes('vod_enabled')) db.exec('ALTER TABLE providers ADD COLUMN vod_enabled INTEGER DEFAULT 1');
+if (!provCols.includes('series_enabled')) db.exec('ALTER TABLE providers ADD COLUMN series_enabled INTEGER DEFAULT 1');
+
 const getStmt = db.prepare('SELECT value FROM settings WHERE key = ?');
 const setStmt = db.prepare('INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
 

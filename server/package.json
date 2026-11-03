@@ -4,12 +4,15 @@
   "private": true,
   "type": "module",
   "main": "src/index.js",
-  "engines": { "node": ">=22.13" },
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "start": "node --no-warnings=ExperimentalWarning src/index.js",
     "dev": "node --no-warnings=ExperimentalWarning --watch src/index.js"
   },
   "dependencies": {
+    "compression": "^1.8.2",
     "express": "^5.1.0",
     "hls.js": "^1.6.2",
     "mpegts.js": "^1.8.0",

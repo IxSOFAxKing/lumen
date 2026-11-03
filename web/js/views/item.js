@@ -1,5 +1,5 @@
 import { api, plexImg } from '../api.js';
-import { h, btn, section, fmtRuntime, fmtDuration, toast, toastErr, empty, spinner } from '../ui.js';
+import { h, btn, section, fmtRuntime, fmtDuration, toast, toastErr, empty, spinner, skeletonRows } from '../ui.js';
 import { icon } from '../icons.js';
 import { go } from '../app.js';
 import { plexRow, plexCard } from '../plexcards.js';
@@ -62,7 +62,9 @@ function castRow(m) {
 
 async function itemView(el, route) {
   const key = route.parts[0];
-  const m = await api.get(`/api/plex/meta/${key}`);
+  const m = await api.cached(`/api/plex/meta/${key}`, 15000);
+  // Start loading children in parallel with rendering the header.
+  const kidsP = (m.type === 'show' || m.type === 'season') ? api.cached(`/api/plex/meta/${m.ratingKey}/children`, 20000) : null;
   const reload = () => { el.replaceChildren(); itemView(el, route); };
   const actions = [];
   const resume = m.viewOffset ? m.viewOffset / 1000 : 0;
@@ -89,13 +91,12 @@ async function itemView(el, route) {
   const page = h('div', { class: 'page', style: { paddingTop: 0 } });
   el.append(page);
 
-  if (m.type === 'show') {
-    const seasons = await api.get(`/api/plex/meta/${m.ratingKey}/children`);
-    page.append(section('Seasons', plexRow(seasons)));
-  }
-  if (m.type === 'season') {
-    const eps = await api.get(`/api/plex/meta/${m.ratingKey}/children`);
-    page.append(section('Episodes', h('div', { class: 'ep-list' }, eps.map(episodeRow))));
+  if (kidsP) {
+    const holder = h('div', {}, ...skeletonRows(1, { wide: m.type === 'season' }));
+    page.append(holder);
+    kidsP.then(kids => holder.replaceChildren(m.type === 'show'
+      ? section('Seasons', plexRow(kids))
+      : section('Episodes', h('div', { class: 'ep-list' }, kids.map(episodeRow))))).catch(e => holder.replaceChildren(empty('Could not load', e.message)));
   }
   if (m.type === 'episode') {
     page.append(h('div', { class: 'row', style: { marginTop: '10px' } }, btn(`Go to ${m.parentTitle || 'season'}`, () => go(`#/item/${m.parentRatingKey}`), { cls: 'sm' })));
@@ -104,7 +105,7 @@ async function itemView(el, route) {
   if (cast) page.append(cast);
   const extras = (m.Extras?.Metadata || []);
   if (extras.length) page.append(section('Extras', plexRow(extras, { wide: true, forcePlay: true })));
-  api.get(`/api/plex/meta/${m.ratingKey}/related`).then(hubs => {
+  api.cached(`/api/plex/meta/${m.ratingKey}/related`, 600000).then(hubs => {
     for (const hub of hubs) if (hub.Metadata?.length) page.append(section(hub.title, plexRow(hub.Metadata)));
   }).catch(() => {});
 }
@@ -124,7 +125,7 @@ async function listView(el, title, sub, items, art) {
 }
 
 async function playlistView(el, route) {
-  const pl = await api.get(`/api/plex/playlist/${route.parts[0]}`);
+  const pl = await api.cached(`/api/plex/playlist/${route.parts[0]}`, 30000);
   return listView(el, pl.title, `${pl.leafCount || pl.items.length} items${pl.duration ? ' · ' + fmtRuntime(pl.duration / 1000) : ''}`, pl.items);
 }
 

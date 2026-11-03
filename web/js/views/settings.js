@@ -96,7 +96,10 @@ async function iptvTab(el) {
         h('div', { class: 'grow' },
           h('div', { class: 'row' }, h('b', { style: { fontSize: '16px' } }, p.name), h('span', { class: 'badge' }, p.type.toUpperCase()), !p.enabled ? h('span', { class: 'badge warn' }, 'DISABLED') : null,
             a ? h('span', { class: `badge ${a.status === 'Active' ? 'ok' : 'err'}` }, (a.status || '').toUpperCase()) : null),
-          h('div', { class: 'dim small', style: { marginTop: '4px' } }, `${p.counts.live.toLocaleString()} channels · ${p.counts.movies.toLocaleString()} movies · ${p.counts.series.toLocaleString()} series · ${p.counts.programmes.toLocaleString()} EPG entries${p.epgRunning ? ' (updating…)' : ''}`),
+          h('div', { class: 'dim small', style: { marginTop: '4px' } }, [`${p.counts.live.toLocaleString()} channels`,
+            p.type !== 'xtream' ? null : p.vod_enabled ? `${p.counts.movies.toLocaleString()} movies` : 'movies off',
+            p.type !== 'xtream' ? null : p.series_enabled ? `${p.counts.series.toLocaleString()} series` : 'series off',
+            `${p.counts.programmes.toLocaleString()} EPG entries${p.epgRunning ? ' (updating…)' : ''}`].filter(Boolean).join(' · ')),
           h('div', { class: 'dim small' }, [a ? `Connections ${a.active_cons ?? '?'}/${a.max_connections ?? '?'}` : null, exp ? `Expires ${exp.toLocaleDateString()}` : (a ? 'No expiry' : null), a?.is_trial ? 'Trial' : null,
             p.last_sync ? `Synced ${fmtDateTime(p.last_sync)}` : 'Never synced', p.last_epg_sync ? `EPG ${fmtDateTime(p.last_epg_sync)}` : null].filter(Boolean).join(' · '))),
         btn('Sync', async (ev) => { const b = ev.currentTarget; b.disabled = true; try { const r = await api.post(`/api/iptv/providers/${p.id}/sync`); toast(`Synced: ${r.live} channels, ${r.vod} movies, ${r.series} series`, { type: 'ok' }); render(); } catch (e) { toastErr(e); } b.disabled = false; }, { cls: 'sm', iconName: 'refresh' }),
@@ -119,7 +122,13 @@ function providerForm(p, done) {
   const output = h('select', { class: 'input' }, h('option', { value: 'ts' }, 'MPEG-TS (.ts) — recommended'), h('option', { value: 'm3u8' }, 'HLS (.m3u8)'));
   output.value = p?.output || 'ts';
   const enabled = h('input', { type: 'checkbox', checked: p ? p.enabled : true });
-  const xtOnly = h('div', {}, h('div', { class: 'set-grid' }, h('label', { class: 'field' }, 'Username', user), h('label', { class: 'field' }, 'Password', pass)), h('label', { class: 'field' }, 'Live stream format', output));
+  const vodOn = h('input', { type: 'checkbox', checked: p ? p.vod_enabled : true });
+  const seriesOn = h('input', { type: 'checkbox', checked: p ? p.series_enabled : true });
+  const xtOnly = h('div', {}, h('div', { class: 'set-grid' }, h('label', { class: 'field' }, 'Username', user), h('label', { class: 'field' }, 'Password', pass)), h('label', { class: 'field' }, 'Live stream format', output),
+    h('div', { class: 'field' }, 'Content to load',
+      h('label', { class: 'check', style: { margin: '4px 0 0', color: 'var(--text)' } }, vodOn, 'Movies (VOD)'),
+      h('label', { class: 'check', style: { margin: 0, color: 'var(--text)' } }, seriesOn, 'TV series'),
+      h('span', { class: 'dim small' }, 'Turn these off to use this provider for live TV only. Syncing is faster too.')));
   const urlLabel = h('span', {}, 'Server URL');
   const sync = () => { xtOnly.classList.toggle('hidden', type.value !== 'xtream'); urlLabel.textContent = type.value === 'xtream' ? 'Server URL (e.g. http://host:port)' : 'M3U playlist URL'; };
   type.addEventListener('change', sync); sync();
@@ -130,7 +139,7 @@ function providerForm(p, done) {
       p ? h('label', { class: 'check' }, enabled, 'Enabled') : null,
       h('p', { class: 'dim small' }, 'Lumen will log in, then download channels, VOD, series and the TV guide.')),
     actions: [{ label: 'Cancel' }, { label: p ? 'Save' : 'Add & sync', primary: true, onClick: async () => {
-      const body = { type: type.value, name: name.value.trim(), url: url.value.trim(), username: user.value.trim(), password: pass.value, epg_url: epg.value.trim(), user_agent: ua.value.trim(), output: output.value, enabled: enabled.checked };
+      const body = { type: type.value, name: name.value.trim(), url: url.value.trim(), username: user.value.trim(), password: pass.value, epg_url: epg.value.trim(), user_agent: ua.value.trim(), output: output.value, enabled: enabled.checked, vod_enabled: vodOn.checked, series_enabled: seriesOn.checked };
       if (p) await api.put(`/api/iptv/providers/${p.id}`, body);
       else { toast('Connecting and syncing… this may take a moment'); await api.post('/api/iptv/providers', body); toast('Provider added', { type: 'ok' }); }
       done?.();
@@ -215,7 +224,12 @@ async function playbackTab(el) {
     h('div', { class: 'set-grid' },
       field('Start page', select([{ value: 'home', label: 'Home' }, { value: 'live', label: 'Live TV' }, { value: 'guide', label: 'TV Guide' }], ui.startPage, v => saveUi({ startPage: v }))),
       field('Theme', select([{ value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }], ui.theme, v => saveUi({ theme: v }))),
-      field('Channel info banner (seconds)', num(ui, 'zapOverlaySeconds', saveUi, 1, 20))),
+      field('Channel info banner (seconds)', num(ui, 'zapOverlaySeconds', saveUi, 1, 20)),
+      field('Live TV buffering', select([
+        { value: 'smooth', label: 'Smooth (recommended) — extra buffer, no frame skipping' },
+        { value: 'balanced', label: 'Balanced' },
+        { value: 'low', label: 'Low latency — closest to live, may stutter' }], ui.liveBuffer || 'smooth', v => saveUi({ liveBuffer: v })),
+        'If channels still buffer, also try Settings → Transcoding → Live TV playback → "Always remux".')),
     h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: ui.showPreview, onChange: e => saveUi({ showPreview: e.target.checked }) }), 'Show live preview when selecting a channel')),
   h('div', { class: 'card-box', style: { marginTop: '18px' } }, h('h3', { style: { marginTop: 0 } }, 'IPTV'),
     h('div', { class: 'set-grid' },

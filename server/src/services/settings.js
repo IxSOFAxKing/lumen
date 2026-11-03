@@ -25,7 +25,7 @@ export const DEFAULTS = {
     userAgent: '',
     timeshiftOffsetMinutes: 0,
   },
-  ui: { startPage: 'home', theme: 'dark', zapOverlaySeconds: 4, showPreview: true },
+  ui: { startPage: 'home', theme: 'dark', zapOverlaySeconds: 4, showPreview: true, liveBuffer: 'smooth' },
 };
 
 function merge(def, val) {

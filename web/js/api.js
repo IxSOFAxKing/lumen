@@ -19,11 +19,30 @@ async function request(method, url, body) {
   return data;
 }
 
+// In-memory GET cache so going back to a page is instant. Writes clear it (except playback heartbeats).
+const cache = new Map();
+const HEARTBEAT = /\/(ping|timeline|progress|play)(\/|$|\?)|\/play\//;
+function mutate(method, u, b) {
+  if (!HEARTBEAT.test(u)) cache.clear();
+  return request(method, u, b);
+}
+
 export const api = {
   get: (u) => request('GET', u),
-  post: (u, b = {}) => request('POST', u, b),
-  put: (u, b = {}) => request('PUT', u, b),
-  del: (u) => request('DELETE', u),
+  /** GET with a short-lived cache (default 60s). */
+  cached(u, ttl = 60000) {
+    const hit = cache.get(u);
+    if (hit && Date.now() - hit.t < ttl) return hit.p;
+    const p = request('GET', u);
+    cache.set(u, { p, t: Date.now() });
+    p.catch(() => cache.delete(u));
+    if (cache.size > 300) cache.delete(cache.keys().next().value);
+    return p;
+  },
+  clearCache: () => cache.clear(),
+  post: (u, b = {}) => mutate('POST', u, b),
+  put: (u, b = {}) => mutate('PUT', u, b),
+  del: (u) => mutate('DELETE', u),
 };
 
 export const qs = (o) => {

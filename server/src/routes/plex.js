@@ -5,21 +5,27 @@ import { getConfig } from '../services/settings.js';
 import { startSession, stopSession } from '../services/transcoder.js';
 import { getSetting } from '../db.js';
 import { ah, pipeFetch, srtToVtt } from '../util.js';
+import { serveCachedImage } from '../services/imgcache.js';
 
 const r = Router();
 const MC = j => j?.MediaContainer || {};
 
 // ---------- Setup / auth ----------
 
+let statusCache = null;
 r.get('/status', ah(async (req, res) => {
   const c = plex.plexConf();
   if (!plex.isConfigured()) return res.json({ configured: false });
+  if (statusCache && Date.now() - statusCache.t < 60000 && statusCache.url === c.url) return res.json(statusCache.v);
+  let v;
   try {
     const info = await plex.testConnection(c.url, c.token);
-    res.json({ configured: true, online: true, url: c.url, ...info });
+    v = { configured: true, online: true, url: c.url, ...info };
   } catch (e) {
-    res.json({ configured: true, online: false, url: c.url, serverName: c.serverName, error: e.message });
+    v = { configured: true, online: false, url: c.url, serverName: c.serverName, error: e.message };
   }
+  statusCache = { v, t: Date.now(), url: c.url };
+  res.json(v);
 }));
 
 r.post('/pin', ah(async (req, res) => res.json(await plex.createPin())));
@@ -44,34 +50,58 @@ r.post('/connect', ah(async (req, res) => {
   url = url.replace(/\/+$/, '');
   const info = await plex.testConnection(url, token);
   plex.saveServer({ url, token, serverName: info.name, machineId: info.machineId });
+  plex.clearPlexCache(); statusCache = null;
   res.json({ ok: true, url, ...info });
 }));
 
-r.post('/disconnect', (req, res) => { plex.saveServer({ url: '', token: '', serverName: '', machineId: '' }); res.json({ ok: true }); });
+r.post('/disconnect', (req, res) => { plex.saveServer({ url: '', token: '', serverName: '', machineId: '' }); plex.clearPlexCache(); statusCache = null; res.json({ ok: true }); });
 
 // ---------- Browsing ----------
 
 r.get('/home', ah(async (req, res) => {
   const [hubs, cont, playlists] = await Promise.all([
-    plex.plexFetch('/hubs', { params: { count: 20, includeEmptyHubs: 0, excludeFields: 'summary' } }),
-    plex.plexFetch('/hubs/home/continueWatching', { params: { count: 20 } }).catch(() => null),
-    plex.plexFetch('/playlists', { params: { playlistType: 'video' } }).catch(() => null),
+    plex.plexCached('/hubs', { params: { count: 20, includeEmptyHubs: 0, excludeFields: 'summary' } }),
+    plex.plexCached('/hubs/home/continueWatching', { params: { count: 20 } }).catch(() => null),
+    plex.plexCached('/playlists', { params: { playlistType: 'video' } }).catch(() => null),
   ]);
   let list = MC(hubs).Hub || [];
   const cw = MC(cont).Hub?.[0];
   if (cw && !list.some(h => h.hubIdentifier === cw.hubIdentifier || h.hubIdentifier === 'home.continue')) list = [cw, ...list];
-  res.json({ hubs: list, playlists: MC(playlists).Metadata || [] });
+
+  // Newest movies and shows across all libraries (for the hero carousel and "New" rows).
+  const libs = (MC(await plex.plexCached('/library/sections', {}, 300000).catch(() => null)).Directory || []).filter(l => l.type === 'movie' || l.type === 'show');
+  const newest = async (lib) => {
+    const type = lib.type === 'movie' ? 1 : 2;
+    const sorts = lib.type === 'movie' ? ['addedAt:desc'] : ['episode.addedAt:desc', 'addedAt:desc'];
+    for (const sort of sorts) {
+      try {
+        const j = await plex.plexCached(`/library/sections/${lib.key}/all`, { params: { type, sort }, headers: { 'X-Plex-Container-Start': '0', 'X-Plex-Container-Size': '24' } });
+        return MC(j).Metadata || [];
+      } catch { /* try next sort */ }
+    }
+    return [];
+  };
+  const lists = await Promise.all(libs.slice(0, 8).map(l => newest(l).then(items => ({ type: l.type, items }))));
+  const recentMovies = lists.filter(l => l.type === 'movie').flatMap(l => l.items).sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0)).slice(0, 30);
+  const recentShows = lists.filter(l => l.type === 'show').flatMap(l => l.items).sort((a, b) => (b.updatedAt || b.addedAt || 0) - (a.updatedAt || a.addedAt || 0)).slice(0, 30);
+  const featured = [];
+  for (let i = 0; featured.length < 8 && (i < recentMovies.length || i < recentShows.length); i++) {
+    for (const m of [recentMovies[i], recentShows[i]]) if (m && m.art && featured.length < 8) featured.push(m);
+  }
+  // Drop Plex's own "recently added" hubs: the rows above replace them.
+  list = list.filter(h => !/recentlyadded|recently_added|home\.movies\.recent|home\.television\.recent/i.test(h.hubIdentifier || ''));
+  res.json({ hubs: list, playlists: MC(playlists).Metadata || [], featured, recentMovies, recentShows });
 }));
 
 r.get('/libraries', ah(async (req, res) => {
-  res.json(MC(await plex.plexFetch('/library/sections')).Directory || []);
+  res.json(MC(await plex.plexCached('/library/sections', {}, 300000)).Directory || []);
 }));
 
 r.get('/library/:id/hubs', ah(async (req, res) => {
   const id = req.params.id;
   const [hubs, popular] = await Promise.all([
-    plex.plexFetch(`/hubs/sections/${id}`, { params: { count: 20, includeEmptyHubs: 0 } }),
-    plex.plexFetch(`/library/sections/${id}/all`, { params: { sort: 'viewCount:desc' }, headers: { 'X-Plex-Container-Start': '0', 'X-Plex-Container-Size': '20' } }).catch(() => null),
+    plex.plexCached(`/hubs/sections/${id}`, { params: { count: 20, includeEmptyHubs: 0 } }),
+    plex.plexCached(`/library/sections/${id}/all`, { params: { sort: 'viewCount:desc' }, headers: { 'X-Plex-Container-Start': '0', 'X-Plex-Container-Size': '20' } }).catch(() => null),
   ]);
   const list = MC(hubs).Hub || [];
   const pop = (MC(popular).Metadata || []).filter(m => (m.viewCount || m.viewedLeafCount) > 0);
@@ -88,7 +118,7 @@ r.get('/library/:id/items', ah(async (req, res) => {
   if (year) params.year = year;
   if (contentRating) params.contentRating = contentRating;
   if (collection) params.collection = collection;
-  const j = await plex.plexFetch(`/library/sections/${req.params.id}/all`, {
+  const j = await plex.plexCached(`/library/sections/${req.params.id}/all`, {
     params, headers: { 'X-Plex-Container-Start': String(start), 'X-Plex-Container-Size': String(size) },
   });
   const m = MC(j);
@@ -97,38 +127,38 @@ r.get('/library/:id/items', ah(async (req, res) => {
 
 r.get('/library/:id/filter/:name', ah(async (req, res) => {
   const name = req.params.name.replace(/[^a-zA-Z]/g, '');
-  res.json(MC(await plex.plexFetch(`/library/sections/${req.params.id}/${name}`)).Directory || []);
+  res.json(MC(await plex.plexCached(`/library/sections/${req.params.id}/${name}`, {}, 300000)).Directory || []);
 }));
 
 r.get('/library/:id/collections', ah(async (req, res) => {
-  res.json(MC(await plex.plexFetch(`/library/sections/${req.params.id}/collections`)).Metadata || []);
+  res.json(MC(await plex.plexCached(`/library/sections/${req.params.id}/collections`)).Metadata || []);
 }));
 
 r.get('/meta/:key', ah(async (req, res) => {
-  const j = await plex.plexFetch(`/library/metadata/${encodeURIComponent(req.params.key)}`, {
+  const j = await plex.plexCached(`/library/metadata/${encodeURIComponent(req.params.key)}`, {
     params: { includeExtras: 1, includeOnDeck: 1, includeChildren: 1, includeReviews: 0, includeMarkers: 1, checkFiles: 0 },
-  });
+  }, 15000);
   const item = MC(j).Metadata?.[0];
   if (!item) return res.status(404).json({ error: 'Not found' });
   res.json(item);
 }));
 
 r.get('/meta/:key/children', ah(async (req, res) => {
-  res.json(MC(await plex.plexFetch(`/library/metadata/${encodeURIComponent(req.params.key)}/children`, { params: { excludeAllLeaves: 1 } })).Metadata || []);
+  res.json(MC(await plex.plexCached(`/library/metadata/${encodeURIComponent(req.params.key)}/children`, { params: { excludeAllLeaves: 1 } }, 20000)).Metadata || []);
 }));
 r.get('/meta/:key/leaves', ah(async (req, res) => {
-  res.json(MC(await plex.plexFetch(`/library/metadata/${encodeURIComponent(req.params.key)}/allLeaves`)).Metadata || []);
+  res.json(MC(await plex.plexCached(`/library/metadata/${encodeURIComponent(req.params.key)}/allLeaves`, {}, 20000)).Metadata || []);
 }));
 r.get('/meta/:key/related', ah(async (req, res) => {
-  const j = await plex.plexFetch(`/hubs/metadata/${encodeURIComponent(req.params.key)}/related`, { params: { count: 20 } }).catch(() => null);
+  const j = await plex.plexCached(`/hubs/metadata/${encodeURIComponent(req.params.key)}/related`, { params: { count: 20 } }, 600000).catch(() => null);
   res.json(MC(j).Hub || []);
 }));
 r.get('/collection/:key/items', ah(async (req, res) => {
-  res.json(MC(await plex.plexFetch(`/library/collections/${encodeURIComponent(req.params.key)}/children`)).Metadata || []);
+  res.json(MC(await plex.plexCached(`/library/collections/${encodeURIComponent(req.params.key)}/children`)).Metadata || []);
 }));
 
 r.get('/playlists', ah(async (req, res) => {
-  res.json(MC(await plex.plexFetch('/playlists')).Metadata || []);
+  res.json(MC(await plex.plexCached('/playlists')).Metadata || []);
 }));
 r.get('/playlist/:id', ah(async (req, res) => {
   const [meta, items] = await Promise.all([
@@ -147,10 +177,12 @@ r.get('/search', ah(async (req, res) => {
 
 r.post('/watched/:key', ah(async (req, res) => {
   await plex.plexFetch('/:/scrobble', { params: { identifier: 'com.plexapp.plugins.library', key: req.params.key } });
+  plex.clearPlexCache();
   res.json({ ok: true });
 }));
 r.post('/unwatched/:key', ah(async (req, res) => {
   await plex.plexFetch('/:/unscrobble', { params: { identifier: 'com.plexapp.plugins.library', key: req.params.key } });
+  plex.clearPlexCache();
   res.json({ ok: true });
 }));
 
@@ -160,12 +192,11 @@ r.get('/image', ah(async (req, res) => {
   const path = String(req.query.path || '');
   if (!path.startsWith('/')) return res.status(400).end();
   const w = Math.min(Number(req.query.w) || 400, 3840), h = Math.min(Number(req.query.h) || 600, 2160);
-  const upstream = await plex.plexFetch('/photo/:/transcode', {
+  // Plex's photo transcoder is slow; keep resized artwork on disk.
+  await serveCachedImage(`plex|${plex.plexConf().machineId}|${path}|${w}x${h}`, () => plex.plexFetch('/photo/:/transcode', {
     raw: true, params: { url: path, width: w, height: h, minSize: 1, upscale: 1, format: 'webp', quality: 80 },
     headers: { Accept: 'image/*' },
-  });
-  if (!upstream.ok) return res.status(upstream.status).end();
-  pipeFetch(upstream, res, { headers: ['content-type', 'content-length'], extra: { 'Cache-Control': 'public, max-age=604800' } });
+  }), res);
 }));
 
 // ---------- Playback ----------
@@ -285,6 +316,7 @@ r.post('/timeline', ah(async (req, res) => {
     params: { ratingKey, key: `/library/metadata/${ratingKey}`, state, time: Math.floor(time * 1000), duration: Math.floor(duration * 1000), context: 'library', hasMDE: 1 },
     headers: session ? { 'X-Plex-Session-Identifier': session } : {},
   }).catch(() => null);
+  if (state !== 'playing') plex.clearPlexCache(); // so Continue Watching reflects the new position
   res.json({ ok: true });
 }));
 

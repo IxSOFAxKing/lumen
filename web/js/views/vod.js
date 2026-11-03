@@ -1,5 +1,5 @@
 import { api, qs } from '../api.js';
-import { h, card, empty, spinner, btn, debounce, infinite, select, fmtDuration, fmtRuntime, prefs } from '../ui.js';
+import { h, card, empty, spinner, btn, debounce, infinite, select, fmtDuration, fmtRuntime, prefs, section, hrow, skeletonRows } from '../ui.js';
 import { store, activeProvider, setActiveProvider, go } from '../app.js';
 import { playVod } from '../playback.js';
 
@@ -11,26 +11,29 @@ async function vodBrowse(el, route) {
   const pid = prov.id;
   const kind = route.query.kind === 'series' ? 'series' : 'movie';
   el.className = 'page';
-  const st = { cat: route.query.cat || prefs.get(`vodcat.${pid}.${kind}`, '__all'), q: '', sort: prefs.get(`vodsort.${kind}`, 'added'), start: 0, total: Infinity };
-  const cats = await api.get(`/api/iptv/providers/${pid}/categories?kind=${kind === 'series' ? 'series' : 'vod'}`);
+  const enabled = kind === 'series' ? prov.series_enabled : prov.vod_enabled;
+  if (!enabled) { el.className = 'page'; el.append(empty(`${kind === 'series' ? 'Series' : 'Movies'} are turned off for ${prov.name}`, 'Enable them in Settings → IPTV Providers → edit provider.', btn('Settings', () => go('#/settings?tab=iptv'), { cls: 'primary' }))); return; }
+  const st = { cat: route.query.cat || prefs.get(`vodcat.${pid}.${kind}`, '__discover'), q: '', sort: prefs.get(`vodsort.${kind}`, 'added'), start: 0, total: Infinity };
+  const cats = await api.cached(`/api/iptv/providers/${pid}/categories?kind=${kind === 'series' ? 'series' : 'vod'}`, 120000);
   const side = h('div', { class: 'side' });
   const grid = h('div', { class: 'grid' });
+  const discover = h('div');
   const count = h('span', { class: 'dim' });
   function renderCats() {
     const item = (id, name, n) => h('div', { class: `cat ${st.cat === id ? 'active' : ''}`, onClick: () => { st.cat = id; prefs.set(`vodcat.${pid}.${kind}`, id); renderCats(); reload(); } },
       h('span', { class: 'ellipsis' }, name), n != null ? h('span', { class: 'n' }, n) : null);
-    side.replaceChildren(item('__all', 'All'), ...cats.filter(c => c.count > 0).map(c => item(c.id, c.name, c.count)));
+    side.replaceChildren(item('__discover', 'Discover'), item('__all', 'All titles'), ...cats.filter(c => c.count > 0).map(c => item(c.id, c.name, c.count)));
   }
   renderCats();
   const provSel = store.providers.length > 1 ? select(store.providers.map(p => ({ value: p.id, label: p.name })), pid, v => { setActiveProvider(v); location.reload(); }) : null;
   el.append(h('div', { class: 'page-head' }, h('h1', {}, kind === 'series' ? 'Series' : 'Movies'), provSel,
     h('input', { class: 'input', placeholder: 'Search…', onInput: debounce(e => { st.q = e.target.value.trim(); reload(); }, 300) }),
     select(SORTS, st.sort, v => { st.sort = v; prefs.set(`vodsort.${kind}`, v); reload(); }), h('span', { class: 'spacer' }), count),
-  h('div', { class: 'sidebar-layout' }, side, h('div', {}, grid)));
+  h('div', { class: 'sidebar-layout' }, side, h('div', { style: { minWidth: 0 } }, discover, grid)));
 
   async function load() {
     if (st.start >= st.total) return false;
-    const d = await api.get(`/api/iptv/vod/${pid}${qs({ kind, category: st.cat, q: st.q, sort: st.sort, start: st.start, size: 60 })}`);
+    const d = await api.cached(`/api/iptv/vod/${pid}${qs({ kind, category: st.cat === '__discover' ? '__all' : st.cat, q: st.q, sort: st.sort, start: st.start, size: 60 })}`);
     st.total = d.total; st.start += d.items.length;
     count.textContent = `${d.total.toLocaleString()} titles`;
     grid.append(...d.items.map(v => card({
@@ -41,8 +44,30 @@ async function vodBrowse(el, route) {
     if (!d.total) grid.append(empty('Nothing found'));
     return st.start < st.total;
   }
+  const vcard = v => card({
+    img: v.poster, title: v.name, sub: [v.year, v.rating ? `★ ${Number(v.rating).toFixed(1)}` : null].filter(Boolean).join(' · '),
+    progress: v.position > 0 && v.duration ? v.position / v.duration : 0, played: v.position === -1,
+    onClick: () => go(`#/vod-item/${kind}/${pid}/${encodeURIComponent(v.id)}`),
+  });
+  async function showDiscover() {
+    discover.replaceChildren(...skeletonRows(3));
+    const d = await api.cached(`/api/iptv/vod/${pid}/discover?kind=${kind}`, 120000);
+    if (st.cat !== '__discover' || st.q) return;
+    const total = cats.reduce((n, c) => n + (c.count || 0), 0);
+    count.textContent = `${total.toLocaleString()} titles`;
+    const goCat = id => () => { st.cat = id; prefs.set(`vodcat.${pid}.${kind}`, id); renderCats(); reload(); };
+    discover.replaceChildren(
+      d.recent.length ? section('Recently Added', hrow(d.recent.map(vcard))) : null,
+      d.top.length ? section('Top Rated', hrow(d.top.map(vcard))) : null,
+      ...d.categories.filter(c => c.items.length).map(c => h('div', {}, h('h2', { class: 'sec' }, c.name, h('a', { class: 'more', href: 'javascript:void 0', onClick: goCat(c.id) }, `See all ${c.count} ›`)), hrow(c.items.map(vcard)))),
+      !d.recent.length ? empty('Nothing here yet', 'Sync the provider in Settings to load titles.') : null);
+  }
   let stop;
-  async function reload() { stop?.(); grid.replaceChildren(); st.start = 0; st.total = Infinity; await load(); stop = infinite(grid, load); }
+  async function reload() {
+    stop?.(); grid.replaceChildren(); discover.replaceChildren(); st.start = 0; st.total = Infinity;
+    if (st.cat === '__discover' && !st.q) return showDiscover();
+    await load(); stop = infinite(grid, load);
+  }
   await reload();
   return () => stop?.();
 }
@@ -57,7 +82,7 @@ function detailHero({ backdrop, poster, title, meta, plot, actions, extra }) {
 async function vodItem(el, route) {
   const [kind, pid, id] = route.parts;
   if (kind === 'movie') {
-    const m = await api.get(`/api/iptv/vod/${pid}/movie/${encodeURIComponent(id)}`);
+    const m = await api.cached(`/api/iptv/vod/${pid}/movie/${encodeURIComponent(id)}`, 20000);
     const info = m.info || {};
     const dur = Number(info.duration_secs) || 0;
     const resume = m.progress?.position > 0 ? m.progress.position : 0;
@@ -73,7 +98,7 @@ async function vodItem(el, route) {
     return;
   }
   // series
-  const s = await api.get(`/api/iptv/vod/${pid}/series/${encodeURIComponent(id)}`);
+  const s = await api.cached(`/api/iptv/vod/${pid}/series/${encodeURIComponent(id)}`, 20000);
   const info = s.info || {};
   const seasons = s.seasons || [];
   const allEps = seasons.flatMap(se => se.episodes.map(e => ({ ...e, season: se.season })));

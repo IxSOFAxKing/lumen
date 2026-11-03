@@ -1,4 +1,5 @@
 import express from 'express';
+import compression from 'compression';
 import path from 'node:path';
 import fs from 'node:fs';
 import { config } from './config.js';
@@ -12,10 +13,15 @@ import { detectHardware, listSessions, stopSession, stopAll } from './services/t
 import { syncProvider } from './services/iptv.js';
 import { syncEpg, purgeOldProgrammes } from './services/epg.js';
 import { initRecorder, stopAllRecordings } from './services/recorder.js';
+import { serveCachedImage } from './services/imgcache.js';
+import { verifyImg } from './services/proxy.js';
 
 const app = express();
 app.set('trust proxy', true);
 app.disable('x-powered-by');
+// gzip JSON / JS / CSS, but never the media streams (they must flow unbuffered).
+const NO_COMPRESS = /^\/api\/(stream|img|plex\/(t|file|image))\b/;
+app.use(compression({ filter: (req, res) => !NO_COMPRESS.test(req.path) && compression.filter(req, res) }));
 app.use(express.json({ limit: '2mb' }));
 
 // ---------- Auth ----------
@@ -36,6 +42,11 @@ app.get('/api/system/hardware', async (req, res, next) => { try { res.json(await
 app.get('/api/system/sessions', (req, res) => res.json(listSessions()));
 app.delete('/api/system/sessions/:id', (req, res) => res.json({ stopped: stopSession(req.params.id) }));
 
+app.get('/api/img', (req, res) => {
+  const { u, s } = req.query;
+  if (!u || !/^https?:\/\//i.test(u) || !verifyImg(u, s)) return res.status(403).end();
+  serveCachedImage(`url|${u}`, () => fetch(u, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(15000), redirect: 'follow' }), res);
+});
 app.use('/api/plex', plexRoutes);
 app.use('/api/iptv', iptvRoutes);
 app.use('/api/stream', streamRoutes);
@@ -53,7 +64,7 @@ app.get('/vendor/:name', (req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=86400');
   res.type('application/javascript').sendFile(f);
 });
-app.use(express.static(config.webDir, { index: false, maxAge: '1h' }));
+app.use(express.static(config.webDir, { index: false, maxAge: 0, etag: true, lastModified: true }));
 app.get(/^\/(?!api\/).*/, (req, res) => res.sendFile(path.join(config.webDir, 'index.html')));
 
 // ---------- Errors ----------

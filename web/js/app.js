@@ -70,11 +70,11 @@ function renderNav(route) {
     item('#/search', 'Search', 'search', n === 'search'),
     hasIptv ? h('div', { class: 'nav-sec' }, 'Live TV') : null,
     hasIptv ? item('#/live', 'Live TV', 'tv', n === 'live') : null,
-    hasIptv ? item('#/guide', 'TV Guide', 'guide', n === 'guide') : null,
+    hasIptv ? item('#/guide', 'Guide', 'guide', n === 'guide') : null,
     hasIptv ? item('#/multiview', 'Multi-View', 'grid', n === 'multiview') : null,
-    hasIptv ? item('#/vod?kind=movie', 'Movies', 'movie', (n === 'vod' || n === 'vod-item') && (route.query.kind || route.parts[0]) !== 'series') : null,
-    hasIptv ? item('#/vod?kind=series', 'Series', 'series', (n === 'vod' || n === 'vod-item') && (route.query.kind || route.parts[0]) === 'series') : null,
-    hasIptv ? item('#/recordings', 'Recordings', 'rec', n === 'recordings') : null,
+    hasIptv && activeProvider()?.vod_enabled ? item('#/vod?kind=movie', 'VOD Movies', 'movie', (n === 'vod' || n === 'vod-item') && (route.query.kind || route.parts[0]) !== 'series') : null,
+    hasIptv && activeProvider()?.series_enabled ? item('#/vod?kind=series', 'VOD Series', 'series', (n === 'vod' || n === 'vod-item') && (route.query.kind || route.parts[0]) === 'series') : null,
+    hasIptv ? item('#/recordings', 'DVR', 'rec', n === 'recordings') : null,
     store.libraries.length ? h('div', { class: 'nav-sec' }, store.plex?.serverName || store.plex?.name || 'Plex') : null,
     store.libraries.filter(l => l.type === 'movie' || l.type === 'show')
       .map(l => item(`#/library/${l.key}`, l.title, libIcon(l.type), n === 'library' && route.parts[0] === String(l.key))),
@@ -95,7 +95,7 @@ export async function refreshStore() {
   store.settings = settings;
   window.lumenSettings = settings;
   document.documentElement.dataset.theme = settings?.ui?.theme || 'dark';
-  store.libraries = plex.configured && plex.online ? await api.get('/api/plex/libraries').catch(() => []) : [];
+  store.libraries = plex.configured && plex.online ? await api.cached('/api/plex/libraries', 300000).catch(() => []) : [];
   renderNav(parseHash());
 }
 
@@ -151,6 +151,8 @@ async function start() {
   window.addEventListener('hashchange', render);
   window.addEventListener('lumen:unauthorized', () => location.reload());
   render();
+  // Warm up the other views in the background so navigation doesn't wait for module downloads.
+  (window.requestIdleCallback || (f => setTimeout(f, 1500)))(() => Object.values(routes).forEach(load => load().catch(() => {})));
   setInterval(checkReminders, 30000);
   checkReminders();
 }

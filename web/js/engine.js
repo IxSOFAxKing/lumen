@@ -3,8 +3,17 @@
  * desc: { type: 'hls' | 'mpegts' | 'file', url, seekTo, live }
  * Returns { destroy(), levels?, setLevel? }
  */
+// Live buffering profiles. "smooth" trades a few seconds of delay for no frame drops / rebuffering.
+const PROFILES = {
+  smooth: { chase: false, stash: 1024 * 1024, hlsSync: 4, hlsBuffer: 60 },
+  balanced: { chase: true, maxLatency: 12, minRemain: 4, stash: 512 * 1024, hlsSync: 3, hlsBuffer: 40 },
+  low: { chase: true, maxLatency: 5, minRemain: 1.5, stash: 256 * 1024, hlsSync: 2, hlsBuffer: 20 },
+};
+const profile = () => PROFILES[window.lumenSettings?.ui?.liveBuffer] || PROFILES.smooth;
+
 export function attachEngine(video, desc, { onFatal, onReady } = {}) {
-  let hls = null, ts = null, destroyed = false, watchdog = null;
+  let hls = null, ts = null, destroyed = false, watchdog = null, stallTimer = null;
+  const prof = profile();
   const fatal = (reason) => { if (!destroyed) onFatal?.(reason); };
 
   const startAt = Number(desc.seekTo) || 0;
@@ -13,8 +22,9 @@ export function attachEngine(video, desc, { onFatal, onReady } = {}) {
     if (window.Hls && window.Hls.isSupported()) {
       hls = new window.Hls({
         startPosition: startAt > 0 ? startAt : -1,
-        maxBufferLength: 30, maxMaxBufferLength: 120, backBufferLength: 90,
-        liveSyncDurationCount: 3, enableWorker: true, lowLatencyMode: false,
+        maxBufferLength: prof.hlsBuffer, maxMaxBufferLength: 120, backBufferLength: 90,
+        liveSyncDurationCount: prof.hlsSync, liveMaxLatencyDurationCount: prof.hlsSync + 6, enableWorker: true, lowLatencyMode: false,
+        nudgeMaxRetry: 10, maxBufferHole: 1,
         manifestLoadingMaxRetry: 6, manifestLoadingRetryDelay: 1000,
         levelLoadingMaxRetry: 6, fragLoadingMaxRetry: 6,
         xhrSetup: (xhr) => { xhr.withCredentials = true; },
@@ -41,15 +51,39 @@ export function attachEngine(video, desc, { onFatal, onReady } = {}) {
   } else if (desc.type === 'mpegts') {
     const m = window.mpegts;
     if (m && m.getFeatureList().mseLivePlayback) {
-      ts = m.createPlayer({ type: 'mpegts', isLive: true, url: new URL(desc.url, location.href).toString(), withCredentials: true }, {
-        enableWorker: true, enableStashBuffer: true, stashInitialSize: 1024 * 384, lazyLoad: false,
-        liveBufferLatencyChasing: true, liveBufferLatencyMaxLatency: 6, liveBufferLatencyMinRemain: 1.5,
-        autoCleanupSourceBuffer: true,
-      });
-      ts.on(m.Events.ERROR, (type, detail) => fatal(`${type}: ${detail}`));
-      ts.attachMediaElement(video);
-      ts.load();
+      const make = () => {
+        ts = m.createPlayer({ type: 'mpegts', isLive: true, url: new URL(desc.url, location.href).toString(), withCredentials: true }, {
+          enableWorker: true, enableStashBuffer: true, stashInitialSize: prof.stash, lazyLoad: false,
+          liveBufferLatencyChasing: prof.chase, liveBufferLatencyMaxLatency: prof.maxLatency || 12, liveBufferLatencyMinRemain: prof.minRemain || 4,
+          autoCleanupSourceBuffer: true, autoCleanupMaxBackwardDuration: 60, autoCleanupMinBackwardDuration: 30,
+          fixAudioTimestampGap: true,
+        });
+        ts.on(m.Events.ERROR, (type, detail) => fatal(`${type}: ${detail}`));
+        ts.attachMediaElement(video);
+        ts.load();
+        video.play().catch(() => {});
+      };
+      make();
       onReady?.();
+      // Stall recovery: jump over buffer gaps, and reconnect if the stream stops delivering data.
+      let stalledSince = 0, reconnects = 0;
+      const onWaiting = () => { if (!stalledSince) stalledSince = Date.now(); };
+      const onPlaying = () => { stalledSince = 0; };
+      video.addEventListener('waiting', onWaiting);
+      video.addEventListener('playing', onPlaying);
+      stallTimer = setInterval(() => {
+        if (destroyed || !stalledSince || video.paused && !video.autoplay) return;
+        const b = video.buffered, t = video.currentTime;
+        for (let i = 0; i < b.length; i++) {
+          if (b.start(i) > t && b.start(i) - t < 5) { video.currentTime = b.start(i) + 0.1; stalledSince = Date.now(); return; }
+        }
+        if (Date.now() - stalledSince > 10000 && reconnects < 5) {
+          reconnects++; stalledSince = Date.now();
+          console.warn('[engine] live stream stalled, reconnecting');
+          try { ts.pause(); ts.unload(); ts.detachMediaElement(); ts.destroy(); } catch { /* */ }
+          make();
+        }
+      }, 1000);
     } else {
       fatal('MSE not supported');
     }
@@ -81,6 +115,7 @@ export function attachEngine(video, desc, { onFatal, onReady } = {}) {
     destroy() {
       destroyed = true;
       clearTimeout(watchdog);
+      clearInterval(stallTimer);
       video.removeEventListener('error', onErr);
       video.removeEventListener('playing', onPlaying);
       try { hls?.destroy(); } catch { /* */ }

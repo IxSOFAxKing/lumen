@@ -44,7 +44,7 @@ export default async function guide(el, route) {
   let offset = 0, total = 0, loading = false;
   let rowsData = [];
 
-  const cats = await api.get(`/api/iptv/providers/${pid}/categories?kind=live`);
+  const cats = await api.cached(`/api/iptv/providers/${pid}/categories?kind=live`, 120000);
   const catSel = h('select', { class: 'input', onChange: e => { cat = e.target.value; prefs.set(`guidecat.${pid}`, cat); reset(); } },
     h('option', { value: '__all' }, 'All channels'), h('option', { value: '__fav' }, '★ Favorites'),
     cats.filter(c => c.count > 0).map(c => h('option', { value: c.id }, c.name)));

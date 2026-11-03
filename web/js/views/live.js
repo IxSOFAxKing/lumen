@@ -12,7 +12,8 @@ export default async function live(el, route) {
   el.style.height = '100%';
   const pid = prov.id;
   let cat = route.query.cat || prefs.get(`livecat.${pid}`, '__all');
-  let channels = [], selected = null, preview = null, previewDesc = null, q = '';
+  let channels = [], selected = null, preview = null, previewDesc = null, q = '', reordering = false, rendered = 0, moreIO = null;
+  const CHUNK = 150;
 
   const catsCol = h('div', { class: 'col cats' });
   const listCol = h('div', { class: 'col chlist' });
@@ -23,12 +24,12 @@ export default async function live(el, route) {
   el.append(h('div', { class: 'live' }, catsCol, listCol, pvCol));
 
   // ---- categories ----
-  const cats = await api.get(`/api/iptv/providers/${pid}/categories?kind=live`);
+  const cats = await api.cached(`/api/iptv/providers/${pid}/categories?kind=live`, 120000);
   const searchInput = h('input', { class: 'input', placeholder: 'Search channels…', style: { width: '100%', marginBottom: '8px' }, onInput: debounce(e => { q = e.target.value.trim(); loadChannels(); }, 250) });
   const provSel = store.providers.length > 1 ? h('select', { class: 'input', style: { width: '100%', marginBottom: '8px' }, onChange: e => { setActiveProvider(e.target.value); go('#/live'); location.reload(); } },
     store.providers.map(p => h('option', { value: p.id, selected: p.id === pid }, p.name))) : null;
   function renderCats() {
-    const item = (id, name, n) => h('div', { class: `cat ${cat === id ? 'active' : ''}`, onClick: () => { cat = id; prefs.set(`livecat.${pid}`, id); renderCats(); loadChannels(); } },
+    const item = (id, name, n) => h('div', { class: `cat ${cat === id ? 'active' : ''}`, onClick: () => { cat = id; reordering = false; prefs.set(`livecat.${pid}`, id); renderCats(); loadChannels(); } },
       h('span', { class: 'ellipsis' }, name), n != null ? h('span', { class: 'n' }, n) : null);
     catsCol.replaceChildren(provSel || '', searchInput,
       item('__fav', '★ Favorites'), item('__recent', '⟲ Recently watched'), item('__all', 'All channels'),
@@ -39,7 +40,7 @@ export default async function live(el, route) {
   // ---- channels ----
   async function loadChannels() {
     listCol.replaceChildren(spinner());
-    channels = await api.get(`/api/iptv/providers/${pid}/channels${qs({ category: q ? '__all' : cat, q })}`);
+    channels = await api.cached(`/api/iptv/providers/${pid}/channels${qs({ category: q ? '__all' : cat, q })}`, 30000);
     renderList();
   }
   function catTitle() { return cat === '__fav' ? 'Favorites' : cat === '__recent' ? 'Recently watched' : cat === '__all' ? 'All channels' : cats.find(c => c.id === cat)?.name || 'Channels'; }
@@ -50,21 +51,93 @@ export default async function live(el, route) {
       onClick: () => { if (selected?.id === c.id) fullscreen(); else select(c); },
       onKeydown: e => {
         if (e.key === 'Enter') fullscreen();
-        else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const n = listCol.querySelector(`[data-i="${i + (e.key === 'ArrowDown' ? 1 : -1)}"]`); n?.focus(); n?.click(); }
+        else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          const j = i + (e.key === 'ArrowDown' ? 1 : -1);
+          if (j >= rendered && j < channels.length) renderMore();
+          const n = listCol.querySelector(`[data-i="${j}"]`); n?.focus(); n?.click();
+        }
         else if (e.key === 'f') toggleFav(c);
       },
       onContextmenu: e => { e.preventDefault(); chMenu(c); } },
-      h('div', { class: 'num' }, c.num ?? ''), logo(c.logo, c.name),
+      reordering ? h('div', { class: 'grip', title: 'Drag to reorder', html: icon('grip'), onPointerdown: e => startDrag(e, i), onClick: e => e.stopPropagation() }) : null,
+      h('div', { class: 'num' }, reordering ? i + 1 : (c.num ?? '')), logo(c.logo, c.name),
       h('div', { class: 'grow' },
         h('div', { class: 'nm ellipsis' }, c.name, c.archive ? h('span', { class: 'badge', style: { marginLeft: '6px' }, title: 'Catch-up available' }, '⟲') : null),
         h('div', { class: 'pr ellipsis' }, c.now ? `${fmtTime(c.now.start)}  ${c.now.title}` : ''),
         c.now ? h('div', { class: 'progress' }, h('i', { style: { width: `${pct}%` } })) : null),
-      h('button', { class: `btn ghost sm icon ${c.fav ? 'fav-star' : 'dim'}`, title: c.fav ? 'Remove favorite' : 'Add favorite', html: icon(c.fav ? 'starf' : 'star'), onClick: e => { e.stopPropagation(); toggleFav(c); } }));
+      reordering
+        ? h('div', { class: 'row', style: { gap: '2px' } },
+          h('button', { class: 'btn ghost sm icon', title: 'Move up', html: icon('up'), disabled: i === 0, onClick: e => { e.stopPropagation(); moveFav(i, i - 1); } }),
+          h('button', { class: 'btn ghost sm icon', title: 'Move down', html: icon('down'), disabled: i === channels.length - 1, onClick: e => { e.stopPropagation(); moveFav(i, i + 1); } }))
+        : h('button', { class: `btn ghost sm icon ${c.fav ? 'fav-star' : 'dim'}`, title: c.fav ? 'Remove favorite' : 'Add favorite', html: icon(c.fav ? 'starf' : 'star'), onClick: e => { e.stopPropagation(); toggleFav(c); } }));
     return row;
   }
+
+  // Large lists render in chunks as you scroll, so big providers stay snappy.
+  function renderMore() {
+    const end = Math.min(channels.length, rendered + CHUNK);
+    const frag = document.createDocumentFragment();
+    for (let i = rendered; i < end; i++) frag.append(chRow(channels[i], i));
+    listCol.querySelector('.more-sentinel')?.before(frag);
+    rendered = end;
+    if (rendered >= channels.length) listCol.querySelector('.more-sentinel')?.remove();
+  }
   function renderList() {
+    moreIO?.disconnect();
+    rendered = 0;
     if (!channels.length) { listCol.replaceChildren(empty(cat === '__fav' ? 'No favorites yet' : 'No channels', cat === '__fav' ? 'Tap the ☆ next to any channel to add it.' : '')); return; }
-    listCol.replaceChildren(...channels.map(chRow));
+    const sentinel = h('div', { class: 'more-sentinel', style: { height: '1px' } });
+    const bar = cat === '__fav' && channels.length > 1 ? h('div', { class: 'reorder-bar' },
+      h('span', { class: 'grow small muted' }, reordering ? 'Drag ⠿ or use the arrows to reorder' : `${channels.length} favorites`),
+      h('button', { class: `btn sm ${reordering ? 'primary' : ''}`, onClick: () => { reordering = !reordering; renderList(); } }, reordering ? 'Done' : 'Reorder')) : null;
+    listCol.replaceChildren(bar, sentinel);
+    renderMore();
+    moreIO = new IntersectionObserver(([e]) => { if (e.isIntersecting) renderMore(); }, { root: listCol, rootMargin: '800px' });
+    if (sentinel.isConnected) moreIO.observe(sentinel);
+  }
+
+  // ---- favorites reordering ----
+  async function saveFavOrder() {
+    try { await api.put('/api/iptv/favorites/order', { order: channels.map(c => ({ providerId: pid, channelId: c.id })) }); }
+    catch (e) { toastErr(e); }
+  }
+  function moveFav(from, to) {
+    if (to < 0 || to >= channels.length || from === to) return;
+    const [c] = channels.splice(from, 1);
+    channels.splice(to, 0, c);
+    renderList();
+    listCol.querySelector(`[data-i="${to}"]`)?.scrollIntoView({ block: 'nearest' });
+    saveFavOrder();
+  }
+  function startDrag(e, from) {
+    e.preventDefault(); e.stopPropagation();
+    const rowEl = e.currentTarget.closest('.ch');
+    rowEl.classList.add('dragging');
+    let target = null, below = false;
+    const clear = () => listCol.querySelectorAll('.drop-above,.drop-below').forEach(x => x.classList.remove('drop-above', 'drop-below'));
+    const move = ev => {
+      const over = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.chlist .ch');
+      clear();
+      if (!over || over === rowEl) { target = null; return; }
+      const r = over.getBoundingClientRect();
+      below = ev.clientY > r.top + r.height / 2;
+      over.classList.add(below ? 'drop-below' : 'drop-above');
+      target = Number(over.dataset.i);
+      // auto-scroll near the edges
+      const lr = listCol.getBoundingClientRect();
+      if (ev.clientY < lr.top + 40) listCol.scrollTop -= 12; else if (ev.clientY > lr.bottom - 40) listCol.scrollTop += 12;
+    };
+    const up = () => {
+      document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up);
+      rowEl.classList.remove('dragging'); clear();
+      if (target === null) return;
+      let to = target + (below ? 1 : 0);
+      if (to > from) to--;
+      moveFav(from, to);
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
   }
 
   async function toggleFav(c) {
@@ -163,6 +236,6 @@ export default async function live(el, route) {
   }
 
   await loadChannels();
-  const refresh = setInterval(() => { if (!document.hidden) api.get(`/api/iptv/providers/${pid}/channels${qs({ category: q ? '__all' : cat, q })}`).then(l => { const sel = selected?.id; channels = l; renderList(); selected = channels.find(x => x.id === sel) || selected; }).catch(() => {}); }, 120000);
-  return () => { clearInterval(refresh); stopPreview(); };
+  const refresh = setInterval(() => { if (!document.hidden && !reordering) api.get(`/api/iptv/providers/${pid}/channels${qs({ category: q ? '__all' : cat, q })}`).then(l => { const sel = selected?.id; channels = l; renderList(); selected = channels.find(x => x.id === sel) || selected; }).catch(() => {}); }, 120000);
+  return () => { clearInterval(refresh); moreIO?.disconnect(); stopPreview(); };
 }

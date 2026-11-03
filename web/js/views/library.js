@@ -1,5 +1,5 @@
 import { api, qs } from '../api.js';
-import { h, section, empty, spinner, select, infinite, prefs } from '../ui.js';
+import { h, section, empty, spinner, select, infinite, prefs, skeletonRows } from '../ui.js';
 import { store } from '../app.js';
 import { plexRow, plexCard } from '../plexcards.js';
 
@@ -21,8 +21,8 @@ export default async function library(el, route) {
   el.append(h('div', { class: 'page-head' }, h('h1', {}, lib?.title || 'Library')), tabs, body);
 
   if (tab === 'recommended') {
-    body.append(spinner());
-    const hubs = await api.get(`/api/plex/library/${id}/hubs`);
+    body.append(...skeletonRows(3));
+    const hubs = await api.cached(`/api/plex/library/${id}/hubs`);
     body.replaceChildren();
     if (!hubs.length) body.append(empty('Nothing here yet'));
     for (const hub of hubs) {
@@ -35,14 +35,14 @@ export default async function library(el, route) {
 
   if (tab === 'collections') {
     body.append(spinner());
-    const cols = await api.get(`/api/plex/library/${id}/collections`);
+    const cols = await api.cached(`/api/plex/library/${id}/collections`);
     body.replaceChildren(cols.length ? h('div', { class: 'grid' }, cols.map(c => plexCard(c))) : empty('No collections'));
     return;
   }
 
   // ---- full library grid ----
   const state = { sort: prefs.get(`libsort.${id}`, 'titleSort'), unwatched: route.query.unwatched === '1', genre: route.query.genre || '', start: 0, total: Infinity };
-  const genres = await api.get(`/api/plex/library/${id}/filter/genre`).catch(() => []);
+  const genres = await api.cached(`/api/plex/library/${id}/filter/genre`, 600000).catch(() => []);
   const grid = h('div', { class: 'grid' });
   const count = h('span', { class: 'dim' });
   const bar = h('div', { class: 'row wrap', style: { marginBottom: '16px' } },
@@ -54,7 +54,7 @@ export default async function library(el, route) {
 
   async function load() {
     if (state.start >= state.total) return false;
-    const d = await api.get(`/api/plex/library/${id}/items${qs({ sort: state.sort, start: state.start, size: 60, unwatched: state.unwatched ? 1 : '', genre: state.genre })}`);
+    const d = await api.cached(`/api/plex/library/${id}/items${qs({ sort: state.sort, start: state.start, size: 60, unwatched: state.unwatched ? 1 : '', genre: state.genre })}`);
     state.total = d.total; state.start += d.items.length;
     count.textContent = `${d.total} items`;
     grid.append(...d.items.map(m => plexCard(m)));

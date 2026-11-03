@@ -5,10 +5,12 @@ import * as iptv from '../services/iptv.js';
 import * as epg from '../services/epg.js';
 import * as dvr from '../services/recorder.js';
 import { startSession } from '../services/transcoder.js';
-import { proxied } from '../services/proxy.js';
+import { proxied, proxyImages } from '../services/proxy.js';
 import { getConfig } from '../services/settings.js';
 
 const r = Router();
+// Route remote channel logos / posters through Lumen's image cache (faster, and avoids mixed-content on HTTPS).
+r.use((req, res, next) => { const json = res.json.bind(res); res.json = body => json(proxyImages(body)); next(); });
 const now = () => Math.floor(Date.now() / 1000);
 
 const publicProvider = p => {
@@ -19,7 +21,7 @@ const publicProvider = p => {
     (SELECT COUNT(*) FROM programmes WHERE provider_id = ?) AS programmes`).get(p.id, p.id, p.id, p.id);
   return {
     id: p.id, name: p.name, type: p.type, url: p.url, username: p.username, hasPassword: !!p.password, epg_url: p.epg_url,
-    output: p.output, user_agent: p.user_agent, enabled: !!p.enabled, last_sync: p.last_sync, last_epg_sync: p.last_epg_sync,
+    output: p.output, user_agent: p.user_agent, enabled: !!p.enabled, vod_enabled: p.type === 'xtream' && !!p.vod_enabled, series_enabled: p.type === 'xtream' && !!p.series_enabled, last_sync: p.last_sync, last_epg_sync: p.last_epg_sync,
     epgRunning: epg.isEpgRunning(p.id), counts,
     account: info?.user_info ? {
       status: info.user_info.status, exp_date: Number(info.user_info.exp_date) || null, max_connections: info.user_info.max_connections,
@@ -37,14 +39,15 @@ function syncAll(id) {
 r.get('/providers', (req, res) => res.json(iptv.listProviders().map(publicProvider)));
 
 r.post('/providers', ah(async (req, res) => {
-  const { name, type = 'xtream', url, username, password, epg_url, output = 'ts', user_agent } = req.body || {};
+  const { name, type = 'xtream', url, username, password, epg_url, output = 'ts', user_agent, vod_enabled = true, series_enabled = true } = req.body || {};
   if (!url) return res.status(400).json({ error: 'URL is required' });
   if (type === 'xtream') {
     if (!username || !password) return res.status(400).json({ error: 'Username and password are required' });
     await iptv.testXtream({ type, url, username, password, user_agent });
   }
-  const r2 = db.prepare('INSERT INTO providers(name, type, url, username, password, epg_url, output, user_agent) VALUES (?,?,?,?,?,?,?,?)')
-    .run(name || (type === 'xtream' ? new URL(iptv.baseUrl({ url })).hostname : 'M3U Playlist'), type, url.trim(), username || null, password || null, epg_url || null, output, user_agent || null);
+  const r2 = db.prepare('INSERT INTO providers(name, type, url, username, password, epg_url, output, user_agent, vod_enabled, series_enabled) VALUES (?,?,?,?,?,?,?,?,?,?)')
+    .run(name || (type === 'xtream' ? new URL(iptv.baseUrl({ url })).hostname : 'M3U Playlist'), type, url.trim(), username || null, password || null, epg_url || null, output, user_agent || null,
+      vod_enabled ? 1 : 0, series_enabled ? 1 : 0);
   const id = Number(r2.lastInsertRowid);
   try { await iptv.syncProvider(id); }
   catch (e) { db.prepare('DELETE FROM providers WHERE id = ?').run(id); throw e; }
@@ -59,9 +62,21 @@ r.put('/providers/:id', ah(async (req, res) => {
     name: b.name ?? p.name, url: b.url ?? p.url, username: b.username ?? p.username,
     password: b.password ? b.password : p.password, epg_url: b.epg_url ?? p.epg_url, output: b.output ?? p.output,
     user_agent: b.user_agent ?? p.user_agent, enabled: b.enabled === undefined ? p.enabled : (b.enabled ? 1 : 0),
+    vod_enabled: b.vod_enabled === undefined ? p.vod_enabled : (b.vod_enabled ? 1 : 0),
+    series_enabled: b.series_enabled === undefined ? p.series_enabled : (b.series_enabled ? 1 : 0),
   };
-  db.prepare('UPDATE providers SET name=?, url=?, username=?, password=?, epg_url=?, output=?, user_agent=?, enabled=? WHERE id=?')
-    .run(next.name, next.url, next.username, next.password, next.epg_url || null, next.output, next.user_agent || null, next.enabled, p.id);
+  db.prepare('UPDATE providers SET name=?, url=?, username=?, password=?, epg_url=?, output=?, user_agent=?, enabled=?, vod_enabled=?, series_enabled=? WHERE id=?')
+    .run(next.name, next.url, next.username, next.password, next.epg_url || null, next.output, next.user_agent || null, next.enabled, next.vod_enabled, next.series_enabled, p.id);
+  // Drop content that was just disabled; fetch content that was just enabled.
+  for (const [flag, kind, catKind] of [['vod_enabled', 'movie', 'vod'], ['series_enabled', 'series', 'series']]) {
+    if (!next[flag] && p[flag]) {
+      db.prepare('DELETE FROM vod WHERE provider_id = ? AND kind = ?').run(p.id, kind);
+      db.prepare('DELETE FROM categories WHERE provider_id = ? AND kind = ?').run(p.id, catKind);
+    }
+  }
+  if ((next.vod_enabled && !p.vod_enabled) || (next.series_enabled && !p.series_enabled)) {
+    iptv.syncProvider(p.id).catch(e => console.error('[iptv] sync after enabling VOD failed:', e.message));
+  }
   res.json(publicProvider(iptv.getProvider(p.id)));
 }));
 
@@ -266,6 +281,22 @@ r.get('/vod/:pid', (req, res) => {
   res.json({ total, items });
 });
 
+r.get('/vod/:pid/discover', (req, res) => {
+  const pid = Number(req.params.pid);
+  const kind = req.query.kind === 'series' ? 'series' : 'movie';
+  const catKind = kind === 'series' ? 'series' : 'vod';
+  const visible = `v.provider_id = ? AND v.kind = ? AND (v.category_id IS NULL OR v.category_id NOT IN (SELECT id FROM categories WHERE provider_id = v.provider_id AND kind = ? AND hidden = 1))`;
+  const q = (order, limit, extra = '', args = []) => db.prepare(`SELECT v.*, pr.position, pr.duration FROM vod v
+    LEFT JOIN vod_progress pr ON pr.provider_id = v.provider_id AND pr.kind = v.kind AND pr.id = v.id
+    WHERE ${visible} ${extra} ORDER BY ${order} LIMIT ${limit}`).all(pid, kind, catKind, ...args);
+  const recent = q('v.added DESC', 30);
+  const top = q('v.rating DESC', 30, 'AND v.rating IS NOT NULL AND v.rating > 0');
+  const cats = db.prepare(`SELECT c.id, c.name, COUNT(v.id) AS n FROM categories c JOIN vod v ON v.provider_id = c.provider_id AND v.category_id = c.id AND v.kind = ?
+    WHERE c.provider_id = ? AND c.kind = ? AND c.hidden = 0 GROUP BY c.id ORDER BY c.sort LIMIT 12`).all(kind, pid, catKind);
+  const categories = cats.map(c => ({ id: c.id, name: c.name, count: c.n, items: q('v.added DESC', 20, 'AND v.category_id = ?', [c.id]) }));
+  res.json({ recent, top, categories });
+});
+
 r.get('/vod/:pid/movie/:id', ah(async (req, res) => {
   const p = iptv.getProvider(req.params.pid);
   const row = db.prepare("SELECT * FROM vod WHERE provider_id = ? AND kind = 'movie' AND id = ?").get(p.id, req.params.id);
@@ -315,8 +346,8 @@ r.get('/search', (req, res) => {
   if (q.length < 2) return res.json({ channels: [], movies: [], series: [], programmes: [] });
   const like = `%${q}%`;
   const channels = db.prepare('SELECT provider_id, id, num, name, logo, archive FROM channels WHERE name LIKE ? AND hidden = 0 LIMIT 40').all(like);
-  const movies = db.prepare("SELECT * FROM vod WHERE kind = 'movie' AND name LIKE ? LIMIT 40").all(like);
-  const series = db.prepare("SELECT * FROM vod WHERE kind = 'series' AND name LIKE ? LIMIT 40").all(like);
+  const movies = db.prepare("SELECT v.* FROM vod v JOIN providers p ON p.id = v.provider_id WHERE p.enabled = 1 AND p.vod_enabled = 1 AND v.kind = 'movie' AND v.name LIKE ? LIMIT 40").all(like);
+  const series = db.prepare("SELECT v.* FROM vod v JOIN providers p ON p.id = v.provider_id WHERE p.enabled = 1 AND p.series_enabled = 1 AND v.kind = 'series' AND v.name LIKE ? LIMIT 40").all(like);
   const programmes = db.prepare(`SELECT pr.*, c.id AS channel_id, c.name AS channel_name, c.logo, c.archive FROM programmes pr
     JOIN channels c ON c.provider_id = pr.provider_id AND c.epg_id = pr.channel
     WHERE pr.title LIKE ? AND pr.stop > ? GROUP BY pr.provider_id, pr.channel, pr.start ORDER BY pr.start LIMIT 40`).all(like, now() - 86400 * 3);
