@@ -36,8 +36,11 @@ class Player {
     this.video.muted = localStorage.getItem('lumen.muted') === 'true';
     this.build();
     this.timers = [];
-    this.timers.push(setInterval(() => this.report('playing'), 10000));
-    this.timers.push(setInterval(() => { if (this.desc?.sessionId) api.post(`/api/stream/session/${this.desc.sessionId}/ping`).catch(() => {}); }, 20000));
+    this.timers.push(setInterval(() => this.report(this.video.paused ? 'paused' : 'playing'), 10000));
+    this.timers.push(setInterval(() => {
+      if (this.desc?.sessionId) api.post(`/api/stream/session/${this.desc.sessionId}/ping`).catch(() => {});
+      if (this.desc?.session) api.post('/api/plex/ping', { session: this.desc.session }).catch(() => {});
+    }, 20000));
     this.timers.push(setInterval(() => this.tick(), 500));
     this.onKey = this.onKey.bind(this);
     document.addEventListener('keydown', this.onKey);
@@ -90,7 +93,7 @@ class Player {
     v.addEventListener('play', () => { this.playBtn.innerHTML = icon('pause'); this.report('playing'); });
     v.addEventListener('pause', () => { this.playBtn.innerHTML = icon('play'); this.poke(); this.report('paused'); });
     v.addEventListener('waiting', () => this.setBusy(true));
-    v.addEventListener('playing', () => { this.setBusy(false); this.clearError(); });
+    v.addEventListener('playing', () => { this.setBusy(false); this.clearError(); this.autoReloads = 0; });
     v.addEventListener('canplay', () => this.setBusy(false));
     v.addEventListener('ended', () => this.ended());
     v.addEventListener('volumechange', () => { this.volBtn.innerHTML = icon(v.muted || v.volume === 0 ? 'mute' : 'vol'); });
@@ -143,6 +146,8 @@ class Player {
 
   fatal(reason) {
     console.warn('[player] fatal:', reason, this.desc);
+    this.autoReloads = (this.autoReloads || 0) + 1;
+    if (this.autoReloads > 3) { this.showError(`Playback failed (${reason}).`); return; }
     const mode = nextMode(this.desc);
     if (mode && this.meta.reload && !this.desc.noFallback) {
       toast(`Direct playback failed — switching to ${mode === 'remux' ? 'remux (audio conversion)' : 'transcoding'}…`);

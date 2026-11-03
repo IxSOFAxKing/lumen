@@ -38,13 +38,46 @@ export function plexUrl(path, params = {}) {
   return u.toString();
 }
 
-export async function plexFetch(path, { params = {}, method = 'GET', headers = {}, raw = false, timeout = 20000 } = {}) {
+// ---------- protection: Lumen must never flood the Plex server ----------
+/** Simple concurrency limiter. */
+export class Gate {
+  constructor(n) { this.n = n; this.active = 0; this.queue = []; }
+  async run(fn) {
+    if (this.active >= this.n) await new Promise(r => this.queue.push(r));
+    this.active++;
+    try { return await fn(); } finally { this.active--; this.queue.shift()?.(); }
+  }
+}
+const gates = { api: new Gate(6), image: new Gate(3) };
+
+// Request accounting: logs a warning if Lumen ever sends Plex an unusual number of requests.
+let reqCount = 0; const reqPaths = new Map();
+setInterval(() => {
+  if (reqCount > 240) {
+    const top = [...reqPaths.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([p, n]) => `${n}× ${p}`).join(', ');
+    console.warn(`[plex] high request rate: ${reqCount} requests to Plex in the last minute (${top})`);
+  }
+  reqCount = 0; reqPaths.clear();
+}, 60000).unref();
+
+/**
+ * Request the Plex server.
+ * gate: 'api' (default for JSON), 'image', or null (streams handle their own limits).
+ * signal: abort when the browser goes away, so abandoned requests don't pile up on Plex.
+ */
+export async function plexFetch(path, { params = {}, method = 'GET', headers = {}, raw = false, timeout = 20000, signal, gate } = {}) {
   if (!isConfigured()) { const e = new Error('Plex is not configured'); e.status = 400; throw e; }
-  const res = await fetch(plexUrl(path, params), {
+  const signals = [timeout ? AbortSignal.timeout(timeout) : null, signal].filter(Boolean);
+  const g = gates[gate === undefined ? (raw ? null : 'api') : gate];
+  reqCount++;
+  const key = path.split('?')[0].replace(/\/\d+/g, '/N').replace(/\/session\/[^/]+/, '/session/S');
+  reqPaths.set(key, (reqPaths.get(key) || 0) + 1);
+  const doFetch = () => fetch(plexUrl(path, params), {
     method,
     headers: plexHeaders({ 'X-Plex-Token': plexConf().token, ...headers }),
-    signal: timeout ? AbortSignal.timeout(timeout) : undefined,
+    signal: signals.length > 1 ? AbortSignal.any(signals) : signals[0],
   });
+  const res = g ? await g.run(doFetch) : await doFetch();
   if (raw) return res;
   if (!res.ok) {
     const body = (await res.text().catch(() => '')).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);

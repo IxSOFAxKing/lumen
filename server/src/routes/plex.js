@@ -194,7 +194,7 @@ r.get('/image', ah(async (req, res) => {
   const w = Math.min(Number(req.query.w) || 400, 3840), h = Math.min(Number(req.query.h) || 600, 2160);
   // Plex's photo transcoder is slow; keep resized artwork on disk.
   await serveCachedImage(`plex|${plex.plexConf().machineId}|${path}|${w}x${h}`, () => plex.plexFetch('/photo/:/transcode', {
-    raw: true, params: { url: path, width: w, height: h, minSize: 1, upscale: 1, format: 'webp', quality: 80 },
+    raw: true, gate: 'image', params: { url: path, width: w, height: h, minSize: 1, upscale: 1, format: 'webp', quality: 80 },
     headers: { Accept: 'image/*' },
   }), res);
 }));
@@ -256,7 +256,8 @@ r.post('/play', ah(async (req, res) => {
     });
   }
 
-  const q = QUALITY[quality] || { bitrate: 40000, res: '3840x2160' };
+  // "Auto" transcodes cap at 1080p/20 Mbps (4K transcodes can overwhelm a Plex server); "Original" keeps full quality.
+  const q = QUALITY[quality] || (quality === 'original' ? { bitrate: 40000, res: '3840x2160' } : QUALITY[20000]);
   const transcoder = req.body.transcoder || tconf.plexTranscoder;
 
   const builtin = async (reason) => {
@@ -265,7 +266,7 @@ r.post('/play', ah(async (req, res) => {
     const audioIdx = Math.max(0, streams.filter(s => s.streamType === 2).indexOf(selAudio));
     const s = await startSession({
       input: plex.plexUrl(part.key), isLive: false, mode: canCopy ? 'remux' : 'transcode', startOffset: Number(offset) || 0,
-      audioIndex: audioIdx, bitrate: QUALITY[quality]?.bitrate, maxHeight: Number(q.res.split('x')[1]), label: `Plex: ${meta.title}`,
+      audioIndex: audioIdx, bitrate: QUALITY[quality]?.bitrate, maxHeight: Math.min(Number(q.res.split('x')[1]), Number(tconf.maxHeight) || 1080), label: `Plex: ${meta.title}`,
     });
     return res.json({ ...base, method: canCopy ? 'builtin-remux' : `builtin-transcode (${s.hwAccel})`, type: 'hls', url: s.url, sessionId: s.id, startOffset: s.startOffset, restartOnSeek: true, fallbackReason: reason || null });
   };
@@ -299,16 +300,22 @@ r.post('/play', ah(async (req, res) => {
   }
   res.json({
     ...base, method: `plex-${dmc.Metadata?.[0]?.Media?.[0]?.Part?.[0]?.Stream?.[0]?.decision || 'transcode'}`, type: 'hls', session,
-    url: `/api/plex/t/video/:/transcode/universal/start.m3u8?${params}`, startOffset: 0, seekTo: Math.floor(offset),
+    url: `/api/plex/t/video/:/transcode/universal/start.m3u8?${params}`, startOffset: 0, seekTo: Math.floor(offset), origin: 'plex',
   });
 }));
 
 r.post('/stop', ah(async (req, res) => {
   const { session, sessionId } = req.body || {};
   if (sessionId) stopSession(sessionId);
-  if (session) await plex.plexFetch('/video/:/transcode/universal/stop', { params: { session } }).catch(() => null);
+  if (session) { plexSessions.delete(session); await plex.plexFetch('/video/:/transcode/universal/stop', { params: { session } }).catch(() => null); }
   res.json({ ok: true });
 }));
+
+r.post('/ping', (req, res) => {
+  const s = plexSessions.get(req.body?.session);
+  if (s) s.last = Date.now();
+  res.json({ alive: !!s });
+});
 
 r.post('/timeline', ah(async (req, res) => {
   const { ratingKey, state = 'playing', time = 0, duration = 0, session } = req.body || {};
@@ -324,7 +331,9 @@ r.post('/timeline', ah(async (req, res) => {
 r.get('/file', ah(async (req, res) => {
   const path = String(req.query.path || '');
   if (!path.startsWith('/library/parts/')) return res.status(400).end();
-  const upstream = await plex.plexFetch(path, { raw: true, timeout: 0, headers: req.headers.range ? { Range: req.headers.range, Accept: '*/*' } : { Accept: '*/*' } });
+  const ac = new AbortController();
+  res.on('close', () => ac.abort());
+  const upstream = await plex.plexFetch(path, { raw: true, timeout: 0, signal: ac.signal, headers: req.headers.range ? { Range: req.headers.range, Accept: '*/*' } : { Accept: '*/*' } });
   pipeFetch(upstream, res);
 }));
 
@@ -337,13 +346,51 @@ r.get('/subtitle/:id', ah(async (req, res) => {
   res.type('text/vtt').send(text);
 }));
 
+// ---- Plex transcode session tracking ----
+// At most 2 concurrent requests per transcode session reach Plex, and sessions the player
+// abandoned (closed tab, crash, network drop) are stopped on the Plex server after 60s of silence.
+const plexSessions = new Map(); // id -> { gate, last }
+const sessionAlias = new Map();  // Plex's internal path session id -> the session id Lumen created
+const passthrough = { run: fn => fn() };
+function trackSession(id) {
+  if (!id) return null;
+  id = sessionAlias.get(id) || id;
+  let s = plexSessions.get(id);
+  if (!s) { s = { gate: new plex.Gate(2), last: 0 }; plexSessions.set(id, s); }
+  s.last = Date.now();
+  return s;
+}
+setInterval(() => {
+  for (const [id, s] of plexSessions) {
+    if (Date.now() - s.last > 60000) {
+      plexSessions.delete(id);
+      for (const [a, root] of sessionAlias) if (root === id) sessionAlias.delete(a);
+      plex.plexFetch('/video/:/transcode/universal/stop', { params: { session: id } }).catch(() => null);
+      console.log(`[plex] stopped idle transcode session ${id.slice(0, 8)}`);
+    }
+  }
+}, 15000).unref();
+
 // Transparent proxy for Plex transcoder (playlists + segments). Relative URLs resolve back through here.
 r.use('/t', ah(async (req, res) => {
   const path = req.originalUrl.replace(/^.*?\/api\/plex\/t/, '');
   if (!path.startsWith('/video/:/transcode/universal/')) return res.status(400).end();
   const [p, qs] = path.split('?');
   const params = Object.fromEntries(new URLSearchParams(qs || ''));
-  const upstream = await plex.plexFetch(p, { raw: true, params, headers: { Accept: '*/*' }, timeout: 120000 });
+  const sid = params.session || p.match(/\/session\/([^/]+)\//)?.[1];
+  const t = trackSession(sid);
+  // Cancel the Plex request if the player gives up on it, instead of leaving it running on the server.
+  const ac = new AbortController();
+  res.on('close', () => ac.abort());
+  let upstream;
+  try {
+    upstream = await (t ? t.gate : passthrough).run(() => ac.signal.aborted ? null
+      : plex.plexFetch(p, { raw: true, params, headers: { Accept: '*/*' }, timeout: 120000, signal: ac.signal }));
+  } catch (e) {
+    if (ac.signal.aborted) return; // browser went away
+    throw e;
+  }
+  if (!upstream) return;
   if (!upstream.ok) {
     const body = (await upstream.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 300);
     console.warn(`[plex] transcoder returned ${upstream.status} for ${p}${body ? `: ${body}` : ''}`);
@@ -358,7 +405,10 @@ r.use('/t', ah(async (req, res) => {
       x.searchParams.delete('X-Plex-Token');
       return '/api/plex/t' + x.pathname + x.search;
     };
-    const text = (await upstream.text()).split(/\r?\n/).map(line => {
+    const raw = await upstream.text();
+    // Plex's variant playlists live under session/<internal id>/ — tie that id to our session.
+    if (params.session) for (const m of raw.matchAll(/session\/([^/\s]+)\//g)) if (m[1] !== params.session) sessionAlias.set(m[1], params.session);
+    const text = raw.split(/\r?\n/).map(line => {
       const t = line.trim();
       if (!t) return line;
       if (t.startsWith('#')) return line.replace(/URI="([^"]+)"/g, (m, u) => `URI="${fix(u)}"`);

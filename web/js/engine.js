@@ -19,6 +19,12 @@ export function attachEngine(video, desc, { onFatal, onReady } = {}) {
   const startAt = Number(desc.seekTo) || 0;
 
   if (desc.type === 'hls') {
+    // Plex's transcoder can take a while to produce each chunk: wait for it patiently instead of
+    // re-requesting (Plex treats repeated requests as seeks and restarts its transcoder).
+    const slowOrigin = desc.origin === 'plex' ? {
+      fragLoadingTimeOut: 90000, fragLoadingMaxRetry: 2, fragLoadingRetryDelay: 3000,
+      manifestLoadingTimeOut: 60000, levelLoadingTimeOut: 60000, maxBufferLength: 20,
+    } : {};
     if (window.Hls && window.Hls.isSupported()) {
       hls = new window.Hls({
         startPosition: startAt > 0 ? startAt : -1,
@@ -28,6 +34,7 @@ export function attachEngine(video, desc, { onFatal, onReady } = {}) {
         manifestLoadingMaxRetry: 6, manifestLoadingRetryDelay: 1000,
         levelLoadingMaxRetry: 6, fragLoadingMaxRetry: 6,
         xhrSetup: (xhr) => { xhr.withCredentials = true; },
+        ...slowOrigin,
       });
       let mediaRecoveries = 0, manifestLoaded = false;
       hls.on(window.Hls.Events.ERROR, (_, data) => {
@@ -36,7 +43,7 @@ export function attachEngine(video, desc, { onFatal, onReady } = {}) {
         // A failed/unparseable master playlist can't be recovered with startLoad(); report it instead of spinning forever.
         if (!manifestLoaded) { fatal(`could not load stream (${data.details}${code ? `, HTTP ${code}` : ''})`); return; }
         if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR && mediaRecoveries < 2) { mediaRecoveries++; hls.recoverMediaError(); return; }
-        if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR && code !== 404 && mediaRecoveries < 4) { mediaRecoveries++; setTimeout(() => hls?.startLoad(), 1500); return; }
+        if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR && code !== 404 && desc.origin !== 'plex' && mediaRecoveries < 4) { mediaRecoveries++; setTimeout(() => hls?.startLoad(), 1500); return; }
         fatal(`${data.type}: ${data.details}${code ? ` (HTTP ${code})` : ''}`);
       });
       hls.on(window.Hls.Events.MANIFEST_PARSED, () => { manifestLoaded = true; onReady?.(); });
