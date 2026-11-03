@@ -5,7 +5,10 @@ export const ah = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).
 /** Pipe a fetch Response to an express response, copying useful headers. */
 export function pipeFetch(upstream, res, { headers = ['content-type', 'content-length', 'content-range', 'accept-ranges', 'last-modified', 'etag', 'cache-control'], extra = {} } = {}) {
   res.status(upstream.status);
+  // fetch() transparently decompresses gzip/br bodies, so the upstream content-length no longer matches.
+  const encoded = !!upstream.headers.get('content-encoding');
   for (const h of headers) {
+    if (encoded && h === 'content-length') continue;
     const v = upstream.headers.get(h);
     if (v) res.setHeader(h, v);
   }

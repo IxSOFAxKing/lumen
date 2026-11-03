@@ -19,14 +19,17 @@ export function attachEngine(video, desc, { onFatal, onReady } = {}) {
         levelLoadingMaxRetry: 6, fragLoadingMaxRetry: 6,
         xhrSetup: (xhr) => { xhr.withCredentials = true; },
       });
-      let mediaRecoveries = 0;
+      let mediaRecoveries = 0, manifestLoaded = false;
       hls.on(window.Hls.Events.ERROR, (_, data) => {
         if (!data.fatal) return;
+        const code = data.response?.code;
+        // A failed/unparseable master playlist can't be recovered with startLoad(); report it instead of spinning forever.
+        if (!manifestLoaded) { fatal(`could not load stream (${data.details}${code ? `, HTTP ${code}` : ''})`); return; }
         if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR && mediaRecoveries < 2) { mediaRecoveries++; hls.recoverMediaError(); return; }
-        if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR && data.response?.code !== 404 && mediaRecoveries < 4) { mediaRecoveries++; setTimeout(() => hls?.startLoad(), 1500); return; }
-        fatal(`${data.type}: ${data.details}`);
+        if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR && code !== 404 && mediaRecoveries < 4) { mediaRecoveries++; setTimeout(() => hls?.startLoad(), 1500); return; }
+        fatal(`${data.type}: ${data.details}${code ? ` (HTTP ${code})` : ''}`);
       });
-      hls.on(window.Hls.Events.MANIFEST_PARSED, () => onReady?.());
+      hls.on(window.Hls.Events.MANIFEST_PARSED, () => { manifestLoaded = true; onReady?.(); });
       hls.loadSource(desc.url);
       hls.attachMedia(video);
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
@@ -105,6 +108,7 @@ export const FALLBACK = ['direct', 'remux', 'transcode'];
 export function nextMode(desc) {
   const m = String(desc?.method || 'direct');
   if (m.startsWith('direct')) return 'remux';
+  if (m.startsWith('plex-')) return 'builtin';
   if (m.startsWith('remux') || m === 'builtin-remux') return 'transcode';
   return null;
 }

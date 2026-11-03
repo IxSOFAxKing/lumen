@@ -226,16 +226,19 @@ r.post('/play', ah(async (req, res) => {
   }
 
   const q = QUALITY[quality] || { bitrate: 40000, res: '3840x2160' };
+  const transcoder = req.body.transcoder || tconf.plexTranscoder;
 
-  if (tconf.plexTranscoder === 'builtin') {
+  const builtin = async (reason) => {
+    if (reason) console.warn(`[plex] using built-in transcoder for "${meta.title}": ${reason}`);
     const canCopy = media.videoCodec === 'h264' && (quality === 'original' || quality === 'auto') && !selSub;
     const audioIdx = Math.max(0, streams.filter(s => s.streamType === 2).indexOf(selAudio));
     const s = await startSession({
       input: plex.plexUrl(part.key), isLive: false, mode: canCopy ? 'remux' : 'transcode', startOffset: Number(offset) || 0,
       audioIndex: audioIdx, bitrate: QUALITY[quality]?.bitrate, maxHeight: Number(q.res.split('x')[1]), label: `Plex: ${meta.title}`,
     });
-    return res.json({ ...base, method: canCopy ? 'builtin-remux' : `builtin-transcode (${s.hwAccel})`, type: 'hls', url: s.url, sessionId: s.id, startOffset: s.startOffset, restartOnSeek: true });
-  }
+    return res.json({ ...base, method: canCopy ? 'builtin-remux' : `builtin-transcode (${s.hwAccel})`, type: 'hls', url: s.url, sessionId: s.id, startOffset: s.startOffset, restartOnSeek: true, fallbackReason: reason || null });
+  };
+  if (transcoder === 'builtin') return builtin();
 
   const session = crypto.randomUUID();
   const params = new URLSearchParams({
@@ -253,10 +256,15 @@ r.post('/play', ah(async (req, res) => {
     ].join('+'),
   });
   // Make Plex decide first so errors (e.g. transcoder unavailable) are surfaced.
-  const decision = await plex.plexFetch(`/video/:/transcode/universal/decision?${params}`, {}).catch(() => null);
+  let decision, decisionError = null;
+  try { decision = await plex.plexFetch(`/video/:/transcode/universal/decision?${params}`, { timeout: 30000 }); }
+  catch (e) { decisionError = e.message; }
   const dmc = MC(decision);
-  if (dmc.generalDecisionCode && Number(dmc.generalDecisionCode) >= 2000) {
-    return res.status(502).json({ error: `Plex cannot play this: ${dmc.generalDecisionText || dmc.transcodeDecisionText}` });
+  const code = Number(dmc.generalDecisionCode || 0);
+  if (decisionError || code >= 2000 || Number(dmc.transcodeDecisionCode || 0) >= 2000) {
+    const why = decisionError || dmc.transcodeDecisionText || dmc.generalDecisionText || `decision code ${code}`;
+    console.warn(`[plex] transcode decision failed for "${meta.title}": ${why}`);
+    return builtin(`Plex transcoder: ${why}`);
   }
   res.json({
     ...base, method: `plex-${dmc.Metadata?.[0]?.Media?.[0]?.Part?.[0]?.Stream?.[0]?.decision || 'transcode'}`, type: 'hls', session,
@@ -304,6 +312,28 @@ r.use('/t', ah(async (req, res) => {
   const [p, qs] = path.split('?');
   const params = Object.fromEntries(new URLSearchParams(qs || ''));
   const upstream = await plex.plexFetch(p, { raw: true, params, headers: { Accept: '*/*' }, timeout: 120000 });
+  if (!upstream.ok) {
+    const body = (await upstream.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 300);
+    console.warn(`[plex] transcoder returned ${upstream.status} for ${p}${body ? `: ${body}` : ''}`);
+    return res.status(upstream.status).type('text/plain').send(body || `Plex returned ${upstream.status}`);
+  }
+  if (p.endsWith('.m3u8') || /mpegurl/i.test(upstream.headers.get('content-type') || '')) {
+    const base = plex.plexConf().url;
+    const fix = u => {
+      if (/^https?:\/\//i.test(u)) { const x = new URL(u); if (!u.startsWith(base)) return u; u = x.pathname + x.search; }
+      if (!u.startsWith('/')) return u; // relative: already resolves through this proxy
+      const x = new URL(u, 'http://plex');
+      x.searchParams.delete('X-Plex-Token');
+      return '/api/plex/t' + x.pathname + x.search;
+    };
+    const text = (await upstream.text()).split(/\r?\n/).map(line => {
+      const t = line.trim();
+      if (!t) return line;
+      if (t.startsWith('#')) return line.replace(/URI="([^"]+)"/g, (m, u) => `URI="${fix(u)}"`);
+      return fix(t);
+    }).join('\n');
+    return res.type('application/vnd.apple.mpegurl').setHeader('Cache-Control', 'no-cache').send(text);
+  }
   pipeFetch(upstream, res, { headers: ['content-type', 'content-length'], extra: { 'Cache-Control': 'no-cache' } });
 }));
 

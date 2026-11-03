@@ -23,10 +23,10 @@ async function plexNext(item) {
  * Play a Plex item. opts: { offset, queue: [items], queueIndex }
  */
 export async function playPlex(ratingKey, opts = {}) {
-  const state = { quality: opts.quality, audio: undefined, subtitle: undefined, mediaIndex: opts.mediaIndex || 0, forceTranscode: false };
+  const state = { quality: opts.quality, audio: undefined, subtitle: undefined, mediaIndex: opts.mediaIndex || 0, forceTranscode: false, transcoder: undefined };
   const fetchDesc = async (offset) => api.post('/api/plex/play', {
     ratingKey, offset, quality: state.quality, mediaIndex: state.mediaIndex,
-    audioStreamID: state.audio, subtitleStreamID: state.subtitle, forceTranscode: state.forceTranscode,
+    audioStreamID: state.audio, subtitleStreamID: state.subtitle, forceTranscode: state.forceTranscode, transcoder: state.transcoder,
   });
   try {
     const desc = await fetchDesc(opts.offset || 0);
@@ -55,7 +55,8 @@ export async function playPlex(ratingKey, opts = {}) {
         if (quality !== undefined) state.quality = quality;
         if (mediaIndex !== undefined) state.mediaIndex = mediaIndex;
         if (mode === 'transcode' || mode === 'remux') { state.forceTranscode = true; if (mode === 'transcode' && (!state.quality || state.quality === 'auto' || state.quality === 'original')) state.quality = '20000'; }
-        if (mode === 'direct') { state.forceTranscode = false; state.quality = 'auto'; }
+        if (mode === 'direct') { state.forceTranscode = false; state.quality = 'auto'; state.transcoder = undefined; }
+        if (mode === 'builtin') { state.forceTranscode = true; state.transcoder = 'builtin'; }
         const d = await fetchDesc(offset);
         currentDesc = d;
         return { desc: d, meta: buildMeta(d) };

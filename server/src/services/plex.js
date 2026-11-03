@@ -47,7 +47,8 @@ export async function plexFetch(path, { params = {}, method = 'GET', headers = {
   });
   if (raw) return res;
   if (!res.ok) {
-    const e = new Error(`Plex responded ${res.status} for ${path}`);
+    const body = (await res.text().catch(() => '')).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+    const e = new Error(`Plex responded ${res.status} for ${path.split('?')[0]}${body ? ` (${body})` : ''}`);
     e.status = res.status === 401 ? 401 : 502;
     throw e;
   }
