@@ -35,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -86,13 +87,14 @@ fun DetailScreen(s: Screen.Detail) {
     val listState = rememberLazyListState()
 
     Box(Modifier.fillMaxSize()) {
-        Backdrop(Net.plexImg(item.art ?: item.thumb, 1280, 720), heightFraction = 1f)
+        Backdrop(Net.plexImg(item.art ?: item.thumb, 1280, 720), heightFraction = 1f, bleedLeft = 0.dp)
       // Scroll only as much as needed (Android TV's default keeps the focused row a third of the way down,
       // which pushed the title and cover art off the top).
-      androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides MinimalScroll) {
+      androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides NoScroll) {
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 40.dp, bottom = 120.dp)) {
             item(key = "info") {
-              Row(Modifier.padding(start = 48.dp, end = 120.dp)) {
+              // Back on the Play / Mark watched buttons: return to the top so the artwork and title are visible.
+              Row(Modifier.padding(start = 48.dp, end = 120.dp).onFocusChanged { if (it.hasFocus) scope.launch { listState.animateScrollToItem(0) } }) {
                 // Cover art
                 val cover = if (item.type == "episode") item.grandparentThumb ?: item.thumb else item.thumb
                 if (cover != null) {
@@ -144,15 +146,17 @@ fun DetailScreen(s: Screen.Detail) {
             }
             if (isShow && d.seasons.isNotEmpty()) {
                 item(key = "seasons") {
-                    LazyRow(contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 26.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides EdgeScroll) {
+                    LazyRow(Modifier.onFocusChanged { if (it.hasFocus) scope.launch { listState.animateScrollToItem(1) } }, contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 26.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         itemsIndexed(d.seasons, key = { _, it -> it.ratingKey }) { _, season ->
                             Chip(season.title, season.ratingKey == seasonKey, memKey = "season/${season.ratingKey}", onFocus = { if (seasonKey != season.ratingKey) seasonKey = season.ratingKey }) { seasonKey = season.ratingKey }
                         }
                     }
+                    }
                 }
                 item(key = "episodes") {
                     val eps = episodes
-                    if (eps == null) Loading() else CardRow("", startPad = 48.dp) {
+                    if (eps == null) Loading() else CardRow("", startPad = 48.dp, onRowFocused = { scope.launch { listState.animateScrollToItem(1) } }) {
                         itemsIndexed(eps, key = { _, it -> it.ratingKey }) { _, ep ->
                             EpisodeCard(ep, onMenu = {
                                 scope.launch { runCatching { Repo.setWatched(ep.ratingKey, !ep.watched) }.onSuccess { Net.clearCache(); reload++; Toast.makeText(ctx, if (ep.watched) "Marked unwatched" else "Marked watched", Toast.LENGTH_SHORT).show() } }
@@ -162,9 +166,13 @@ fun DetailScreen(s: Screen.Detail) {
                 }
             }
             val cast = item.raw.optJSONArray("Role").objects().take(20)
-            if (cast.isNotEmpty()) item(key = "cast") { CastRow(cast) }
+            if (cast.isNotEmpty()) item(key = "cast") { CastRow(cast) { scope.launch { listState.animateScrollToItem(listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == "cast" }?.index ?: return@launch) } } }
             d.related.forEachIndexed { i, hub ->
-                item(key = "rel$i") { PlexRow("rel:${hub.id}", hub.title, hub.items, hub.wide, 48.dp) { Nav.openDetails(it) } }
+                item(key = "rel$i") {
+                    PlexRow("rel:${hub.id}", hub.title, hub.items, hub.wide, 48.dp, onRowFocused = {
+                        scope.launch { listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == "rel$i" }?.index?.let { listState.animateScrollToItem(it) } }
+                    }) { Nav.openDetails(it) }
+                }
             }
         }
       }
@@ -199,8 +207,8 @@ private fun EpisodeCard(ep: PlexItem, onMenu: () -> Unit, onClick: () -> Unit) {
 }
 
 @Composable
-private fun CastRow(cast: List<JSONObject>) {
-    CardRow("Cast", startPad = 48.dp, modifier = Modifier.padding(top = 18.dp)) {
+private fun CastRow(cast: List<JSONObject>, onRowFocused: () -> Unit) {
+    CardRow("Cast", startPad = 48.dp, modifier = Modifier.padding(top = 18.dp), onRowFocused = onRowFocused) {
         itemsIndexed(cast, key = { i, _ -> "cast$i" }) { i, r ->
             Column(Modifier.width(92.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Focusable(onClick = {}, memKey = "cast/$i", shape = CircleShape, modifier = Modifier.size(72.dp), background = C.card) {

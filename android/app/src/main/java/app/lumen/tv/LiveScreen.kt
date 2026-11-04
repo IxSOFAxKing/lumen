@@ -4,6 +4,7 @@ import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -73,6 +74,8 @@ fun LiveScreen() {
         loadingGroup = null
     }
     val groupName = groups?.firstOrNull { it.id == group }?.name?.removePrefix("★  ") ?: "Channels"
+    // Leaving Live TV for another section closes the preview.
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { Preview.channel = null } }
     val firstChFr = remember { FocusRequester() }
     InitialFocus(firstChFr)
     val chState = rememberLazyListState()
@@ -140,13 +143,20 @@ fun LiveScreen() {
         }
         // ---- details ----
         Column(Modifier.width(300.dp).fillMaxHeight().padding(start = 12.dp, end = 24.dp, top = 30.dp)) {
-            FocusedDetails(focusedCh)
+            Preview.channel?.let { pc ->
+                Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(10.dp))) {
+                    LivePreview(pc, Modifier.fillMaxSize())
+                    Box(Modifier.align(Alignment.TopStart).padding(6.dp).clip(RoundedCornerShape(3.dp)).background(C.live).padding(horizontal = 5.dp, vertical = 1.dp)) { T("LIVE · ${pc.name}", 9.sp, Color.White, FontWeight.Bold) }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+            FocusedDetails(focusedCh, compact = Preview.channel != null)
         }
     }
 }
 
 @Composable
-private fun FocusedDetails(ch: androidx.compose.runtime.State<Channel?>) { ch.value?.let { ChannelDetails(it) } }
+private fun FocusedDetails(ch: androidx.compose.runtime.State<Channel?>, compact: Boolean) { ch.value?.let { ChannelDetails(it, compact) } }
 
 @Composable
 fun ChannelLine(ch: Channel, fr: FocusRequester? = null, onFocus: () -> Unit = {}, onMenu: (() -> Unit)? = null, onClick: () -> Unit) {
@@ -181,9 +191,9 @@ fun ChannelLine(ch: Channel, fr: FocusRequester? = null, onFocus: () -> Unit = {
 }
 
 @Composable
-fun ChannelDetails(ch: Channel) {
+fun ChannelDetails(ch: Channel, compact: Boolean = false) {
     Column {
-        Box(Modifier.fillMaxWidth().height(110.dp).clip(RoundedCornerShape(10.dp)).background(C.card), contentAlignment = Alignment.Center) {
+        if (!compact) Box(Modifier.fillMaxWidth().height(110.dp).clip(RoundedCornerShape(10.dp)).background(C.card), contentAlignment = Alignment.Center) {
             if (ch.logo != null) Img(Net.url(ch.logo), Modifier.fillMaxSize().padding(22.dp), ContentScale.Fit)
             else T(ch.name, 20.sp, weight = FontWeight.Bold)
         }

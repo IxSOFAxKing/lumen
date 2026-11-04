@@ -662,6 +662,8 @@ class PlayerActivity : ComponentActivity() {
             if (!src.isLive) { val p = absPos(); val du = duration(); AppScope.launch { src.progress(p, du, "stopped") } }
             AppScope.launch { Playback.release(d) }
         }
+        // Back on the Live TV screen, keep watching this channel in the preview window.
+        if (src is LiveSource && Nav.current == Screen.Live) Preview.channel = src.channel
         if (src is WebSource) PlayerBus.closed(if (src.isLive) 0.0 else absPos() - (d?.startOffset ?: 0.0))
         Net.clearCache()
         exo.stop()

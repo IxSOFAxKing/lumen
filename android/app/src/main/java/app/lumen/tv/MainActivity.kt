@@ -7,6 +7,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.using
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -91,6 +92,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        Preview.pausedForPlayer = false
         Net.clearCache() // watch progress may have changed in the player
         // Rows reload with fresh progress; put focus back on the card you were on.
         if (AppState.loaded) Nav.mem(Nav.current).restorePending = true
@@ -171,7 +173,8 @@ fun Shell(onExit: () -> Unit) {
                 transitionSpec = {
                     (androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(260, delayMillis = 40)) +
                         androidx.compose.animation.scaleIn(androidx.compose.animation.core.tween(300), initialScale = 0.97f)) togetherWith
-                        androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(140))
+                        androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(140)) using
+                        androidx.compose.animation.SizeTransform(clip = false) // artwork may extend under the side menu
                 },
             ) { s ->
                 CompositionLocalProvider(LocalMemory provides Nav.mem(s)) {
@@ -216,7 +219,7 @@ private fun Rail(entries: List<RailEntry>, screen: Screen, railFocus: androidx.c
     val currentId = entries.firstOrNull { it.screen == screen }?.id ?: if (screen == Screen.Settings) "settings" else null
     Box(
         Modifier.fillMaxHeight().width(if (expanded) 420.dp else 64.dp)
-            .background(if (expanded) Brush.horizontalGradient(listOf(Color.Black.copy(alpha = 0.92f), Color.Black.copy(alpha = 0.75f), Color.Transparent)) else Brush.horizontalGradient(listOf(C.bg, C.bg.copy(alpha = 0.9f))))
+            .background(if (expanded) Brush.horizontalGradient(listOf(Color.Black.copy(alpha = 0.92f), Color.Black.copy(alpha = 0.75f), Color.Transparent)) else Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent)))
     ) {
         // Every item in menu order, so ▲ / ▼ always move through the menu.
         val order = entries.map { it.id } + "settings"

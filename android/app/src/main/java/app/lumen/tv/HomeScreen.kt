@@ -1,6 +1,7 @@
 package app.lumen.tv
 
 import androidx.compose.animation.Crossfade
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -262,8 +263,14 @@ fun HeroInfoOf(h: androidx.compose.runtime.State<Hero?>, compact: Boolean, modif
 
 /** Full-bleed artwork in the top-right, fading into the background like Netflix. */
 @Composable
-fun Backdrop(url: String?, heightFraction: Float = 0.78f) {
-    Box(Modifier.fillMaxSize()) {
+fun Backdrop(url: String?, heightFraction: Float = 0.78f, bleedLeft: androidx.compose.ui.unit.Dp = 64.dp) {
+    // Extends under the (transparent) side menu, so artwork runs to the edge of the screen.
+    Box(Modifier.fillMaxSize().layout { m, c ->
+        val extra = bleedLeft.roundToPx()
+        val w = c.maxWidth + extra
+        val p = m.measure(c.copy(minWidth = w, maxWidth = w))
+        layout(c.maxWidth, p.height) { p.place(-extra, 0) }
+    }) {
         Crossfade(targetState = url, animationSpec = tween(450), label = "backdrop", modifier = Modifier.align(Alignment.TopEnd).fillMaxWidth(0.80f).fillMaxHeight(heightFraction)) { u ->
             Box(Modifier.fillMaxSize()) {
                 Img(u, Modifier.fillMaxSize(), ContentScale.Crop)

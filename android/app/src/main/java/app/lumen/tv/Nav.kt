@@ -83,6 +83,7 @@ object Nav {
     }
 
     fun playLive(ch: Channel, list: List<Channel>, groupName: String) {
+        Preview.pausedForPlayer = true
         Playback.zapList = list.ifEmpty { listOf(ch) }
         Playback.zapTitle = groupName
         Net.prefs.lastChannel = "${ch.providerId}:${ch.id}"
