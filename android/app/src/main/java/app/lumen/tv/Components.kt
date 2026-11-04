@@ -286,7 +286,7 @@ fun WideCard(item: PlexItem, memKey: String, onFocus: () -> Unit = {}, onMenu: (
 /** Live channel card: logo, what's on now and how far through it is. */
 @Composable
 fun ChannelCard(ch: Channel, memKey: String, onFocus: () -> Unit = {}, onMenu: (() -> Unit)? = null, fr: FocusRequester? = null, onClick: () -> Unit) {
-    Column(Modifier.width(184.dp)) {
+    Column(Modifier.width(196.dp).height(196.dp)) {
         Focusable(onClick = onClick, memKey = memKey, focusRequester = fr, onFocus = onFocus, onMenu = onMenu, modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f), background = C.card, focusedBackground = C.cardHi) {
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(C.cardHi, C.bg2))))
             if (ch.logo != null) Img(Net.url(ch.logo), Modifier.fillMaxSize().padding(horizontal = 30.dp, vertical = 18.dp), ContentScale.Fit)
@@ -298,7 +298,8 @@ fun ChannelCard(ch: Channel, memKey: String, onFocus: () -> Unit = {}, onMenu: (
         }
         Spacer(Modifier.height(6.dp))
         T(listOfNotNull(ch.num?.toString(), ch.name).joinToString("  "), 12.sp, C.text, FontWeight.Medium)
-        T(ch.onAir?.title ?: "No programme info", 11.sp, C.text2)
+        T(ch.onAir?.title ?: "No programme info", 11.sp, C.text2, maxLines = 2, lineHeight = 14.sp)
+        ch.onAir?.let { T("${fmtTime(it.start)} – ${fmtTime(it.stop)}", 10.sp, C.text3) }
     }
 }
 
@@ -335,8 +336,8 @@ fun PlexRow(rowKey: String, title: String, items: List<PlexItem>, wide: Boolean,
         itemsIndexed(unique, key = { _, it -> it.ratingKey }) { i, it ->
           Box(Modifier.animateItem(fadeInSpec = tween(320), placementSpec = spring(stiffness = 500f), fadeOutSpec = tween(150))) {
             val fr = if (i == 0) firstFocus else null
-            if (wide) WideCard(it, "$rowKey/${it.ratingKey}", onFocus = { onItemFocus(it) }, onMenu = { Nav.openDetails(it) }, fr = fr) { onOpen(it) }
-            else PosterCard(it, "$rowKey/${it.ratingKey}", onFocus = { onItemFocus(it) }, onMenu = { Nav.openDetails(it) }, fr = fr) { onOpen(it) }
+            if (wide) WideCard(it, "$rowKey/${it.ratingKey}", onFocus = { onItemFocus(it) }, onMenu = { Menus.item(it, inContinue = rowKey == "continue") }, fr = fr) { onOpen(it) }
+            else PosterCard(it, "$rowKey/${it.ratingKey}", onFocus = { onItemFocus(it) }, onMenu = { Menus.item(it) }, fr = fr) { onOpen(it) }
           }
         }
     }

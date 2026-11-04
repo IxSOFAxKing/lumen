@@ -490,9 +490,44 @@ r.get('/subtitle/:id', ah(async (req, res) => {
   const key = String(req.query.key || `/library/streams/${req.params.id}`);
   if (!key.startsWith('/library/streams/')) return res.status(400).end();
   const upstream = await plex.plexFetch(key, { raw: true, headers: { Accept: '*/*' } });
+  if (!upstream.ok) return res.status(upstream.status === 404 ? 404 : 502).end();
   let text = await upstream.text();
-  if (!text.startsWith('WEBVTT')) text = srtToVtt(text);
+  if (!text.trimStart().startsWith('WEBVTT')) text = srtToVtt(text);
+  // Subtitle sync: shift every cue by ?offset= milliseconds (positive = later).
+  const offset = Number(req.query.offset) || 0;
+  if (offset) text = shiftVtt(text, offset);
   res.type('text/vtt').send(text);
+}));
+
+function shiftVtt(text, ms) {
+  const fmt = t => {
+    t = Math.max(0, Math.round(t));
+    const h = Math.floor(t / 3600000), m = Math.floor(t / 60000) % 60, s2 = Math.floor(t / 1000) % 60, f = t % 1000;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s2).padStart(2, '0')}.${String(f).padStart(3, '0')}`;
+  };
+  return text.replace(/(?:(\d+):)?(\d{2}):(\d{2})[.,](\d{3})/g, (all, h, m, sec, f) => {
+    const t = (Number(h || 0) * 3600 + Number(m) * 60 + Number(sec)) * 1000 + Number(f);
+    return fmt(t + ms);
+  });
+}
+
+// Seek-bar preview thumbnails (Plex "BIF" index of the media part).
+r.get('/bif/:partId', ah(async (req, res) => {
+  const id = String(req.params.partId).replace(/\D/g, '');
+  if (!id) return res.status(400).end();
+  const ac = new AbortController();
+  res.on('close', () => ac.abort());
+  const upstream = await plex.plexFetch(`/library/parts/${id}/indexes/sd`, { raw: true, gate: 'image', timeout: 60000, signal: ac.signal, params: { interval: 10000 }, headers: { Accept: '*/*' } });
+  if (!upstream.ok) return res.status(404).end();
+  res.setHeader('Cache-Control', 'private, max-age=86400');
+  pipeFetch(upstream, res);
+}));
+
+/** Remove an item from Continue Watching (Plex's own action). */
+r.post('/continue/remove/:key', ah(async (req, res) => {
+  await plex.plexFetch('/actions/removeFromContinueWatching', { method: 'PUT', params: { ratingKey: req.params.key } }).catch(() => null);
+  plex.clearPlexCache();
+  res.json({ ok: true });
 }));
 
 // ---- Plex transcode session tracking ----

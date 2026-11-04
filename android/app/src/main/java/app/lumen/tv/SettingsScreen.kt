@@ -141,6 +141,7 @@ fun SettingsScreen() {
                     }
                 }
             }
+            item { Toggle("Ask \"Who's watching?\" when the app opens", Net.prefs.askProfile) { Net.prefs.askProfile = !Net.prefs.askProfile; tick++ } }
             item {
                 val def = users.firstOrNull { it.optString("uuid") == pu?.optString("default") }
                 SettingRow("Default Plex user (all apps)", if (pu?.optBoolean("defaultSet") == true) def?.optString("title") ?: "" else "Ask when the app opens", hint = "Used by every app and TV that hasn't picked a user") {

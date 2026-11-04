@@ -242,7 +242,7 @@ private fun HomeContent(d: HomeData) {
                         ) { if (it.type == "playlist") Nav.openDetails(it) else Nav.open(it) }
                         is HomeRow.Channels -> CardRow(row.title, startPad = 32.dp, onRowFocused = onRowFocused) {
                             itemsIndexed(row.channels.distinctBy { "${it.providerId}:${it.id}" }, key = { _, c -> "${c.providerId}:${c.id}" }) { i, ch ->
-                                ChannelCard(ch, "${row.key}/${ch.providerId}:${ch.id}", onFocus = { focusTarget.value = Hero.of(ch) }, fr = if (idx == 0 && i == 0) firstCardFr else null) {
+                                ChannelCard(ch, "${row.key}/${ch.providerId}:${ch.id}", onFocus = { focusTarget.value = Hero.of(ch) }, onMenu = { Menus.channel(ch, row.channels, row.title) }, fr = if (idx == 0 && i == 0) firstCardFr else null) {
                                     Nav.playLive(ch, row.channels, row.title)
                                 }
                             }
@@ -307,6 +307,6 @@ private fun HeroBody(h: Hero?, compact: Boolean) {
         Spacer(Modifier.height(6.dp))
         h.meta?.takeIf { it.isNotBlank() }?.let { T(it, 13.sp, C.text2) }
         Spacer(Modifier.height(8.dp))
-        h.summary?.let { T(it, 13.sp, C.text2, maxLines = if (compact) 2 else 3, lineHeight = 18.sp) }
+        h.summary?.let { T(it, 13.sp, C.text2, maxLines = 3, lineHeight = 18.sp) }
     }
 }

@@ -77,6 +77,8 @@ class PlayerState {
     var message by mutableStateOf<String?>(null)
     var method by mutableStateOf("")
     var sleepAt by mutableStateOf(0L)
+    var thumb by mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null)
+    var subOffsetMs by mutableIntStateOf(0)
 }
 
 /**
@@ -210,6 +212,7 @@ class PlayerActivity : ComponentActivity() {
                 if (d.url.isBlank()) throw IllegalStateException("The server didn't return a stream")
                 desc = d
                 st.method = d.method
+                loadThumbnails(src, d)
                 st.buttons = buildButtons(src)
                 play(d)
             } catch (e: Exception) {
@@ -264,6 +267,18 @@ class PlayerActivity : ComponentActivity() {
             if (state == Player.STATE_BUFFERING) { if (bufferingSince == 0L) bufferingSince = System.currentTimeMillis() } else bufferingSince = 0L
             if (state == Player.STATE_READY) fallbacks = fallbacks.coerceAtMost(1)
             if (state == Player.STATE_ENDED) onEnded()
+        }
+        override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+            // After a subtitle-sync reload, switch to the shifted subtitles.
+            if (!pickSynced) return
+            tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }.forEach { g ->
+                for (i in 0 until g.length) if (g.getTrackFormat(i).id?.contains("lumen-sync") == true) {
+                    pickSynced = false
+                    exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                        .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, i)).build()
+                    return
+                }
+            }
         }
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             st.playing = isPlaying
@@ -331,6 +346,7 @@ class PlayerActivity : ComponentActivity() {
         }
         if (st.scrub != null && now > scrubCommitAt) commitScrub()
         if (st.sleepAt > 0 && now >= st.sleepAt) { finish(); return }
+        updateThumb()
         if (st.message != null && now > hideAt + 2000) st.message = null
         if (st.digits.isNotEmpty() && now - digitsAt > 1500) commitDigits()
         if (src == null) return
@@ -535,6 +551,69 @@ class PlayerActivity : ComponentActivity() {
         return sub(parent, "Playback speed", opts.map { v -> PanelItem(if (v == 1f) "Normal" else "${v}×", speed == v) { speed = v; exo.setPlaybackSpeed(v) } })
     }
 
+    // ---------- seek-bar thumbnails ----------
+    private var bif: Bif? = null
+    private var bifFor: String? = null
+    private var thumbIdx = -1
+    private var thumbJob: Job? = null
+
+    private fun loadThumbnails(src: Source, d: Desc) {
+        if (!src.isPlex) { bif = null; bifFor = null; st.thumb = null; return }
+        val part = d.raw.str("partId") ?: return
+        if (bifFor == part) return
+        bifFor = part; bif = null; thumbIdx = -1; st.thumb = null
+        lifecycleScope.launch { val b = Bif.load(this@PlayerActivity, part); if (bifFor == part) bif = b }
+    }
+
+    private fun updateThumb() {
+        val t = st.scrub
+        val b = bif
+        if (t == null || b == null) { if (st.thumb != null && t == null) { st.thumb = null; thumbIdx = -1 }; return }
+        val i = b.indexAt(t)
+        if (i == thumbIdx || thumbJob?.isActive == true) return
+        thumbIdx = i
+        thumbJob = lifecycleScope.launch { b.image(i)?.let { if (st.scrub != null) st.thumb = it } }
+    }
+
+    // ---------- subtitle sync ----------
+    private var pickSynced = false
+
+    private fun syncPanel(src: Source, parent: Panel): Panel {
+        val steps = listOf(-5000, -3000, -2000, -1500, -1000, -750, -500, -250, 0, 250, 500, 750, 1000, 1500, 2000, 3000, 5000)
+        val items = steps.map { ms ->
+            val label = when { ms == 0 -> "In sync (0 s)"; ms < 0 -> "Show ${"%.2f".format(-ms / 1000.0).trimEnd('0').trimEnd('.')} s earlier"; else -> "Show ${"%.2f".format(ms / 1000.0).trimEnd('0').trimEnd('.')} s later" }
+            PanelItem(label, st.subOffsetMs == ms) { applySubtitleSync(src, ms) }
+        }
+        return sub(parent, "Subtitle sync", items)
+    }
+
+    /** Re-load the subtitles shifted by [ms] (the server shifts the cue times), keeping the playback position. */
+    private fun applySubtitleSync(src: Source, ms: Int) {
+        val d = desc ?: return
+        if (!d.method.startsWith("direct") && src.isPlex) {
+            Toast.makeText(this, "These subtitles are burned into the video while transcoding, so they can't be shifted. Set Quality to Auto/Original to sync them.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val base = d.subtitleUrl ?: src.subtitles.firstOrNull { it.selected }?.let { Net.url("/api/plex/subtitle/${it.id}") }
+        if (base == null) { Toast.makeText(this, "Choose a subtitle first (Audio & subtitles).", Toast.LENGTH_LONG).show(); return }
+        val u = Uri.parse(base).buildUpon().clearQuery().apply {
+            Uri.parse(base).queryParameterNames.filter { it != "offset" }.forEach { k -> appendQueryParameter(k, Uri.parse(base).getQueryParameter(k)) }
+            if (ms != 0) appendQueryParameter("offset", ms.toString())
+        }.build()
+        st.subOffsetMs = ms
+        val item = MediaItem.Builder().setUri(Uri.parse(d.url)).apply {
+            when (d.type) { "hls" -> setMimeType(MimeTypes.APPLICATION_M3U8); "mpegts" -> setMimeType(MimeTypes.VIDEO_MP2T) }
+            setSubtitleConfigurations(listOf(MediaItem.SubtitleConfiguration.Builder(u).setId("lumen-sync").setLabel("Subtitles (synced)")
+                .setMimeType(MimeTypes.TEXT_VTT).setSelectionFlags(C.SELECTION_FLAG_DEFAULT or C.SELECTION_FLAG_FORCED).build()))
+        }.build()
+        val pos = exo.currentPosition
+        pickSynced = true
+        exo.setMediaItem(item, pos)
+        exo.prepare()
+        exo.playWhenReady = true
+        Toast.makeText(this, if (ms == 0) "Subtitle offset cleared" else "Subtitles shifted ${if (ms > 0) "+" else ""}${ms} ms", Toast.LENGTH_SHORT).show()
+    }
+
     private fun subtitleSizePanel(parent: Panel): Panel {
         val opts = listOf(0.75f to "Small", 1f to "Normal", 1.25f to "Large", 1.5f to "Extra large")
         return sub(parent, "Subtitle size", opts.map { (v, l) -> PanelItem(l, subScale == v) {
@@ -568,6 +647,7 @@ class PlayerActivity : ComponentActivity() {
         if (src.isPlex) items += PanelItem("Quality  ›") { st.panel = qualityPanel(src).copy(parent = me) }
         items += PanelItem("Audio & subtitles  ›") { st.panel = tracksPanel(src).copy(parent = me) }
         items += PanelItem("Subtitle size  ›") { st.panel = subtitleSizePanel(me) }
+        items += PanelItem("Subtitle sync  ·  ${if (st.subOffsetMs == 0) "0 s" else "${st.subOffsetMs} ms"}  ›") { st.panel = syncPanel(src, me) }
         items += PanelItem("Playback speed  ·  ${if (speed == 1f) "Normal" else "${speed}×"}  ›") { st.panel = speedPanel(me) }
         items += PanelItem("Aspect ratio  ›") { st.panel = aspectPanel(me) }
         items += PanelItem("Sleep timer  ›") { st.panel = sleepPanel(me) }

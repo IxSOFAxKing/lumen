@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -153,7 +154,7 @@ private fun VodControls(st: PlayerState, clock: Long) {
         Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 40.dp, end = 40.dp, bottom = 26.dp)) {
             val dur = st.dur
             val shown = st.scrub ?: st.pos
-            SeekBar(if (dur > 0) (shown / dur).toFloat() else 0f, if (dur > 0) (st.pos / dur).toFloat() else 0f, st.zone == 0, st.scrub != null, fmtClock(shown))
+            SeekBar(if (dur > 0) (shown / dur).toFloat() else 0f, if (dur > 0) (st.pos / dur).toFloat() else 0f, st.zone == 0, st.scrub != null, fmtClock(shown), st.thumb)
             Spacer(Modifier.height(6.dp))
             Row {
                 T(fmtClock(shown), 13.sp, C.text, FontWeight.SemiBold)
@@ -196,7 +197,7 @@ private fun VodControls(st: PlayerState, clock: Long) {
 }
 
 @Composable
-private fun SeekBar(fraction: Float, played: Float, focused: Boolean, scrubbing: Boolean, label: String) {
+private fun SeekBar(fraction: Float, played: Float, focused: Boolean, scrubbing: Boolean, label: String, thumb: androidx.compose.ui.graphics.ImageBitmap? = null) {
     BoxWithConstraints(Modifier.fillMaxWidth().height(22.dp)) {
         val w = maxWidth
         Box(Modifier.align(Alignment.CenterStart).fillMaxWidth().height(if (focused) 6.dp else 4.dp).clip(RoundedCornerShape(3.dp)).background(Color.White.copy(alpha = 0.25f))) {
@@ -205,6 +206,12 @@ private fun SeekBar(fraction: Float, played: Float, focused: Boolean, scrubbing:
         val x = w * fraction.coerceIn(0f, 1f)
         Box(Modifier.align(Alignment.CenterStart).offset(x = x - 8.dp).size(if (focused) 16.dp else 10.dp).clip(CircleShape).background(Color.White))
         if (scrubbing) {
+            if (thumb != null) {
+                // Preview thumbnail above the playhead, like Plex.
+                androidx.compose.foundation.Image(thumb, null, contentScale = ContentScale.Crop,
+                    modifier = Modifier.offset(x = (x - 96.dp).coerceIn(0.dp, w - 192.dp), y = (-140).dp).size(192.dp, 108.dp)
+                        .clip(RoundedCornerShape(8.dp)).background(Color.Black).border(2.dp, Color.White, RoundedCornerShape(8.dp)))
+            }
             Box(Modifier.offset(x = (x - 30.dp).coerceIn(0.dp, w - 60.dp), y = (-30).dp).clip(RoundedCornerShape(6.dp)).background(Color.White).padding(horizontal = 8.dp, vertical = 3.dp)) {
                 T(label, 12.sp, Color.Black, FontWeight.Bold)
             }

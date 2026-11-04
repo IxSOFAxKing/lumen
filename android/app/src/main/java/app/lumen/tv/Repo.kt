@@ -24,6 +24,17 @@ object AppState {
     var checkingProfile by mutableStateOf(false)
     /** Plex Home users to choose from at launch ("Who's watching?"), or null. */
     var askProfile by mutableStateOf<JSONObject?>(null)
+    /** Set when the app comes back after a while in the background: ask who's watching again. */
+    var profileCheckTick by mutableIntStateOf(0)
+
+    /** "Who's watching?": show the Plex Home user picker (or switch to the default user if asking is turned off). */
+    suspend fun checkProfile() {
+        if (!plexOnline) return
+        val pu = runCatching { Net.obj("/api/plex/users") }.getOrNull() ?: return
+        if (pu.optJSONArray("users").objects().size < 2) return
+        if (Net.prefs.askProfile) askProfile = pu
+        else if (pu.optBoolean("defaultSet")) runCatching { Net.post("/api/plex/users/reset") }
+    }
     var loadError by mutableStateOf<String?>(null)
     /** Changes whenever the app comes back to the foreground (e.g. after the player), so rows refresh. */
     var resumeTick by mutableIntStateOf(0)

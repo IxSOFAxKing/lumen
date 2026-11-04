@@ -45,6 +45,11 @@ class Prefs(context: Context) {
         get() = sp.getString("tvAccent", null)
         set(v) = sp.edit().putString("tvAccent", v).apply()
 
+    /** Show "Who's watching?" when the app opens (otherwise use the default Plex user). */
+    var askProfile: Boolean
+        get() = sp.getBoolean("askProfile", true)
+        set(v) = sp.edit().putBoolean("askProfile", v).apply()
+
     val isPaired: Boolean get() = !server.isNullOrBlank() && !token.isNullOrBlank()
 
     fun clearPairing() = sp.edit().remove("token").apply()

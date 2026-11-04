@@ -158,9 +158,7 @@ androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.ge
                     val eps = episodes
                     if (eps == null) Loading() else CardRow("", startPad = 48.dp, onRowFocused = { scope.launch { listState.smoothScrollToItem(1) } }) {
                         itemsIndexed(eps, key = { _, it -> it.ratingKey }) { _, ep ->
-                            EpisodeCard(ep, onMenu = {
-                                scope.launch { runCatching { Repo.setWatched(ep.ratingKey, !ep.watched) }.onSuccess { Net.clearCache(); reload++; Toast.makeText(ctx, if (ep.watched) "Marked unwatched" else "Marked watched", Toast.LENGTH_SHORT).show() } }
-                            }) { Nav.play(ep, resume = true) }
+                            EpisodeCard(ep, onMenu = { Menus.item(ep) }) { Nav.play(ep, resume = true) }
                         }
                     }
                 }

@@ -12,6 +12,18 @@ class LumenApp : Application(), ImageLoaderFactory {
         super.onCreate()
         Net.init(this)
         Themes.apply(Net.prefs.tvTheme, Net.prefs.tvAccent)
+        // Coming back to the app after 5+ minutes away asks "Who's watching?" again.
+        var awaySince = 0L
+        androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.addObserver(androidx.lifecycle.LifecycleEventObserver { _, e ->
+            when (e) {
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> awaySince = System.currentTimeMillis()
+                androidx.lifecycle.Lifecycle.Event.ON_START -> {
+                    if (awaySince > 0 && System.currentTimeMillis() - awaySince > 5 * 60_000 && AppState.loaded) AppState.profileCheckTick++
+                    awaySince = 0
+                }
+                else -> {}
+            }
+        })
     }
 
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)

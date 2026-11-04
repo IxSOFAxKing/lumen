@@ -127,16 +127,7 @@ fun LiveScreen() {
                 else -> LazyColumn(state = chState, contentPadding = PaddingValues(start = 4.dp, end = 8.dp, bottom = 80.dp)) {
                     itemsIndexed(list, key = { i, c -> "${c.providerId}:${c.id}:$i" }) { i, ch ->
                         ChannelLine(ch, fr = if (i == 0) firstChFr else null, onFocus = { focusedCh.value = ch },
-                            onMenu = {
-                                scope.launch {
-                                    runCatching { Repo.toggleFavorite(ch) }.onSuccess { added ->
-                                        Toast.makeText(ctx, if (added) "Added ${ch.name} to favourites" else "Removed ${ch.name} from favourites", Toast.LENGTH_SHORT).show()
-                                        AppState.refresh()
-                                        val upd = list.map { c -> if (c.id == ch.id && c.providerId == ch.providerId) c.copy(favLists = if (added) listOf(1) else emptyList()) else c }
-                                        channels = if (!added && group.startsWith("__fav")) upd.filter { it.id != ch.id } else upd
-                                    }.onFailure { Toast.makeText(ctx, it.message, Toast.LENGTH_SHORT).show() }
-                                }
-                            }) { Nav.playLive(ch, list, groupName) }
+                            onMenu = { Menus.channel(ch, list, groupName) }) { Nav.playLive(ch, list, groupName) }
                     }
                 }
             }

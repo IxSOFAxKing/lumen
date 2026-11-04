@@ -110,7 +110,7 @@ fun SearchScreen() {
             else -> LazyColumn(contentPadding = PaddingValues(bottom = 120.dp)) {
                 if (r.channels.isNotEmpty()) item(key = "channels") {
                     CardRow("Live channels", startPad = 32.dp) {
-                        itemsIndexed(r.channels, key = { i, c -> "${c.providerId}:${c.id}:$i" }) { _, ch -> ChannelCard(ch, "s/ch/${ch.providerId}:${ch.id}") { Nav.playLive(ch, r.channels, "Search") } }
+                        itemsIndexed(r.channels, key = { i, c -> "${c.providerId}:${c.id}:$i" }) { _, ch -> ChannelCard(ch, "s/ch/${ch.providerId}:${ch.id}", onMenu = { Menus.channel(ch, r.channels, "Search") }) { Nav.playLive(ch, r.channels, "Search") } }
                     }
                 }
                 itemsIndexed(r.hubs, key = { i, h -> "${h.id}-$i" }) { _, hub ->

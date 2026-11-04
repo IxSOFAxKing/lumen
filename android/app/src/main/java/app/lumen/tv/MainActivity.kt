@@ -108,15 +108,9 @@ fun Shell(onExit: () -> Unit) {
             val first = !AppState.startApplied
             if (first) AppState.checkingProfile = true
             AppState.refresh()
-            // "Who's watching?" when the app opens — unless a default Plex user is set (then use it).
+            // "Who's watching?" every time the app opens.
             if (first) {
-                if (AppState.plexOnline) {
-                    val pu = runCatching { Net.obj("/api/plex/users") }.getOrNull()
-                    if (pu != null && pu.optJSONArray("users").objects().size > 1) {
-                        if (pu.optBoolean("defaultSet")) runCatching { Net.post("/api/plex/users/reset") }
-                        else AppState.askProfile = pu
-                    }
-                }
+                AppState.checkProfile()
                 AppState.checkingProfile = false
             }
             // Start page from Settings → Appearance (shared with the web app) — only when the app starts.
@@ -129,6 +123,7 @@ fun Shell(onExit: () -> Unit) {
             }
         }
     }
+    LaunchedEffect(AppState.profileCheckTick) { if (AppState.profileCheckTick > 0) AppState.checkProfile() }
     if (!AppState.loaded || AppState.checkingProfile) { Box(Modifier.fillMaxSize().background(C.bg)) { Loading(Modifier.align(Alignment.Center)) }; return }
     AppState.askProfile?.let { pu -> WhoIsWatching(pu, onExit) { AppState.askProfile = null; Net.clearCache(); Nav.memory.clear(); AppState.resumeTick++ }; return }
     if (AppState.loadError != null && AppState.providers.isEmpty() && !AppState.plexConfigured) {
@@ -194,6 +189,7 @@ fun Shell(onExit: () -> Unit) {
             }
         }
         if (showRail) Rail(entries, screen, railFocus, railRequesters) { e -> Nav.root(e) }
+        MenuHost()
     }
 }
 

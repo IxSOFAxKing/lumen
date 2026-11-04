@@ -163,10 +163,10 @@ fun GridScreen(s: Screen.Grid) {
                         if (i >= items.size - 21) { scope.launch { more() } }
                     }
                     val fr = if (i == 0) firstFr else null
-                    if (wide) WideCard(it, "g/${it.ratingKey}-$i", onFocus = onFocus, onMenu = { Nav.openDetails(it) }, width = 200.dp, fr = fr) {
+                    if (wide) WideCard(it, "g/${it.ratingKey}-$i", onFocus = onFocus, onMenu = { Menus.item(it) }, width = 200.dp, fr = fr) {
                         if (src is GridSource.Playlist) Nav.play(it, resume = true, queue = items.drop(i)) else Nav.open(it)
                     }
-                    else PosterCard(it, "g/${it.ratingKey}-$i", onFocus = onFocus, onMenu = { Nav.openDetails(it) }, width = 112.dp, fr = fr) {
+                    else PosterCard(it, "g/${it.ratingKey}-$i", onFocus = onFocus, onMenu = { Menus.item(it) }, width = 112.dp, fr = fr) {
                         if (src is GridSource.Playlist && (it.type == "movie" || it.isEpisode)) Nav.play(it, resume = true, queue = items.drop(i)) else Nav.open(it)
                     }
                 }
