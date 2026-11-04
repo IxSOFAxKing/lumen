@@ -1,6 +1,11 @@
 package app.lumen.tv
 
 import androidx.compose.animation.Crossfade
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.togetherWith
@@ -170,6 +175,11 @@ private fun HomeContent(d: HomeData) {
     val playFr = remember { FocusRequester() }
     val firstCardFr = remember { FocusRequester() }
     InitialFocus(if (showBillboard) playFr else firstCardFr)
+    // Once you move down into the rows the banner shrinks, giving the rows more room (like Netflix).
+    var rowIdx by remember { mutableIntStateOf(0) }
+    val compact = !billboardFocused
+    val heroH by androidx.compose.animation.core.animateDpAsState(if (compact) 150.dp else if (showBillboard) 236.dp else 215.dp, tween(380), label = "heroH")
+    val bbH by androidx.compose.animation.core.animateDpAsState(if (compact) 0.dp else 46.dp, tween(320), label = "bbH")
 
     // Debounced: the backdrop only changes once you settle on a card.
     // Only the banner reads these, so moving between cards doesn't redraw the rows.
@@ -186,11 +196,11 @@ private fun HomeContent(d: HomeData) {
     Box(Modifier.fillMaxSize()) {
         HeroBackdrop(hero)
         Column(Modifier.fillMaxSize()) {
-            HeroInfoOf(hero, Modifier.fillMaxWidth().height(if (showBillboard) 250.dp else 215.dp).padding(start = 32.dp, top = 34.dp, end = 360.dp))
+            HeroInfoOf(hero, compact, Modifier.fillMaxWidth().height(heroH).padding(start = 32.dp, top = if (compact) 22.dp else 34.dp, end = 360.dp))
             if (showBillboard) {
                 val alpha by animateFloatAsState(if (billboardFocused) 1f else 0f, label = "bb")
                 Row(
-                    Modifier.padding(start = 32.dp, bottom = 8.dp).alpha(alpha)
+                    Modifier.padding(start = 32.dp).height(bbH).clipToBounds().alpha(alpha)
                         .onFocusChanged {
                             billboardFocused = it.hasFocus
                             if (it.hasFocus) { focusTarget.value = null; d.featured.getOrNull(featIndex)?.let { f -> hero.value = Hero.of(f) }; scope.launch { listState.animateScrollToItem(0) } }
@@ -212,9 +222,17 @@ private fun HomeContent(d: HomeData) {
             }
             // The focused row is snapped to the top of this area (onRowFocused); nothing else scrolls it.
             androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides NoScroll) {
-            LazyColumn(state = listState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 200.dp)) {
+            LazyColumn(
+                state = listState, contentPadding = PaddingValues(top = 4.dp, bottom = 200.dp),
+                modifier = Modifier.weight(1f).onPreviewKeyEvent { ev ->
+                    // ▲ from the first row goes back to the banner's buttons.
+                    if (showBillboard && rowIdx == 0 && ev.type == KeyEventType.KeyDown && ev.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP) {
+                        runCatching { playFr.requestFocus() }; true
+                    } else false
+                },
+            ) {
                 itemsIndexed(d.rows, key = { _, r -> r.key }) { idx, row ->
-                    val onRowFocused: () -> Unit = { scope.launch { listState.animateScrollToItem(idx) } }
+                    val onRowFocused: () -> Unit = { rowIdx = idx; scope.launch { listState.animateScrollToItem(idx) } }
                     when (row) {
                         is HomeRow.Plex -> PlexRow(
                             row.key, row.title, row.items, row.wide, 32.dp, onRowFocused,
@@ -240,7 +258,7 @@ private fun HomeContent(d: HomeData) {
 fun HeroBackdrop(h: androidx.compose.runtime.State<Hero?>, heightFraction: Float = 0.78f) = Backdrop(h.value?.backdrop, heightFraction)
 
 @Composable
-fun HeroInfoOf(h: androidx.compose.runtime.State<Hero?>, modifier: Modifier) = HeroInfo(h.value, modifier)
+fun HeroInfoOf(h: androidx.compose.runtime.State<Hero?>, compact: Boolean, modifier: Modifier) = HeroInfo(h.value, modifier, compact)
 
 /** Full-bleed artwork in the top-right, fading into the background like Netflix. */
 @Composable
@@ -248,10 +266,7 @@ fun Backdrop(url: String?, heightFraction: Float = 0.78f) {
     Box(Modifier.fillMaxSize()) {
         Crossfade(targetState = url, animationSpec = tween(450), label = "backdrop", modifier = Modifier.align(Alignment.TopEnd).fillMaxWidth(0.80f).fillMaxHeight(heightFraction)) { u ->
             Box(Modifier.fillMaxSize()) {
-                // Slow "Ken Burns" drift on the artwork (drawn on the GPU layer only).
-                val drift = androidx.compose.animation.core.rememberInfiniteTransition(label = "drift")
-                val z by drift.animateFloat(1f, 1.07f, androidx.compose.animation.core.infiniteRepeatable(tween(16000, easing = androidx.compose.animation.core.LinearEasing), androidx.compose.animation.core.RepeatMode.Reverse), label = "z")
-                Img(u, Modifier.fillMaxSize().graphicsLayer { scaleX = z; scaleY = z; transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.7f, 0.3f) }, ContentScale.Crop)
+                Img(u, Modifier.fillMaxSize(), ContentScale.Crop)
                 Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to C.bg, 0.35f to C.bg.copy(alpha = 0.55f), 1f to Color.Transparent)))
                 Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.45f to Color.Transparent, 1f to C.bg)))
             }
@@ -260,7 +275,7 @@ fun Backdrop(url: String?, heightFraction: Float = 0.78f) {
 }
 
 @Composable
-fun HeroInfo(hero: Hero?, modifier: Modifier = Modifier) {
+fun HeroInfo(hero: Hero?, modifier: Modifier = Modifier, compact: Boolean = false) {
     // New title slides up and fades in; the old one fades out.
     androidx.compose.animation.AnimatedContent(
         targetState = hero, modifier = modifier, label = "hero",
@@ -269,11 +284,11 @@ fun HeroInfo(hero: Hero?, modifier: Modifier = Modifier) {
             (androidx.compose.animation.fadeIn(tween(380, delayMillis = 60)) + androidx.compose.animation.slideInVertically(tween(380)) { it / 10 }) togetherWith
                 androidx.compose.animation.fadeOut(tween(160))
         },
-    ) { h -> HeroBody(h) }
+    ) { h -> HeroBody(h, compact) }
 }
 
 @Composable
-private fun HeroBody(h: Hero?) {
+private fun HeroBody(h: Hero?, compact: Boolean) {
     Column {
         if (h == null) return@Column
         if (h.logo != null) {
@@ -281,10 +296,10 @@ private fun HeroBody(h: Hero?) {
             Spacer(Modifier.height(8.dp))
         }
         h.kicker?.let { T(it.uppercase(), 11.sp, if (it.startsWith("LIVE")) C.live else C.accent, FontWeight.Bold) ; Spacer(Modifier.height(4.dp)) }
-        T(h.title, if (h.title.length > 28) 26.sp else 32.sp, weight = FontWeight.Bold, maxLines = 2, lineHeight = 34.sp)
+        T(h.title, if (compact) 24.sp else if (h.title.length > 28) 26.sp else 32.sp, weight = FontWeight.Bold, maxLines = if (compact) 1 else 2, lineHeight = 34.sp)
         Spacer(Modifier.height(6.dp))
         h.meta?.takeIf { it.isNotBlank() }?.let { T(it, 13.sp, C.text2) }
         Spacer(Modifier.height(8.dp))
-        h.summary?.let { T(it, 13.sp, C.text2, maxLines = 3, lineHeight = 18.sp) }
+        h.summary?.let { T(it, 13.sp, C.text2, maxLines = if (compact) 2 else 3, lineHeight = 18.sp) }
     }
 }

@@ -33,6 +33,7 @@ import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -57,12 +58,14 @@ fun LibraryScreen(lib: Library) {
     LaunchedEffect(hubs) { if (hero.value == null) hubs?.firstOrNull()?.items?.firstOrNull()?.let { hero.value = Hero.of(it) } }
     val firstFr = remember { FocusRequester() }
     InitialFocus(firstFr)
+    var rowsFocused by remember { mutableStateOf(false) }
     val type = if (lib.type == "movie") "1" else "2"
 
     Box(Modifier.fillMaxSize()) {
         HeroBackdrop(hero)
         Column(Modifier.fillMaxSize()) {
-            HeroInfoOf(hero, Modifier.fillMaxWidth().height(196.dp).padding(start = 32.dp, top = 30.dp, end = 360.dp))
+            val heroH by androidx.compose.animation.core.animateDpAsState(if (rowsFocused) 140.dp else 196.dp, androidx.compose.animation.core.tween(380), label = "heroH")
+            HeroInfoOf(hero, rowsFocused, Modifier.fillMaxWidth().height(heroH).padding(start = 32.dp, top = if (rowsFocused) 20.dp else 30.dp, end = 360.dp))
             Row(Modifier.padding(start = 32.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 T(lib.title, 18.sp, weight = FontWeight.Bold, modifier = Modifier.padding(end = 8.dp, top = 6.dp))
                 Chip("Browse A–Z", false, memKey = "chip/az", focusRequester = firstFr) { Nav.push(Screen.Grid(lib.title, GridSource.Library(lib.key, type))) }
@@ -74,7 +77,7 @@ fun LibraryScreen(lib: Library) {
                 hubs == null && error != null -> Message("Couldn't load ${lib.title}", error)
                 hubs == null -> Loading()
                 else -> androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides NoScroll) {
-                LazyColumn(state = listState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 200.dp)) {
+                LazyColumn(state = listState, modifier = Modifier.weight(1f).onFocusChanged { rowsFocused = it.hasFocus }, contentPadding = PaddingValues(top = 4.dp, bottom = 200.dp)) {
                     itemsIndexed(hubs!!, key = { i, h -> "${h.id}-$i" }) { idx, hub ->
                         PlexRow("hub:${hub.id}", hub.title, hub.items, hub.wide, 32.dp, { scope.launch { listState.animateScrollToItem(idx) } },
                             onItemFocus = { focusTarget.value = Hero.of(it) }) { Nav.open(it) }
