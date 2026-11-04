@@ -32,10 +32,44 @@ async function plexTab(el) {
       btn('Change server', () => connectFlow(el), {}),
       btn('Disconnect', async () => { if (await confirmDialog('Disconnect Plex?', 'Lumen will forget this Plex server and token.', { danger: true, okLabel: 'Disconnect' })) { await api.post('/api/plex/disconnect'); await refreshStore(); location.reload(); } }, { cls: 'danger' })));
     if (!st.online) box.append(h('p', { style: { color: 'var(--err)' } }, st.error));
+    if (st.online) el.append(homeUsersCard());
     box.append(h('p', { class: 'dim small', style: { marginBottom: 0 } }, 'Tip: Plex hardware transcoding requires Plex Pass and is configured on your Plex server. Alternatively choose "Lumen built-in" transcoder under Transcoding to use Lumen\'s own GPU pipeline.'));
   } else {
     connectFlow(el);
   }
+}
+
+/** Plex Home users: who this browser watches as, and the default for every app. */
+function homeUsersCard() {
+  const box = h('div', { class: 'card-box', style: { marginTop: '18px' } }, h('h3', { style: { marginTop: 0 } }, 'Plex Home users'), spinner());
+  const pinDialog = (u) => new Promise(resolve => {
+    const input = h('input', { class: 'input', type: 'password', inputmode: 'numeric', maxlength: 4, placeholder: 'PIN', style: { width: '120px', letterSpacing: '6px', fontSize: '20px' } });
+    let ok = false;
+    modal({ title: `PIN for ${u.title}`, body: input, onClose: () => resolve(ok ? input.value : null),
+      actions: [{ label: 'Cancel' }, { label: 'Switch', primary: true, onClick: () => { ok = true; } }] });
+    setTimeout(() => input.focus(), 50);
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') { ok = true; document.querySelector('.modal-bg:last-of-type .mf .btn.primary')?.click(); } });
+  });
+  const draw = async () => {
+    let d;
+    try { d = await api.get('/api/plex/users'); }
+    catch (e) { box.replaceChildren(h('h3', { style: { marginTop: 0 } }, 'Plex Home users'), h('p', { class: 'muted' }, `Not available: ${e.message}. If you use Plex Home, sign in to Plex again above (Change server → Sign in with Plex).`)); return; }
+    const sw = async (u, makeDefault) => {
+      let pin;
+      if (u.protected) { pin = await pinDialog(u); if (pin === null) return; }
+      try { await api.post('/api/plex/users/switch', { uuid: u.uuid, pin, makeDefault }); toast(makeDefault ? `${u.title} is now the default user` : `Watching as ${u.title}`, { type: 'ok' }); api.clearCache(); draw(); }
+      catch (e) { toastErr(e); }
+    };
+    box.replaceChildren(h('h3', { style: { marginTop: 0 } }, 'Plex Home users'),
+      h('p', { class: 'muted small' }, 'Pick who you watch as in this browser — Continue Watching, watched status and restrictions follow the Plex user. The default user applies to every app and TV that hasn\'t picked one.'),
+      ...d.users.map(u => h('div', { class: 'prov' },
+        u.thumb ? h('img', { src: u.thumb, alt: '', style: { width: '40px', height: '40px', borderRadius: '50%' } }) : h('div', { class: 'logo', style: { width: '40px', height: '40px', borderRadius: '50%' } }),
+        h('div', { class: 'grow' }, h('b', {}, u.title), h('div', { class: 'dim small' }, [u.admin ? 'Admin' : null, u.restricted ? 'Managed' : null, u.protected ? 'PIN' : null].filter(Boolean).join(' · ') || 'Home user')),
+        u.uuid === d.current ? h('span', { class: 'badge ok' }, 'WATCHING') : btn('Switch', () => sw(u, false), { cls: 'sm' }),
+        u.uuid === d.default ? h('span', { class: 'badge' }, 'DEFAULT') : btn('Make default', () => sw(u, true), { cls: 'sm' }))));
+  };
+  draw();
+  return box;
 }
 
 function connectFlow(el) {
@@ -62,7 +96,7 @@ function connectFlow(el) {
             h('div', { class: 'grow' }, h('b', {}, s.name), h('div', { class: 'dim small' }, `${s.owned ? 'Owned' : 'Shared'} · ${s.connections.length} connection(s)`)),
             btn('Connect', async (ev) => {
               ev.currentTarget.disabled = true;
-              try { await api.post('/api/plex/connect', { server: s }); toast(`Connected to ${s.name}`, { type: 'ok' }); await refreshStore(); location.hash = '#/home'; }
+              try { await api.post('/api/plex/connect', { server: s, token: r.token }); toast(`Connected to ${s.name}`, { type: 'ok' }); await refreshStore(); location.hash = '#/home'; }
               catch (e) { toastErr(e); ev.target.disabled = false; }
             }, { cls: 'primary sm' }))));
         };
@@ -284,6 +318,17 @@ async function playbackTab(el) {
       .flatMap(([k, v]) => [h('dt', {}, h('span', { class: 'badge' }, k)), h('dd', {}, v)]))));
 }
 
+function accountForm(auth) {
+  const user = h('input', { class: 'input', value: auth.username || '', autocomplete: 'username' });
+  const cur = h('input', { class: 'input', type: 'password', placeholder: 'Current password', autocomplete: 'current-password' });
+  const pw = h('input', { class: 'input', type: 'password', placeholder: 'New password (leave empty to keep)', autocomplete: 'new-password' });
+  return h('form', { style: { display: 'grid', gap: '8px', maxWidth: '360px', marginBottom: '14px' }, onSubmit: async e => {
+    e.preventDefault();
+    try { await api.put('/api/auth/account', { current: cur.value, username: user.value.trim(), password: pw.value || undefined }); toast('Login updated', { type: 'ok' }); cur.value = ''; pw.value = ''; }
+    catch (ex) { toastErr(ex); }
+  } }, h('b', {}, 'Change username or password'), user, cur, pw, h('button', { class: 'btn', type: 'submit', style: { justifySelf: 'start' } }, 'Save'));
+}
+
 // ---------------- System ----------------
 async function systemTab(el) {
   const auth = await api.get('/api/auth/status');
@@ -291,8 +336,9 @@ async function systemTab(el) {
   el.append(h('div', { class: 'card-box' }, h('h3', { style: { marginTop: 0 } }, 'Active transcoding sessions'), sess),
 
     h('div', { class: 'card-box', style: { marginTop: '18px' } }, h('h3', { style: { marginTop: 0 } }, 'Security'),
-      h('p', { class: 'muted' }, auth.required ? 'Password protection is enabled (APP_PASSWORD).' : 'Password protection is disabled. Set APP_PASSWORD in docker-compose.yml to require a login.'),
-      auth.required ? btn('Sign out', async () => { await api.post('/api/auth/logout'); location.reload(); }, { iconName: 'logout' }) : null));
+      h('p', { class: 'muted' }, `Signed in as ${auth.username || 'admin'}.`, auth.envManaged ? ' The login is set with LUMEN_USERNAME / LUMEN_PASSWORD in docker-compose.yml.' : ''),
+      auth.envManaged ? null : accountForm(auth),
+      btn('Sign out', async () => { await api.post('/api/auth/logout'); location.reload(); }, { iconName: 'logout' })));
   // Backup / restore
   const withProv = h('input', { type: 'checkbox' });
   const file = h('input', { type: 'file', accept: '.json,application/json', style: { display: 'none' }, onChange: async e => {

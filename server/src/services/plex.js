@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { getSetting } from '../db.js';
 import { getConfig, setConfig } from './settings.js';
 
@@ -29,12 +30,19 @@ export function isConfigured() {
   return Boolean(c.url && c.token);
 }
 
+/**
+ * The Plex Home user a request is made for ({ uuid, token }); requests outside a user context use the
+ * server owner's token. Set per request by the /api/plex routes.
+ */
+export const plexUserCtx = new AsyncLocalStorage();
+export const activeToken = () => plexUserCtx.getStore()?.token || plexConf().token;
+
 /** Build an absolute URL to the Plex server including the token. */
 export function plexUrl(path, params = {}) {
   const c = plexConf();
   const u = new URL(c.url + (path.startsWith('/') ? path : '/' + path));
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null) u.searchParams.set(k, v);
-  u.searchParams.set('X-Plex-Token', c.token);
+  u.searchParams.set('X-Plex-Token', activeToken());
   return u.toString();
 }
 
@@ -108,7 +116,7 @@ export async function plexFetch(path, { params = {}, method = 'GET', headers = {
   reqPaths.set(key, (reqPaths.get(key) || 0) + 1);
   const doFetch = () => fetch(plexUrl(path, params), {
     method,
-    headers: plexHeaders({ 'X-Plex-Token': plexConf().token, ...headers }),
+    headers: plexHeaders({ 'X-Plex-Token': activeToken(), ...headers }),
     signal: signals.length > 1 ? AbortSignal.any(signals) : signals[0],
   });
   await rateLimit();
@@ -160,7 +168,8 @@ export async function plexFetch(path, { params = {}, method = 'GET', headers = {
 const cache = new Map();
 /** Cached GET for browse endpoints. Serves stale data instantly and refreshes it in the background. */
 export async function plexCached(path, opts = {}, ttl = 60000) {
-  const key = path + '|' + JSON.stringify(opts.params || {}) + '|' + JSON.stringify(opts.headers || {});
+  // Each Plex Home user sees their own Continue Watching, watched state, etc.
+  const key = (plexUserCtx.getStore()?.uuid || '') + '|' + path + '|' + JSON.stringify(opts.params || {}) + '|' + JSON.stringify(opts.headers || {});
   const hit = cache.get(key);
   const now = Date.now();
   // Recently failed requests are not retried for 30s, so nothing can hammer Plex with a failing call.
@@ -239,3 +248,62 @@ export async function testConnection(url, token) {
 }
 
 export function saveServer(patch) { return setConfig('plex', patch); }
+
+// ---------- Plex Home users ----------
+
+/** plex.tv answers some endpoints in XML only; parse <Tag a="b" …> elements into objects. */
+function xmlElements(text, tag) {
+  const out = [];
+  const dec = v => v.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  for (const m of text.matchAll(new RegExp(`<${tag}\\b([^>]*)>`, 'gi'))) {
+    const o = {};
+    for (const a of m[1].matchAll(/([\w:-]+)="([^"]*)"/g)) o[a[1]] = dec(a[2]);
+    out.push(o);
+  }
+  return out;
+}
+
+async function plexTv(path, { method = 'GET', token, params = {} } = {}) {
+  const u = new URL('https://plex.tv' + path);
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') u.searchParams.set(k, v);
+  const res = await fetch(u, { method, headers: plexHeaders({ 'X-Plex-Token': token }), signal: AbortSignal.timeout(15000) });
+  const text = await res.text();
+  if (!res.ok) {
+    const e = new Error(res.status === 401 || res.status === 403 ? 'Plex refused: incorrect PIN or not allowed' : `plex.tv responded ${res.status}`);
+    e.status = res.status === 401 || res.status === 403 ? 403 : 502;
+    throw e;
+  }
+  let json = null;
+  try { json = JSON.parse(text); } catch { /* XML */ }
+  return { json, text };
+}
+
+const bool = v => v === true || v === 1 || v === '1' || v === 'true';
+const accountToken = () => plexConf().accountToken || plexConf().token;
+
+/** Users of the Plex Home the server owner belongs to. */
+export async function homeUsers() {
+  const { json, text } = await plexTv('/api/home/users', { token: accountToken() });
+  const list = json ? (json.users || json.MediaContainer?.User || []) : xmlElements(text, 'User');
+  return list.map(u => ({
+    id: String(u.id), uuid: u.uuid || String(u.id), title: u.title || u.friendlyName || u.username || 'User', thumb: u.thumb || null,
+    admin: bool(u.admin), protected: bool(u.protected) || bool(u.hasPassword), restricted: bool(u.restricted),
+  }));
+}
+
+/** Switch to a Home user (checks the PIN with plex.tv) and return that user's token for this Plex server. */
+export async function switchHomeUser(user, pin) {
+  const { json, text } = await plexTv(`/api/home/users/${encodeURIComponent(user.id)}/switch`, { method: 'POST', token: accountToken(), params: { pin } });
+  const userToken = json?.authToken || json?.authenticationToken || json?.user?.authToken
+    || xmlElements(text, 'user')[0]?.authenticationToken || xmlElements(text, 'user')[0]?.authToken;
+  if (!userToken) throw Object.assign(new Error('Plex did not return a token for this user'), { status: 502 });
+  const machineId = plexConf().machineId;
+  let serverToken = null;
+  try {
+    const servers = await listServers(userToken);
+    serverToken = servers.find(s => s.machineId === machineId)?.accessToken || null;
+  } catch { /* fall through */ }
+  if (!serverToken && user.admin) serverToken = plexConf().token;
+  if (!serverToken) throw Object.assign(new Error(`${user.title} doesn't have access to this Plex server (share it with them in Plex first).`), { status: 403 });
+  return serverToken;
+}

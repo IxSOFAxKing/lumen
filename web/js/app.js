@@ -130,17 +130,27 @@ export function activeProvider() {
 export function setActiveProvider(id) { prefs.set('provider', Number(id)); }
 
 // ---------- Login ----------
-async function showLogin() {
+async function showLogin({ setup = false } = {}) {
+  if (document.querySelector('.login')) return;
   document.getElementById('app').classList.add('hidden');
-  const input = h('input', { class: 'input', type: 'password', placeholder: 'Password', autofocus: true, style: { width: '100%' } });
+  const user = h('input', { class: 'input', type: 'text', placeholder: 'Username', autocomplete: 'username', autocapitalize: 'off', style: { width: '100%', marginBottom: '10px' } });
+  const input = h('input', { class: 'input', type: 'password', placeholder: 'Password', autocomplete: setup ? 'new-password' : 'current-password', style: { width: '100%' } });
+  const confirm = setup ? h('input', { class: 'input', type: 'password', placeholder: 'Repeat password', autocomplete: 'new-password', style: { width: '100%', marginTop: '10px' } }) : null;
   const err = h('div', { class: 'small', style: { color: 'var(--err)', minHeight: '20px', marginTop: '8px' } });
   const box = h('div', { class: 'login' }, h('form', { class: 'card-box', onSubmit: async (e) => {
     e.preventDefault();
-    try { await api.post('/api/auth/login', { password: input.value }); box.remove(); document.getElementById('app').classList.remove('hidden'); if (started) location.reload(); else start(); }
-    catch (ex) { err.textContent = ex.message; }
-  } }, h('img', { src: '/img/icon.svg', alt: '' }), h('h2', { style: { margin: '0 0 18px' } }, 'Lumen'), input, err,
-    h('button', { class: 'btn primary', style: { width: '100%', marginTop: '6px' }, type: 'submit' }, 'Sign in')));
+    if (setup && input.value !== confirm.value) { err.textContent = 'The passwords don\'t match'; return; }
+    try {
+      await api.post(setup ? '/api/auth/setup' : '/api/auth/login', { username: user.value, password: input.value });
+      box.remove(); document.getElementById('app').classList.remove('hidden');
+      if (started) location.reload(); else start();
+    } catch (ex) { err.textContent = ex.message; }
+  } }, h('img', { src: '/img/icon.svg', alt: '' }), h('h2', { style: { margin: '0 0 6px' } }, setup ? 'Welcome to Lumen' : 'Lumen'),
+    setup ? h('p', { class: 'muted small', style: { margin: '0 0 16px' } }, 'Create the username and password that will protect this Lumen server.') : h('div', { style: { height: '12px' } }),
+    user, input, confirm, err,
+    h('button', { class: 'btn primary', style: { width: '100%', marginTop: '6px' }, type: 'submit' }, setup ? 'Create account' : 'Sign in')));
   document.body.append(box);
+  setTimeout(() => user.focus(), 50);
 }
 
 // ---------- Reminders ----------
@@ -173,9 +183,9 @@ async function start() {
   window.addEventListener('hashchange', render);
   // Show the login screen instead of reloading (a reload loop would re-request everything).
   let loggingIn = false;
-  window.addEventListener('lumen:unauthorized', () => {
+  window.addEventListener('lumen:unauthorized', (e) => {
     if (window.LumenNative?.unpaired) { window.LumenNative.unpaired(); return; } // the TV app re-pairs instead of showing a password prompt
-    if (!loggingIn) { loggingIn = true; showLogin(); }
+    if (!loggingIn) { loggingIn = true; showLogin({ setup: !!e.detail?.setup }); }
   });
   render();
   // Optionally jump straight back into the last live channel (TiviMate-style).
@@ -191,6 +201,6 @@ async function start() {
 (async function boot() {
   initTv();
   const s = await api.get('/api/auth/status').catch(() => ({ required: false, authed: true }));
-  if (s.required && !s.authed) return window.LumenNative?.unpaired ? window.LumenNative.unpaired() : showLogin();
+  if (s.required && !s.authed) return window.LumenNative?.unpaired ? window.LumenNative.unpaired() : showLogin({ setup: !!s.setup });
   start();
 })();

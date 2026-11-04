@@ -28,7 +28,8 @@ app.use(compression({ filter: (req, res) => !NO_COMPRESS.test(req.path) && compr
 app.use(express.json({ limit: '25mb' }));
 
 // ---------- Auth ----------
-app.get('/api/auth/status', (req, res) => res.json({ required: auth.authEnabled(), authed: auth.isAuthed(req) }));
+app.get('/api/auth/status', auth.status);
+app.post('/api/auth/setup', auth.setup);
 app.post('/api/auth/login', auth.login);
 app.post('/api/auth/logout', auth.logout);
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url))).version;
@@ -37,7 +38,7 @@ app.get('/api/health', (req, res) => res.json({ ok: true, app: 'lumen', version:
 
 // ---------- Device pairing (no login needed to *request* pairing; a signed-in user approves it) ----------
 app.post('/api/pair/start', (req, res, next) => {
-  try { res.json(devices.startPairing(req.body || {}, { autoApprove: !auth.authEnabled(), ip: req.ip })); } catch (e) { next(e); }
+  try { res.json(devices.startPairing(req.body || {}, { autoApprove: false, ip: req.ip })); } catch (e) { next(e); }
 });
 app.get('/api/pair/status/:id', (req, res) => res.json(devices.pairingStatus(req.params.id)));
 // Short link for the Downloader app on Android TV: http://<server>:8080/tv.apk
@@ -45,6 +46,7 @@ app.get(['/tv.apk', '/tv'], (req, res) => res.redirect(302, 'https://github.com/
 app.use('/api', auth.requireAuth);
 
 // ---------- Settings & system ----------
+app.put('/api/auth/account', auth.changeAccount);
 app.get('/api/devices', (req, res) => res.json({ devices: devices.listDevices(), pending: devices.pendingPairings(), current: req.device?.id || null }));
 app.post('/api/pair/approve', (req, res, next) => { try { res.json(devices.approvePairing(req.body?.code, req.body?.name)); } catch (e) { next(e); } });
 app.put('/api/devices/:id', (req, res) => { devices.renameDevice(req.params.id, req.body?.name || 'Device'); res.json({ ok: true }); });

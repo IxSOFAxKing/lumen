@@ -13,6 +13,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS devices (
   last_ip TEXT
 )`);
 
+try { db.exec('ALTER TABLE devices ADD COLUMN plex_user TEXT'); } catch { /* exists */ }
+
 const hash = t => crypto.createHash('sha256').update(String(t)).digest('hex');
 const PAIR_TTL = 10 * 60 * 1000;
 const pairs = new Map(); // pairId -> { code, name, platform, created, status, token?, deviceId? }
@@ -90,3 +92,4 @@ export function listDevices() {
 }
 export function renameDevice(id, name) { db.prepare('UPDATE devices SET name = ? WHERE id = ?').run(String(name).slice(0, 60), Number(id)); }
 export function revokeDevice(id) { db.prepare('DELETE FROM devices WHERE id = ?').run(Number(id)); }
+export function setDevicePlexUser(id, uuid) { db.prepare('UPDATE devices SET plex_user = ? WHERE id = ?').run(uuid || null, Number(id)); }

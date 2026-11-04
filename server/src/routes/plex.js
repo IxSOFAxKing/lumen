@@ -6,9 +6,59 @@ import { startSession, stopSession } from '../services/transcoder.js';
 import { getSetting, setSetting } from '../db.js';
 import { ah, pipeFetch, srtToVtt } from '../util.js';
 import { serveCachedImage } from '../services/imgcache.js';
+import { cookies } from '../auth.js';
+import { setDevicePlexUser } from '../services/devices.js';
 
 const r = Router();
 const MC = j => j?.MediaContainer || {};
+
+// ---------- Plex Home user for this request ----------
+// Each device (or browser) can pick its own Home user; otherwise the default user (or the owner) is used.
+function selectedUser(req) {
+  const c = plex.plexConf();
+  const uuid = req.device?.plex_user || cookies(req).lumen_plex_user || c.defaultUser || null;
+  const u = uuid && c.homeUsers?.[uuid];
+  return u?.token ? { uuid, token: u.token, title: u.title } : null;
+}
+r.use((req, res, next) => {
+  const u = selectedUser(req);
+  return u ? plex.plexUserCtx.run(u, next) : next();
+});
+
+r.get('/users', ah(async (req, res) => {
+  const c = plex.plexConf();
+  const users = await plex.homeUsers();
+  const cur = selectedUser(req)?.uuid || users.find(u => u.admin)?.uuid || null;
+  res.json({ users: users.map(u => ({ ...u, thumb: u.thumb })), current: cur, default: c.defaultUser || users.find(u => u.admin)?.uuid || null });
+}));
+
+/** Switch this device/browser to a Home user (PIN checked by plex.tv). makeDefault also makes it everyone's default. */
+r.post('/users/switch', ah(async (req, res) => {
+  const { uuid, pin, makeDefault } = req.body || {};
+  const users = await plex.homeUsers();
+  const u = users.find(x => x.uuid === uuid || x.id === String(uuid));
+  if (!u) return res.status(404).json({ error: 'User not found' });
+  if (u.protected && !pin) return res.status(403).json({ error: 'This user needs a PIN', needsPin: true });
+  const token = await plex.switchHomeUser(u, pin);
+  const c = plex.plexConf();
+  const homeUsers = { ...(c.homeUsers || {}), [u.uuid]: { title: u.title, thumb: u.thumb, admin: u.admin, token } };
+  plex.saveServer({ homeUsers, ...(makeDefault ? { defaultUser: u.uuid } : {}) });
+  if (req.device) setDevicePlexUser(req.device.id, u.uuid);
+  else {
+    const secure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+    res.setHeader('Set-Cookie', `lumen_plex_user=${encodeURIComponent(u.uuid)}; Path=/; SameSite=Lax; Max-Age=${60 * 60 * 24 * 365}${secure ? '; Secure' : ''}`);
+  }
+  res.json({ ok: true, user: { uuid: u.uuid, title: u.title, thumb: u.thumb } });
+}));
+
+/** Default Home user for devices that haven't picked one. The user must have been switched to (with its PIN) before. */
+r.post('/users/default', ah(async (req, res) => {
+  const { uuid } = req.body || {};
+  const c = plex.plexConf();
+  if (uuid && !c.homeUsers?.[uuid]) return res.status(400).json({ error: 'Switch to this user first (that checks its PIN), then make it the default.' });
+  plex.saveServer({ defaultUser: uuid || '' });
+  res.json({ ok: true });
+}));
 
 // ---------- Setup / auth ----------
 
@@ -41,6 +91,7 @@ r.post('/servers', ah(async (req, res) => res.json(await plex.listServers(req.bo
 
 r.post('/connect', ah(async (req, res) => {
   let { url, token, server } = req.body || {};
+  const accountToken = token || null; // plex.tv account token (PIN sign-in): needed for Plex Home users
   if (server) {
     url = await plex.pickConnection(server);
     token = server.accessToken || token;
@@ -49,12 +100,12 @@ r.post('/connect', ah(async (req, res) => {
   if (!url || !token) return res.status(400).json({ error: 'url and token are required' });
   url = url.replace(/\/+$/, '');
   const info = await plex.testConnection(url, token);
-  plex.saveServer({ url, token, serverName: info.name, machineId: info.machineId });
+  plex.saveServer({ url, token, serverName: info.name, machineId: info.machineId, ...(server && accountToken ? { accountToken } : {}), homeUsers: {}, defaultUser: '' });
   plex.clearPlexCache(); statusCache = null;
   res.json({ ok: true, url, ...info });
 }));
 
-r.post('/disconnect', (req, res) => { plex.saveServer({ url: '', token: '', serverName: '', machineId: '' }); plex.clearPlexCache(); statusCache = null; res.json({ ok: true }); });
+r.post('/disconnect', (req, res) => { plex.saveServer({ url: '', token: '', serverName: '', machineId: '', accountToken: '', homeUsers: {}, defaultUser: '' }); plex.clearPlexCache(); statusCache = null; res.json({ ok: true }); });
 
 // ---------- Browsing ----------
 
