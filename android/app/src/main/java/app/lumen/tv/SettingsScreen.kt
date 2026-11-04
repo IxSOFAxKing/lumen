@@ -72,7 +72,7 @@ fun SettingsScreen() {
         picker = Picker(title, opts, cur) { o -> save(key, o.value) }
     }
     fun switchUser(u: JSONObject, makeDefault: Boolean, pin: String? = null) {
-        if (u.optBoolean("protected") && pin == null) { pinFor = u to makeDefault; return }
+        if (u.optBoolean("protected") && !u.optBoolean("known") && pin == null) { pinFor = u to makeDefault; return }
         scope.launch {
             runCatching { Net.post("/api/plex/users/switch", JSONObject().put("uuid", u.optString("uuid")).put("makeDefault", makeDefault).apply { if (pin != null) put("pin", pin) }) }
                 .onSuccess {
@@ -116,16 +116,18 @@ fun SettingsScreen() {
             item {
                 val cur = users.firstOrNull { it.optString("uuid") == pu?.optString("current") }
                 SettingRow("Plex user (this TV)", cur?.optString("title") ?: "", hint = "Whose Continue Watching and watched status you see") {
-                    picker = Picker("Watch as", users.map { Opt(it.optString("uuid"), it.optString("title") + if (it.optBoolean("protected")) "  🔒" else "") }, pu?.optString("current") ?: "") { o ->
+                    picker = Picker("Watch as", users.map { Opt(it.optString("uuid"), it.optString("title") + if (it.optBoolean("protected") && !it.optBoolean("known")) "  🔒" else "") }, pu?.optString("current") ?: "") { o ->
                         users.firstOrNull { it.optString("uuid") == o.value }?.let { switchUser(it, false) }
                     }
                 }
             }
             item {
                 val def = users.firstOrNull { it.optString("uuid") == pu?.optString("default") }
-                SettingRow("Default Plex user (all apps)", def?.optString("title") ?: "", hint = "Used by every app and TV that hasn't picked a user") {
-                    picker = Picker("Default user for all apps", users.map { Opt(it.optString("uuid"), it.optString("title") + if (it.optBoolean("protected")) "  🔒" else "") }, pu?.optString("default") ?: "") { o ->
-                        users.firstOrNull { it.optString("uuid") == o.value }?.let { switchUser(it, true) }
+                SettingRow("Default Plex user (all apps)", if (pu?.optBoolean("defaultSet") == true) def?.optString("title") ?: "" else "Ask when the app opens", hint = "Used by every app and TV that hasn't picked a user") {
+                    val opts = listOf(Opt("", "No default — ask who's watching")) + users.map { Opt(it.optString("uuid"), it.optString("title") + if (it.optBoolean("protected") && !it.optBoolean("known")) "  🔒" else "") }
+                    picker = Picker("Default user for all apps", opts, if (pu?.optBoolean("defaultSet") == true) pu.optString("default") else "") { o ->
+                        if (o.value == "") scope.launch { runCatching { Net.post("/api/plex/users/default", JSONObject().put("uuid", JSONObject.NULL)) }; tick++ }
+                        else users.firstOrNull { it.optString("uuid") == o.value }?.let { switchUser(it, true) }
                     }
                 }
             }
@@ -207,7 +209,7 @@ private fun ChoiceDialog(p: Picker, onDismiss: () -> Unit, onPick: (Opt) -> Unit
 
 /** PIN entry for a protected Plex Home user: number keys on the remote, or the on-screen keyboard. */
 @Composable
-private fun PinDialog(user: String, onDismiss: () -> Unit, onDone: (String) -> Unit) {
+fun PinDialog(user: String, onDismiss: () -> Unit, onDone: (String) -> Unit) {
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
         var pin by remember { mutableStateOf("") }
         val fr = remember { FocusRequester() }

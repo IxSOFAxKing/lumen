@@ -56,7 +56,7 @@ function homeUsersCard() {
     catch (e) { box.replaceChildren(h('h3', { style: { marginTop: 0 } }, 'Plex Home users'), h('p', { class: 'muted' }, `Not available: ${e.message}. If you use Plex Home, sign in to Plex again above (Change server → Sign in with Plex).`)); return; }
     const sw = async (u, makeDefault) => {
       let pin;
-      if (u.protected) { pin = await pinDialog(u); if (pin === null) return; }
+      if (u.protected && !u.known) { pin = await pinDialog(u); if (pin === null) return; }
       try { await api.post('/api/plex/users/switch', { uuid: u.uuid, pin, makeDefault }); toast(makeDefault ? `${u.title} is now the default user` : `Watching as ${u.title}`, { type: 'ok' }); api.clearCache(); draw(); }
       catch (e) { toastErr(e); }
     };
@@ -66,7 +66,11 @@ function homeUsersCard() {
         u.thumb ? h('img', { src: u.thumb, alt: '', style: { width: '40px', height: '40px', borderRadius: '50%' } }) : h('div', { class: 'logo', style: { width: '40px', height: '40px', borderRadius: '50%' } }),
         h('div', { class: 'grow' }, h('b', {}, u.title), h('div', { class: 'dim small' }, [u.admin ? 'Admin' : null, u.restricted ? 'Managed' : null, u.protected ? 'PIN' : null].filter(Boolean).join(' · ') || 'Home user')),
         u.uuid === d.current ? h('span', { class: 'badge ok' }, 'WATCHING') : btn('Switch', () => sw(u, false), { cls: 'sm' }),
-        u.uuid === d.default ? h('span', { class: 'badge' }, 'DEFAULT') : btn('Make default', () => sw(u, true), { cls: 'sm' }))));
+        u.uuid === d.default && d.defaultSet ? h('span', { class: 'badge' }, 'DEFAULT') : btn('Make default', () => sw(u, true), { cls: 'sm' }))),
+      h('p', { class: 'dim small', style: { marginBottom: 0 } }, d.defaultSet
+        ? 'TV apps open as the default user.'
+        : 'No default user: TV apps ask "Who\'s watching?" when they open.',
+        d.defaultSet ? btn('No default — ask on TVs', async () => { await api.post('/api/plex/users/default', { uuid: null }); draw(); }, { cls: 'sm ghost' }) : null));
   };
   draw();
   return box;

@@ -46,6 +46,7 @@ import org.json.JSONObject
 
 private class DetailData(val item: PlexItem, val seasons: List<PlexItem>, val onDeck: PlexItem?, val related: List<Hub>)
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun DetailScreen(s: Screen.Detail) {
     val mem = LocalMemory.current
@@ -86,7 +87,10 @@ fun DetailScreen(s: Screen.Detail) {
 
     Box(Modifier.fillMaxSize()) {
         Backdrop(Net.plexImg(item.art ?: item.thumb, 1280, 720), heightFraction = 1f)
-        LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 56.dp, bottom = 120.dp)) {
+      // Scroll only as much as needed (Android TV's default keeps the focused row a third of the way down,
+      // which pushed the title and cover art off the top).
+      androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides MinimalScroll) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 40.dp, bottom = 120.dp)) {
             item(key = "info") {
               Row(Modifier.padding(start = 48.dp, end = 120.dp)) {
                 // Cover art
@@ -162,6 +166,19 @@ fun DetailScreen(s: Screen.Detail) {
             d.related.forEachIndexed { i, hub ->
                 item(key = "rel$i") { PlexRow("rel:${hub.id}", hub.title, hub.items, hub.wide, 48.dp) { Nav.openDetails(it) } }
             }
+        }
+      }
+    }
+}
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+val MinimalScroll = object : androidx.compose.foundation.gestures.BringIntoViewSpec {
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+        val trailing = offset + size
+        return when {
+            offset >= 0 && trailing <= containerSize -> 0f
+            offset < 0 || size > containerSize -> offset
+            else -> trailing - containerSize
         }
     }
 }

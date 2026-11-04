@@ -30,7 +30,11 @@ r.get('/users', ah(async (req, res) => {
   if (!plex.isConfigured()) return res.status(400).json({ error: 'Plex is not connected' });
   const users = await plex.homeUsers();
   const cur = selectedUser(req)?.uuid || users.find(u => u.admin)?.uuid || null;
-  res.json({ users: users.map(u => ({ ...u, thumb: u.thumb })), current: cur, default: c.defaultUser || users.find(u => u.admin)?.uuid || null });
+  // "known": Lumen already holds this user's token, so switching needs no PIN (the owner never needs one).
+  res.json({
+    users: users.map(u => ({ ...u, known: !!c.homeUsers?.[u.uuid]?.token || u.admin })),
+    current: cur, default: c.defaultUser || users.find(u => u.admin)?.uuid || null, defaultSet: !!c.defaultUser,
+  });
 }));
 
 /** Switch this device/browser to a Home user (PIN checked by plex.tv). makeDefault also makes it everyone's default. */
@@ -39,9 +43,13 @@ r.post('/users/switch', ah(async (req, res) => {
   const users = await plex.homeUsers();
   const u = users.find(x => x.uuid === uuid || x.id === String(uuid));
   if (!u) return res.status(404).json({ error: 'User not found' });
-  if (u.protected && !pin) return res.status(403).json({ error: 'This user needs a PIN', needsPin: true });
-  const token = await plex.switchHomeUser(u, pin);
   const c = plex.plexConf();
+  // The PIN is only needed the first time: after that Lumen keeps the user's token. The owner uses the server token.
+  let token = c.homeUsers?.[u.uuid]?.token || (u.admin ? c.token : null);
+  if (!token) {
+    if (u.protected && !pin) return res.status(403).json({ error: 'This user needs a PIN', needsPin: true });
+    token = await plex.switchHomeUser(u, pin);
+  }
   const homeUsers = { ...(c.homeUsers || {}), [u.uuid]: { title: u.title, thumb: u.thumb, admin: u.admin, token } };
   plex.saveServer({ homeUsers, ...(makeDefault ? { defaultUser: u.uuid } : {}) });
   if (req.device) setDevicePlexUser(req.device.id, u.uuid);
@@ -52,11 +60,21 @@ r.post('/users/switch', ah(async (req, res) => {
   res.json({ ok: true, user: { uuid: u.uuid, title: u.title, thumb: u.thumb } });
 }));
 
+/** Forget this device's/browser's choice, so it follows the default user. */
+r.post('/users/reset', (req, res) => {
+  if (req.device) setDevicePlexUser(req.device.id, null);
+  else res.setHeader('Set-Cookie', 'lumen_plex_user=; Path=/; Max-Age=0');
+  res.json({ ok: true });
+});
+
 /** Default Home user for devices that haven't picked one. The user must have been switched to (with its PIN) before. */
 r.post('/users/default', ah(async (req, res) => {
   const { uuid } = req.body || {};
   const c = plex.plexConf();
-  if (uuid && !c.homeUsers?.[uuid]) return res.status(400).json({ error: 'Switch to this user first (that checks its PIN), then make it the default.' });
+  if (uuid && !c.homeUsers?.[uuid]) {
+    const u = (await plex.homeUsers()).find(x => x.uuid === uuid);
+    if (!u?.admin) return res.status(400).json({ error: 'Switch to this user first (that checks its PIN), then make it the default.' });
+  }
   plex.saveServer({ defaultUser: uuid || '' });
   res.json({ ok: true });
 }));

@@ -21,6 +21,9 @@ object AppState {
     var favLists by mutableStateOf<List<Group>>(emptyList())
     var loaded by mutableStateOf(false)
     var startApplied = false
+    var checkingProfile by mutableStateOf(false)
+    /** Plex Home users to choose from at launch ("Who's watching?"), or null. */
+    var askProfile by mutableStateOf<JSONObject?>(null)
     var loadError by mutableStateOf<String?>(null)
     /** Changes whenever the app comes back to the foreground (e.g. after the player), so rows refresh. */
     var resumeTick by mutableIntStateOf(0)
