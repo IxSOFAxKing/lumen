@@ -11,6 +11,7 @@ class LumenApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         Net.init(this)
+        Themes.apply(Net.prefs.tvTheme, Net.prefs.tvAccent)
     }
 
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)

@@ -112,6 +112,23 @@ fun SettingsScreen() {
             }
         }
 
+        item {
+            SettingRow("Theme (this TV)", Themes.current.name) {
+                picker = Picker("Theme", Themes.all.map { Opt(it.id, it.name) }, Themes.current.id) { o ->
+                    Net.prefs.tvTheme = o.value as String
+                    Themes.apply(Net.prefs.tvTheme, Net.prefs.tvAccent)
+                }
+            }
+        }
+        item {
+            SettingRow("Accent colour (this TV)", Themes.accents.firstOrNull { it.first == (Net.prefs.tvAccent ?: "") }?.second ?: "Custom") {
+                picker = Picker("Accent colour", Themes.accents.map { Opt(it.first, it.second) }, Net.prefs.tvAccent ?: "") { o ->
+                    Net.prefs.tvAccent = o.value as String
+                    Themes.apply(Net.prefs.tvTheme, Net.prefs.tvAccent)
+                }
+            }
+        }
+
         val pu = plexUsers
         val users = pu?.optJSONArray("users").objects()
         if (users.size > 1) {
@@ -188,7 +205,7 @@ private fun ChoiceDialog(p: Picker, onDismiss: () -> Unit, onPick: (Opt) -> Unit
         val sel = p.options.indexOfFirst { it.value.toString() == p.current }.coerceAtLeast(0)
         val frs = remember(p) { p.options.map { FocusRequester() } }
         LaunchedEffect(p) { kotlinx.coroutines.delay(60); runCatching { frs[sel].requestFocus() } }
-        Column(Modifier.width(400.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xFF161A23)).padding(18.dp)) {
+        Column(Modifier.width(400.dp).clip(RoundedCornerShape(14.dp)).background(C.bg2).padding(18.dp)) {
             T(p.title, 18.sp, weight = FontWeight.Bold, modifier = Modifier.padding(start = 6.dp, bottom = 10.dp))
             LazyColumn(Modifier.heightIn(max = 380.dp), state = androidx.compose.foundation.lazy.rememberLazyListState(initialFirstVisibleItemIndex = (sel - 3).coerceAtLeast(0))) {
                 items(p.options.size) { i ->
@@ -217,7 +234,7 @@ fun PinDialog(user: String, onDismiss: () -> Unit, onDone: (String) -> Unit) {
         var pin by remember { mutableStateOf("") }
         val fr = remember { FocusRequester() }
         LaunchedEffect(Unit) { kotlinx.coroutines.delay(60); runCatching { fr.requestFocus() } }
-        Column(Modifier.width(360.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xFF161A23)).padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.width(360.dp).clip(RoundedCornerShape(14.dp)).background(C.bg2).padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             T("PIN for $user", 18.sp, weight = FontWeight.Bold)
             Spacer(Modifier.height(14.dp))
             androidx.compose.foundation.text.BasicTextField(

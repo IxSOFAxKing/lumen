@@ -6,6 +6,7 @@ import androidx.compose.animation.core.spring
 import android.view.KeyEvent as AKey
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
@@ -135,8 +136,8 @@ fun Focusable(
 ) {
     var focused by remember { mutableStateOf(false) }
     // Springy zoom + soft glow on focus.
-    val scale by animateFloatAsState(if (focused) focusedScale else 1f, spring(dampingRatio = 0.62f, stiffness = 420f), label = "focusScale")
-    val glow by androidx.compose.animation.core.animateDpAsState(if (focused && outline) 18.dp else 0.dp, tween(220), label = "glow")
+    val scale by animateFloatAsState(if (focused) focusedScale else 1f, tween(220, easing = androidx.compose.animation.core.FastOutSlowInEasing), label = "focusScale")
+    val ring by animateFloatAsState(if (focused && outline) 1f else 0f, tween(180), label = "ring")
     val mem = LocalMemory.current
     val fr = focusRequester ?: remember { FocusRequester() }
     if (memKey != null) {
@@ -171,10 +172,9 @@ fun Focusable(
                 onClick = onClick,
             )
             .graphicsLayer { scaleX = scale; scaleY = scale }
-            .then(if (glow > 0.dp) Modifier.shadow(glow, shape, ambientColor = Color.White.copy(alpha = 0.35f), spotColor = Color.White.copy(alpha = 0.5f)) else Modifier)
             .clip(shape)
             .background(if (focused) focusedBackground else background)
-            .then(if (outline && focused) Modifier.border(2.5.dp, Color.White, shape) else Modifier),
+            .then(if (outline && ring > 0.01f) Modifier.border(2.5.dp, Color.White.copy(alpha = ring), shape) else Modifier),
     ) { content(focused) }
 }
 
@@ -288,7 +288,7 @@ fun WideCard(item: PlexItem, memKey: String, onFocus: () -> Unit = {}, onMenu: (
 fun ChannelCard(ch: Channel, memKey: String, onFocus: () -> Unit = {}, onMenu: (() -> Unit)? = null, fr: FocusRequester? = null, onClick: () -> Unit) {
     Column(Modifier.width(184.dp)) {
         Focusable(onClick = onClick, memKey = memKey, focusRequester = fr, onFocus = onFocus, onMenu = onMenu, modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f), background = C.card, focusedBackground = C.cardHi) {
-            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF232A3A), Color(0xFF151922)))))
+            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(C.cardHi, C.bg2))))
             if (ch.logo != null) Img(Net.url(ch.logo), Modifier.fillMaxSize().padding(horizontal = 30.dp, vertical = 18.dp), ContentScale.Fit)
             else T(ch.name, 16.sp, weight = FontWeight.Bold, maxLines = 2, modifier = Modifier.align(Alignment.Center).padding(10.dp))
             ch.onAir?.let { ProgressLine(it.progress, Modifier.align(Alignment.BottomStart).fillMaxWidth(), color = C.live) }
@@ -344,13 +344,24 @@ fun PlexRow(rowKey: String, title: String, items: List<PlexItem>, wide: Boolean,
 
 /** Lists whose rows are snapped into place by the screen itself: no automatic scrolling. */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+val SmoothScroll: androidx.compose.animation.core.AnimationSpec<Float> = tween(340, easing = androidx.compose.animation.core.FastOutSlowInEasing)
+
+/** Scroll a list so [index] sits at the top, with a smooth eased animation. */
+suspend fun androidx.compose.foundation.lazy.LazyListState.smoothScrollToItem(index: Int) {
+    val info = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
+    if (info != null) animateScrollBy((info.offset + layoutInfo.viewportStartOffset).toFloat(), SmoothScroll)
+    else animateScrollToItem(index)
+}
+
 val NoScroll = object : androidx.compose.foundation.gestures.BringIntoViewSpec {
+    override val scrollAnimationSpec: androidx.compose.animation.core.AnimationSpec<Float> get() = SmoothScroll
     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float = 0f
 }
 
 /** Keep the focused item fully visible with some breathing room (room for the focus zoom). */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 val EdgeScroll = object : androidx.compose.foundation.gestures.BringIntoViewSpec {
+    override val scrollAnimationSpec: androidx.compose.animation.core.AnimationSpec<Float> get() = SmoothScroll
     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
         val margin = containerSize * 0.08f
         val trailing = offset + size

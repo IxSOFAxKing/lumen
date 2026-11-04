@@ -121,7 +121,7 @@ fun PlayerOverlay(st: PlayerState, view: PlayerView) {
             }
         }
         st.error?.let { e ->
-            Column(Modifier.align(Alignment.Center).width(520.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xEE161A23)).padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(Modifier.align(Alignment.Center).width(520.dp).clip(RoundedCornerShape(14.dp)).background(C.bg2.copy(alpha = 0.94f)).padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 T("Can't play this right now", 20.sp, weight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
                 T(e, 13.sp, C.text2, maxLines = 4)
@@ -173,8 +173,11 @@ private fun VodControls(st: PlayerState, clock: Long) {
                         "fwd" -> Ico.Forward
                         "restart" -> Ico.Restart
                         "tracks" -> Ico.Subtitles
-                        "quality" -> Icons.Filled.Settings
+                        "quality", "settings" -> Icons.Filled.Settings
                         "next" -> Ico.SkipNext
+                        "prev" -> Ico.SkipPrev
+                        "episodes" -> Ico.Channels
+                        "chapters" -> Ico.Guide
                         else -> Icons.Filled.List
                     }
                     Row(
@@ -245,7 +248,7 @@ private fun LiveBanner(st: PlayerState, clock: Long) {
                 }
                 ch?.next?.takeIf { it != p }?.let { n -> Spacer(Modifier.height(4.dp)); T("Next  ${fmtTime(n.start)}   ${n.title}", 12.sp, C.text3) }
                 Spacer(Modifier.height(8.dp))
-                T("▲▼ change channel   ·   OK channel list   ·   0–9 channel number", 11.sp, C.text3)
+                T("▲▼ channel   ·   OK channel list   ·   ▶ programme guide   ·   MENU options   ·   0–9 number", 11.sp, C.text3)
             }
         }
     }
@@ -292,7 +295,7 @@ private fun ChannelListPanel(st: PlayerState) {
 private fun SidePanel(p: Panel) {
     val state = rememberLazyListState()
     LaunchedEffect(p.index) { if (p.index > 6) state.scrollToItem(p.index - 4) else if (p.index < state.firstVisibleItemIndex) state.scrollToItem(p.index) }
-    Column(Modifier.width(360.dp).fillMaxHeight().background(Color(0xF2101318)).padding(top = 28.dp, start = 14.dp, end = 14.dp)) {
+    Column(Modifier.width(360.dp).fillMaxHeight().background(C.bg2.copy(alpha = 0.96f)).padding(top = 28.dp, start = 14.dp, end = 14.dp)) {
         T(p.title, 17.sp, weight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp, bottom = 12.dp))
         LazyColumn(state = state, contentPadding = PaddingValues(bottom = 40.dp)) {
             itemsIndexed(p.items) { i, it ->
@@ -306,6 +309,6 @@ private fun SidePanel(p: Panel) {
                 }
             }
         }
-        T("▲▼ choose · OK select · BACK close", 11.sp, C.text3, modifier = Modifier.padding(8.dp))
+        T(if (p.parent != null) "▲▼ choose · OK select · BACK back" else "▲▼ choose · OK select · BACK close", 11.sp, C.text3, modifier = Modifier.padding(8.dp))
     }
 }

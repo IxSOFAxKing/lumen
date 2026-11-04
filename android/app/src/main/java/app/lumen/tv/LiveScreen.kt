@@ -168,7 +168,7 @@ fun ChannelLine(ch: Channel, fr: FocusRequester? = null, onFocus: () -> Unit = {
         Row(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             if (AppState.uiBool("chShowNumbers", true)) T(ch.num?.toString() ?: "", 13.sp, if (f) Color.DarkGray else C.text3, FontWeight.SemiBold, modifier = Modifier.width(38.dp))
             if (AppState.uiBool("chShowLogos", true)) {
-                Box(Modifier.size(52.dp, 32.dp).clip(RoundedCornerShape(5.dp)).background(if (f) Color(0xFF1C212D) else Color.White.copy(alpha = 0.06f)), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(52.dp, 32.dp).clip(RoundedCornerShape(5.dp)).background(if (f) C.card else Color.White.copy(alpha = 0.06f)), contentAlignment = Alignment.Center) {
                     if (ch.logo != null) Img(Net.url(ch.logo), Modifier.fillMaxSize().padding(4.dp), ContentScale.Fit)
                 }
                 Spacer(Modifier.width(12.dp))

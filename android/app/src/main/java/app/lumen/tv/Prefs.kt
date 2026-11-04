@@ -37,6 +37,14 @@ class Prefs(context: Context) {
         get() = sp.getString("lastChannel", null)
         set(v) = sp.edit().putString("lastChannel", v).apply()
 
+    var tvTheme: String?
+        get() = sp.getString("tvTheme", null)
+        set(v) = sp.edit().putString("tvTheme", v).apply()
+
+    var tvAccent: String?
+        get() = sp.getString("tvAccent", null)
+        set(v) = sp.edit().putString("tvAccent", v).apply()
+
     val isPaired: Boolean get() = !server.isNullOrBlank() && !token.isNullOrBlank()
 
     fun clearPairing() = sp.edit().remove("token").apply()

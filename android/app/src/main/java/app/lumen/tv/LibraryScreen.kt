@@ -79,7 +79,7 @@ fun LibraryScreen(lib: Library) {
                 else -> androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides NoScroll) {
                 LazyColumn(state = listState, modifier = Modifier.weight(1f).onFocusChanged { rowsFocused = it.hasFocus }, contentPadding = PaddingValues(top = 4.dp, bottom = 200.dp)) {
                     itemsIndexed(hubs!!, key = { i, h -> "${h.id}-$i" }) { idx, hub ->
-                        PlexRow("hub:${hub.id}", hub.title, hub.items, hub.wide, 32.dp, { scope.launch { listState.animateScrollToItem(idx) } },
+                        PlexRow("hub:${hub.id}", hub.title, hub.items, hub.wide, 32.dp, { scope.launch { listState.smoothScrollToItem(idx) } },
                             onItemFocus = { focusTarget.value = Hero.of(it) }) { Nav.open(it) }
                     }
                 }

@@ -214,7 +214,7 @@ private fun railEntries(): List<RailEntry> {
 @Composable
 private fun Rail(entries: List<RailEntry>, screen: Screen, railFocus: androidx.compose.runtime.MutableState<Boolean>, requesters: Map<String, FocusRequester>, onSelect: (Screen) -> Unit) {
     val expanded = railFocus.value
-    val width by animateDpAsState(if (expanded) 210.dp else 64.dp, label = "rail")
+    val width by animateDpAsState(if (expanded) 210.dp else 64.dp, androidx.compose.animation.core.tween(220, easing = androidx.compose.animation.core.FastOutSlowInEasing), label = "rail")
     val currentId = entries.firstOrNull { it.screen == screen }?.id ?: if (screen == Screen.Settings) "settings" else null
     Box(
         Modifier.fillMaxHeight().width(if (expanded) 420.dp else 64.dp)

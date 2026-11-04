@@ -115,6 +115,7 @@ fun GuideScreen() {
         loadMore()
     }
     InitialFocus(gridFr)
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { Preview.channel = null } }
 
     val ch = channels.getOrNull(selRow)
     val prog = ch?.programmes?.firstOrNull { selTime >= it.start && selTime < it.stop }
@@ -151,8 +152,15 @@ fun GuideScreen() {
 
     Column(Modifier.fillMaxSize().padding(top = 18.dp)) {
         // ---- header: selected programme ----
-        Row(Modifier.fillMaxWidth().height(112.dp).padding(start = 24.dp, end = 24.dp)) {
-            Box(Modifier.size(128.dp, 72.dp).clip(RoundedCornerShape(8.dp)).background(C.card), contentAlignment = Alignment.Center) {
+        Row(Modifier.fillMaxWidth().height(116.dp).padding(start = 24.dp, end = 24.dp)) {
+            val pc = Preview.channel
+            if (pc != null) {
+                // Keep watching the last channel while you browse the guide.
+                Box(Modifier.size(176.dp, 99.dp).clip(RoundedCornerShape(8.dp))) {
+                    LivePreview(pc, Modifier.fillMaxSize())
+                    Box(Modifier.align(Alignment.TopStart).padding(4.dp).clip(RoundedCornerShape(3.dp)).background(C.live).padding(horizontal = 4.dp, vertical = 1.dp)) { T("LIVE", 8.sp, Color.White, FontWeight.Bold) }
+                }
+            } else Box(Modifier.size(128.dp, 72.dp).clip(RoundedCornerShape(8.dp)).background(C.card), contentAlignment = Alignment.Center) {
                 ch?.logo?.let { Img(Net.url(it), Modifier.fillMaxSize().padding(10.dp), ContentScale.Fit) } ?: ch?.let { T(it.name, 13.sp, maxLines = 2) }
             }
             Spacer(Modifier.width(18.dp))
@@ -279,7 +287,7 @@ private fun GuideRow(c: Channel, focused: Boolean, selectedRow: Boolean, selTime
                 val isSel = focused && selTime >= p.start && selTime < p.stop
                 val bg = when {
                     isSel -> Color.White
-                    p.start <= n && p.stop > n -> Color(0xFF2A3142)
+                    p.start <= n && p.stop > n -> C.cardHi
                     p.stop <= n -> Color.White.copy(alpha = 0.04f)
                     else -> Color.White.copy(alpha = 0.08f)
                 }

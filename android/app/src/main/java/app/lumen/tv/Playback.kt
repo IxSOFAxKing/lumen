@@ -78,6 +78,12 @@ abstract class Source {
     open val audio: List<StreamOpt> = emptyList()
     open val subtitles: List<StreamOpt> = emptyList()
     open val isPlex: Boolean = false
+    open val chapters: List<Marker> = emptyList()
+    open val hasPrev: Boolean = false
+    open suspend fun previous(): Source? = null
+    /** Episodes in the same season (Plex), for the Episodes panel. */
+    open suspend fun siblings(): List<PlexItem> = emptyList()
+    open val ratingKey: String? = null
 
     /** Load/reload the stream. mode = fallback mode after an error (remux/transcode/builtin). */
     abstract suspend fun open(offset: Double, mode: String? = null): Desc
@@ -95,7 +101,7 @@ private fun uiPrefs(): JSONObject {
     }
 }
 
-class PlexSource(val ratingKey: String, private val queue: List<String>? = null, private val queueIndex: Int = 0) : Source() {
+class PlexSource(override val ratingKey: String, private val queue: List<String>? = null, private val queueIndex: Int = 0) : Source() {
     private var meta: PlexItem? = null
     private var last: JSONObject = JSONObject()
     private var current: Desc? = null
@@ -106,6 +112,7 @@ class PlexSource(val ratingKey: String, private val queue: List<String>? = null,
     private var transcoder: String? = null
     private var scrobbled = false
     private var nextItem: PlexItem? = null
+    private var prevItem: PlexItem? = null
     private var nextResolved = false
 
     override val isPlex = true
@@ -116,15 +123,24 @@ class PlexSource(val ratingKey: String, private val queue: List<String>? = null,
     override val audio get() = last.optJSONArray("audio").objects().map { StreamOpt(it.optInt("id"), it.optString("label"), it.optBoolean("selected")) }
     override val subtitles get() = last.optJSONArray("subtitles").objects().map { StreamOpt(it.optInt("id"), it.optString("label"), it.optBoolean("selected")) }
     override val hasNext get() = nextItem != null
+    override val hasPrev get() = prevItem != null
+    override val chapters get() = last.optJSONArray("chapters").objects().mapIndexed { i, c -> Marker(c.str("tag") ?: "Chapter ${i + 1}", c.optDouble("startTimeOffset") / 1000, c.optDouble("endTimeOffset") / 1000) }
+    override suspend fun siblings(): List<PlexItem> = meta?.takeIf { it.isEpisode }?.parentRatingKey?.let { runCatching { Repo.children(it) }.getOrNull() } ?: emptyList()
+    override suspend fun previous(): Source? = prevItem?.let { if (queue != null) PlexSource(it.ratingKey, queue, (queueIndex - 1).coerceAtLeast(0)) else PlexSource(it.ratingKey) }
     override val nextLabel get() = nextItem?.let { n -> if (n.isEpisode) listOfNotNull(n.episodeLabel, n.title).joinToString(" · ") else n.title }
 
     override suspend fun prepare() {
         meta = runCatching { Repo.meta(ratingKey) }.getOrNull()
         if (!nextResolved) {
             nextResolved = true
-            nextItem = if (queue != null) queue.getOrNull(queueIndex + 1)?.let { k -> runCatching { Repo.meta(k) }.getOrNull() }
-            else meta?.takeIf { it.isEpisode }?.grandparentRatingKey?.let { show ->
-                runCatching { Repo.leaves(show) }.getOrNull()?.let { l -> val i = l.indexOfFirst { it.ratingKey == ratingKey }; if (i >= 0) l.getOrNull(i + 1) else null }
+            if (queue != null) {
+                nextItem = queue.getOrNull(queueIndex + 1)?.let { k -> runCatching { Repo.meta(k) }.getOrNull() }
+                prevItem = queue.getOrNull(queueIndex - 1)?.let { k -> runCatching { Repo.meta(k) }.getOrNull() }
+            } else meta?.takeIf { it.isEpisode }?.grandparentRatingKey?.let { show ->
+                runCatching { Repo.leaves(show) }.getOrNull()?.let { l ->
+                    val i = l.indexOfFirst { it.ratingKey == ratingKey }
+                    if (i >= 0) { nextItem = l.getOrNull(i + 1); prevItem = l.getOrNull(i - 1) }
+                }
             }
         }
     }

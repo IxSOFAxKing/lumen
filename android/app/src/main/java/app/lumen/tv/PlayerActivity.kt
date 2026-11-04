@@ -47,7 +47,7 @@ import java.util.Locale
 val AppScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
 data class PanelItem(val label: String, val selected: Boolean = false, val header: Boolean = false, val action: () -> Unit = {})
-data class Panel(val title: String, val items: List<PanelItem>, val index: Int)
+data class Panel(val title: String, val items: List<PanelItem>, val index: Int, val parent: Panel? = null)
 data class Btn(val id: String, val label: String)
 
 /** Everything the player overlay shows; plain Compose state driven by [PlayerActivity]. */
@@ -76,6 +76,7 @@ class PlayerState {
     var error by mutableStateOf<String?>(null)
     var message by mutableStateOf<String?>(null)
     var method by mutableStateOf("")
+    var sleepAt by mutableStateOf(0L)
 }
 
 /**
@@ -241,10 +242,15 @@ class PlayerActivity : ComponentActivity() {
 
     private fun buildButtons(src: Source): List<Btn> {
         if (src.isLive) return emptyList()
-        val l = mutableListOf(Btn("play", "Play / Pause"), Btn("back", "Back ${seekBack().toInt()}s"), Btn("fwd", "Forward ${seekFwd().toInt()}s"),
-            Btn("restart", "Start over"), Btn("tracks", "Audio & subtitles"))
-        if (src.isPlex) l += Btn("quality", "Quality")
-        if (src.hasNext) l += Btn("next", "Next episode")
+        // Same controls as Plex: previous / rewind / play / forward / next, then audio & subtitles, episodes, chapters, settings.
+        val l = mutableListOf<Btn>()
+        if (src.hasPrev) l += Btn("prev", "Previous")
+        l += Btn("back", "Back ${seekBack().toInt()}s"); l += Btn("play", "Play / Pause"); l += Btn("fwd", "Forward ${seekFwd().toInt()}s")
+        if (src.hasNext) l += Btn("next", "Next")
+        l += Btn("restart", "Start over"); l += Btn("tracks", "Audio & subtitles")
+        if (src.isPlex && src.ratingKey != null) l += Btn("episodes", "Episodes")
+        if (src.chapters.size > 1) l += Btn("chapters", "Chapters")
+        l += Btn("settings", "Settings")
         return l
     }
 
@@ -324,6 +330,7 @@ class PlayerActivity : ComponentActivity() {
             st.zone = 0
         }
         if (st.scrub != null && now > scrubCommitAt) commitScrub()
+        if (st.sleepAt > 0 && now >= st.sleepAt) { finish(); return }
         if (st.message != null && now > hideAt + 2000) st.message = null
         if (st.digits.isNotEmpty() && now - digitsAt > 1500) commitDigits()
         if (src == null) return
@@ -426,8 +433,12 @@ class PlayerActivity : ComponentActivity() {
             "fwd" -> seekAbs(st.pos + seekFwd())
             "restart" -> seekAbs(0.0)
             "next" -> playNext()
+            "prev" -> lifecycleScope.launch { src.previous()?.let { start(it, 0.0) } }
             "tracks" -> st.panel = tracksPanel(src)
             "quality" -> st.panel = qualityPanel(src)
+            "settings" -> st.panel = vodSettings(src)
+            "chapters" -> st.panel = chaptersPanel(src)
+            "episodes" -> lifecycleScope.launch { episodesPanel(src)?.let { st.panel = it; poke() } }
         }
         poke()
     }
@@ -494,6 +505,165 @@ class PlayerActivity : ComponentActivity() {
         return Panel("Quality  ·  now: $method", items, opts.indexOfFirst { it.first == cur }.coerceAtLeast(0))
     }
 
+    // ------------------------------------------------------------------ option menus
+    private var aspect = 0      // 0 fit, 1 fill (stretch), 2 zoom (crop)
+    private var speed = 1f
+    private var subScale = 1f
+
+    private fun sub(parent: Panel, title: String, items: List<PanelItem>): Panel =
+        Panel(title, items, items.indexOfFirst { !it.header && it.selected }.takeIf { it >= 0 } ?: items.indexOfFirst { !it.header }.coerceAtLeast(0), parent)
+
+    private fun aspectPanel(parent: Panel): Panel {
+        val opts = listOf("Fit (original)" to AspectRatioFrameLayout.RESIZE_MODE_FIT, "Stretch to fill" to AspectRatioFrameLayout.RESIZE_MODE_FILL, "Zoom (crop)" to AspectRatioFrameLayout.RESIZE_MODE_ZOOM)
+        return sub(parent, "Aspect ratio", opts.mapIndexed { i, (l, m) -> PanelItem(l, aspect == i) { aspect = i; view.resizeMode = m } })
+    }
+
+    private fun sleepPanel(parent: Panel): Panel {
+        val now = System.currentTimeMillis()
+        val left = if (st.sleepAt > now) ((st.sleepAt - now) / 60000 + 1) else 0
+        val opts = listOf(0, 15, 30, 45, 60, 90, 120, 180)
+        return sub(parent, "Sleep timer" + if (left > 0) "  ·  $left min left" else "", opts.map { m ->
+            PanelItem(if (m == 0) "Off" else "$m minutes", if (m == 0) st.sleepAt == 0L else false) {
+                st.sleepAt = if (m == 0) 0L else System.currentTimeMillis() + m * 60_000L
+                Toast.makeText(this, if (m == 0) "Sleep timer off" else "Stopping in $m minutes", Toast.LENGTH_SHORT).show()
+            }
+        })
+    }
+
+    private fun speedPanel(parent: Panel): Panel {
+        val opts = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
+        return sub(parent, "Playback speed", opts.map { v -> PanelItem(if (v == 1f) "Normal" else "${v}×", speed == v) { speed = v; exo.setPlaybackSpeed(v) } })
+    }
+
+    private fun subtitleSizePanel(parent: Panel): Panel {
+        val opts = listOf(0.75f to "Small", 1f to "Normal", 1.25f to "Large", 1.5f to "Extra large")
+        return sub(parent, "Subtitle size", opts.map { (v, l) -> PanelItem(l, subScale == v) {
+            subScale = v
+            val base = AppState.uiNum("subtitleSize", 100.0).toFloat() / 100f
+            view.subtitleView?.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * base * v)
+        } })
+    }
+
+    /** Technical details of what's playing (like Plex's "Playback info" / TiviMate's stream info). */
+    private fun infoPanel(parent: Panel): Panel {
+        val v = exo.videoFormat; val a = exo.audioFormat; val d = desc
+        val lines = listOfNotNull(
+            "Method: ${d?.method ?: "?"}",
+            v?.let { "Video: ${it.width}×${it.height}${if (it.frameRate > 0) " @ ${"%.2f".format(it.frameRate)} fps" else ""} · ${it.sampleMimeType?.substringAfter('/') ?: it.codecs ?: "?"}" },
+            v?.bitrate?.takeIf { it > 0 }?.let { "Video bitrate: ${it / 1000} kbps" },
+            a?.let { "Audio: ${it.sampleMimeType?.substringAfter('/') ?: "?"} · ${it.channelCount} ch · ${it.sampleRate} Hz" },
+            d?.raw?.optString("quality")?.takeIf { it.isNotBlank() }?.let { "Quality setting: $it" },
+            d?.raw?.optString("network")?.takeIf { it.isNotBlank() }?.let { "Network: $it" },
+            "Buffered: ${"%.1f".format((exo.totalBufferedDuration) / 1000.0)} s",
+            "Dropped frames: ${exo.videoDecoderCounters?.droppedBufferCount ?: 0}",
+            d?.url?.let { "Stream: ${Uri.parse(it).path}" },
+        )
+        return Panel("Playback info", lines.map { PanelItem(it) }, 0, parent)
+    }
+
+    /** Plex player ⚙ menu. */
+    private fun vodSettings(src: Source): Panel {
+        lateinit var me: Panel
+        val items = mutableListOf<PanelItem>()
+        if (src.isPlex) items += PanelItem("Quality  ›") { st.panel = qualityPanel(src).copy(parent = me) }
+        items += PanelItem("Audio & subtitles  ›") { st.panel = tracksPanel(src).copy(parent = me) }
+        items += PanelItem("Subtitle size  ›") { st.panel = subtitleSizePanel(me) }
+        items += PanelItem("Playback speed  ·  ${if (speed == 1f) "Normal" else "${speed}×"}  ›") { st.panel = speedPanel(me) }
+        items += PanelItem("Aspect ratio  ›") { st.panel = aspectPanel(me) }
+        items += PanelItem("Sleep timer  ›") { st.panel = sleepPanel(me) }
+        if (src.chapters.size > 1) items += PanelItem("Chapters  ›") { st.panel = chaptersPanel(src).copy(parent = me) }
+        items += PanelItem("Playback info  ›") { st.panel = infoPanel(me) }
+        me = Panel("Settings", items, 0)
+        return me
+    }
+
+    private fun chaptersPanel(src: Source): Panel {
+        val pos = st.pos
+        val ch = src.chapters
+        val cur = ch.indexOfLast { pos >= it.start }
+        return Panel("Chapters", ch.mapIndexed { i, c -> PanelItem("${fmtClock(c.start)}   ${c.type}", i == cur) { seekAbs(c.start) } }, cur.coerceAtLeast(0))
+    }
+
+    private suspend fun episodesPanel(src: Source): Panel? {
+        val eps = src.siblings()
+        if (eps.isEmpty()) { Toast.makeText(this, "No other episodes", Toast.LENGTH_SHORT).show(); return null }
+        val cur = eps.indexOfFirst { it.ratingKey == src.ratingKey }
+        return Panel(eps.first().parentTitle ?: "Episodes", eps.mapIndexed { i, e ->
+            PanelItem("${e.index ?: i + 1}.  ${e.title}${if (e.watched) "   ✓" else if (e.progress > 0) "   ◐" else ""}", i == cur) { start(PlexSource(e.ratingKey), if (e.viewOffsetMs > 0) e.resumeSec else 0.0) }
+        }, cur.coerceAtLeast(0))
+    }
+
+    /** TiviMate-style options for live TV (MENU, or long-press OK). */
+    private fun liveOptions(src: Source): Panel {
+        lateinit var me: Panel
+        val ch = (src as? LiveSource)?.channel
+        val p = st.channel?.onAir
+        val items = mutableListOf<PanelItem>()
+        items += PanelItem("Programme guide  ›") { lifecycleScope.launch { programmesPanel()?.let { st.panel = it.copy(parent = me); poke() } } }
+        items += PanelItem("Channel list  ›") { st.chList = true; st.controls = false }
+        if (ch != null && p != null && ch.archive) items += PanelItem("Watch from start") { start(CatchupSource(ch.providerId, ch.id, p.start, p.stop, p.title, ch.name), 0.0) }
+        if (ch != null && p != null) items += PanelItem("Record this programme") {
+            lifecycleScope.launch { runCatching { Repo.record(ch, p) }.onSuccess { Toast.makeText(this@PlayerActivity, it, Toast.LENGTH_SHORT).show() }.onFailure { Toast.makeText(this@PlayerActivity, it.message, Toast.LENGTH_LONG).show() } }
+        }
+        if (ch != null) items += PanelItem(if (ch.isFav) "Remove from favourites" else "Add to favourites") {
+            lifecycleScope.launch { runCatching { Repo.toggleFavorite(ch) }.onSuccess { added -> Toast.makeText(this@PlayerActivity, if (added) "Added to favourites" else "Removed from favourites", Toast.LENGTH_SHORT).show() } }
+        }
+        prevChannel?.let { pc -> items += PanelItem("Previous channel: ${pc.name}") { Playback.zapList.indexOfFirst { it.id == pc.id }.takeIf { it >= 0 }?.let { zapTo(it) } } }
+        items += PanelItem("Audio track  ›") { st.panel = tracksPanel(src).copy(parent = me) }
+        items += PanelItem("Subtitles  ›") { st.panel = tracksPanel(src).copy(parent = me) }
+        items += PanelItem("Video track  ›") { st.panel = videoPanel(me) }
+        items += PanelItem("Aspect ratio  ›") { st.panel = aspectPanel(me) }
+        items += PanelItem("Sleep timer  ›") { st.panel = sleepPanel(me) }
+        items += PanelItem("Reload stream") { start(src, 0.0) }
+        items += PanelItem("Stream info  ›") { st.panel = infoPanel(me) }
+        me = Panel(ch?.name ?: "Options", items, 0)
+        return me
+    }
+
+    private fun videoPanel(parent: Panel): Panel {
+        val items = mutableListOf(PanelItem("Auto", exo.trackSelectionParameters.overrides.isEmpty()) {
+            exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_VIDEO).build()
+        })
+        exo.currentTracks.groups.filter { it.type == C.TRACK_TYPE_VIDEO }.forEach { g ->
+            for (i in 0 until g.length) {
+                if (!g.isTrackSupported(i)) continue
+                val f = g.getTrackFormat(i)
+                items += PanelItem("${f.width}×${f.height}${if (f.bitrate > 0) " · ${f.bitrate / 1000} kbps" else ""}", g.isTrackSelected(i) && items.size > 0 && !exo.trackSelectionParameters.overrides.isEmpty()) {
+                    exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, i)).build()
+                }
+            }
+        }
+        return sub(parent, "Video track", items)
+    }
+
+    /** Programme list for the current channel (▶ while watching): now, upcoming and catch-up. */
+    private suspend fun programmesPanel(): Panel? {
+        val ch = st.channel ?: return null
+        val n = nowS()
+        val from = if (ch.archive) n - 3 * 86400 else n - 3600
+        val list = runCatching { Net.arr("/api/iptv/epg/${ch.providerId}/${Uri.encode(ch.id)}?from=$from&to=${n + 24 * 3600}") }.getOrNull()?.objects()?.mapNotNull { Programme.from(it) }
+        if (list.isNullOrEmpty()) { Toast.makeText(this, "No programme information for ${ch.name}", Toast.LENGTH_SHORT).show(); return null }
+        val items = mutableListOf<PanelItem>()
+        var lastDay = ""
+        val dayFmt = java.text.SimpleDateFormat("EEEE d MMM", Locale.getDefault())
+        var curIdx = 0
+        list.filter { it.stop > from }.forEach { p ->
+            val day = dayFmt.format(java.util.Date(p.start * 1000))
+            if (day != lastDay) { items += PanelItem(day, header = true); lastDay = day }
+            val state = when { p.isNow -> "  ● NOW"; p.stop <= n -> if (ch.archive) "  ⟲" else ""; else -> "" }
+            if (p.isNow) curIdx = items.size
+            items += PanelItem("${fmtTime(p.start)}  ${p.title}$state", p.isNow) {
+                when {
+                    p.isNow -> start(LiveSource(ch), 0.0)
+                    p.stop <= n && ch.archive -> start(CatchupSource(ch.providerId, ch.id, p.start, p.stop, p.title, ch.name), 0.0)
+                    p.stop <= n -> Toast.makeText(this, "No catch-up on this channel", Toast.LENGTH_SHORT).show()
+                    else -> lifecycleScope.launch { runCatching { Repo.record(ch, p) }.onSuccess { Toast.makeText(this@PlayerActivity, it, Toast.LENGTH_SHORT).show() }.onFailure { Toast.makeText(this@PlayerActivity, it.message, Toast.LENGTH_LONG).show() } }
+                }
+            }
+        }
+        return Panel("${ch.name} · OK: watch, catch-up (⟲) or record", items, curIdx)
+    }
+
     // ------------------------------------------------------------------ live TV
     private fun zap(dir: Int) {
         val list = Playback.zapList
@@ -552,7 +722,7 @@ class PlayerActivity : ComponentActivity() {
                 code == KeyEvent.KEYCODE_DPAD_UP -> st.panel = p.copy(index = prevItem(p, p.index))
                 code == KeyEvent.KEYCODE_DPAD_DOWN -> st.panel = p.copy(index = nextItem(p, p.index))
                 isOk(code) -> { st.panel = null; p.items.getOrNull(p.index)?.takeIf { !it.header }?.action?.invoke() }
-                back || code == KeyEvent.KEYCODE_DPAD_LEFT -> st.panel = null
+                back || code == KeyEvent.KEYCODE_DPAD_LEFT -> st.panel = p.parent?.let { it.copy() }
             }
             poke(); return true
         }
@@ -605,7 +775,9 @@ class PlayerActivity : ComponentActivity() {
                 if (Playback.zapList.size > 1) { st.chList = true; st.controls = false } else poke()
             }
             code == KeyEvent.KEYCODE_LAST_CHANNEL -> prevChannel?.let { pc -> Playback.zapList.indexOfFirst { it.id == pc.id }.takeIf { it >= 0 }?.let { zapTo(it) } }
-            code == KeyEvent.KEYCODE_DPAD_RIGHT || code == KeyEvent.KEYCODE_INFO || code == KeyEvent.KEYCODE_MENU || code == KeyEvent.KEYCODE_GUIDE -> if (st.controls && code != KeyEvent.KEYCODE_DPAD_RIGHT) st.controls = false else poke()
+            code == KeyEvent.KEYCODE_MENU || code == KeyEvent.KEYCODE_SETTINGS -> source?.let { st.panel = liveOptions(it); st.controls = true; poke() }
+            code == KeyEvent.KEYCODE_DPAD_RIGHT || code == KeyEvent.KEYCODE_GUIDE -> lifecycleScope.launch { programmesPanel()?.let { st.panel = it; poke() } }
+            code == KeyEvent.KEYCODE_INFO -> if (st.controls) st.controls = false else poke()
             else -> return false
         }
         return true
@@ -634,7 +806,8 @@ class PlayerActivity : ComponentActivity() {
             code == KeyEvent.KEYCODE_MEDIA_NEXT -> if (source?.hasNext == true) playNext()
             code == KeyEvent.KEYCODE_DPAD_UP -> { if (st.controls && st.zone == 1) st.zone = 0; poke() }
             code == KeyEvent.KEYCODE_DPAD_DOWN -> { if (st.controls) { st.zone = 1; st.btn = st.btn.coerceIn(0, (btns.size - 1).coerceAtLeast(0)) }; poke() }
-            code == KeyEvent.KEYCODE_MENU || code == KeyEvent.KEYCODE_CAPTIONS -> source?.let { st.panel = tracksPanel(it); poke() }
+            code == KeyEvent.KEYCODE_CAPTIONS -> source?.let { st.panel = tracksPanel(it); poke() }
+            code == KeyEvent.KEYCODE_MENU || code == KeyEvent.KEYCODE_SETTINGS -> source?.let { st.panel = vodSettings(it); poke() }
             else -> return false
         }
         return true
@@ -663,7 +836,7 @@ class PlayerActivity : ComponentActivity() {
             AppScope.launch { Playback.release(d) }
         }
         // Back on the Live TV screen, keep watching this channel in the preview window.
-        if (src is LiveSource && Nav.current == Screen.Live) Preview.channel = src.channel
+        if (src is LiveSource && (Nav.current == Screen.Live || Nav.current == Screen.Guide)) Preview.channel = src.channel
         if (src is WebSource) PlayerBus.closed(if (src.isLive) 0.0 else absPos() - (d?.startOffset ?: 0.0))
         Net.clearCache()
         exo.stop()

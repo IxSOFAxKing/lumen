@@ -184,7 +184,7 @@ private fun HomeContent(d: HomeData) {
 
     // Debounced: the backdrop only changes once you settle on a card.
     // Only the banner reads these, so moving between cards doesn't redraw the rows.
-    LaunchedEffect(Unit) { snapshotFlow { focusTarget.value }.collectLatest { t -> if (t != null) { delay(220); hero.value = t } } }
+    LaunchedEffect(Unit) { snapshotFlow { focusTarget.value }.collectLatest { t -> if (t != null) { delay(320); hero.value = t } } }
     // The featured banner rotates while it has focus.
     LaunchedEffect(billboardFocused, featIndex) {
         if (!billboardFocused || d.featured.size < 2 || !AppState.uiBool("heroAutoplay", true)) return@LaunchedEffect
@@ -204,7 +204,7 @@ private fun HomeContent(d: HomeData) {
                     Modifier.padding(start = 32.dp).height(bbH).clipToBounds().alpha(alpha)
                         .onFocusChanged {
                             billboardFocused = it.hasFocus
-                            if (it.hasFocus) { focusTarget.value = null; d.featured.getOrNull(featIndex)?.let { f -> hero.value = Hero.of(f) }; scope.launch { listState.animateScrollToItem(0) } }
+                            if (it.hasFocus) { focusTarget.value = null; d.featured.getOrNull(featIndex)?.let { f -> hero.value = Hero.of(f) }; scope.launch { listState.smoothScrollToItem(0) } }
                         },
                 ) {
                     val f = d.featured.getOrNull(featIndex)
@@ -233,7 +233,7 @@ private fun HomeContent(d: HomeData) {
                 },
             ) {
                 itemsIndexed(d.rows, key = { _, r -> r.key }) { idx, row ->
-                    val onRowFocused: () -> Unit = { rowIdx = idx; scope.launch { listState.animateScrollToItem(idx) } }
+                    val onRowFocused: () -> Unit = { rowIdx = idx; scope.launch { listState.smoothScrollToItem(idx) } }
                     when (row) {
                         is HomeRow.Plex -> PlexRow(
                             row.key, row.title, row.items, row.wide, 32.dp, onRowFocused,
