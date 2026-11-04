@@ -424,7 +424,7 @@ r.post('/play', ah(async (req, res) => {
   const session = crypto.randomUUID();
   const params = new URLSearchParams({
     path: `/library/metadata/${meta.ratingKey}`, mediaIndex: String(meta.Media.indexOf(media)), partIndex: '0', protocol: 'hls', fastSeek: '1',
-    directPlay: '0', directStream: wantsOriginal ? '1' : '0', directStreamAudio: '1', subtitleSize: String(Math.round(Number(prefs.subtitleSize) || 100)), audioBoost: '100',
+    directPlay: '0', directStream: wantsOriginal ? '1' : '0', directStreamAudio: '1', subtitleSize: String(Math.round(Number(prefs.subtitleSize) || 100)), audioBoost: String(Math.min(300, Math.max(100, Number(req.body.audioBoost) || 100))),
     location: 'lan', offset: String(Math.floor(offset)), session, maxVideoBitrate: String(q.bitrate), videoBitrate: String(q.bitrate),
     videoQuality: '100', videoResolution: q.res, copyts: '1', mediaBufferSize: '102400', autoAdjustQuality: '0', hasMDE: '1',
     subtitles: selSub ? 'burn' : 'none',

@@ -3,6 +3,9 @@ package app.lumen.tv
 import android.view.KeyEvent as AKey
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
@@ -220,7 +223,17 @@ fun GuideScreen() {
                     }
                 }
                 .focusRequester(gridFr)
-                .focusable(),
+                .focusable()
+                // Touch: swipe left/right to move through time.
+                .pointerInput(Unit) {
+                    var acc = 0f
+                    detectHorizontalDragGestures(onDragEnd = { acc = 0f }) { _, dx ->
+                        acc += dx
+                        val step = 90.dp.toPx()
+                        while (acc <= -step) { acc += step; winStart += HALF_HOUR; selTime = maxOf(selTime, winStart) }
+                        while (acc >= step) { acc -= step; winStart = maxOf(floor30(loadFrom), winStart - HALF_HOUR); selTime = minOf(selTime, winStart + SPAN - 1) }
+                    }
+                },
         ) {
             val areaW: Dp = maxWidth - CH_W
             val dpPerSec = areaW.value / SPAN
@@ -248,7 +261,13 @@ fun GuideScreen() {
                         }
                     } else LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 40.dp)) {
                         itemsIndexed(channels, key = { i, c -> "${c.id}:$i" }) { i, c ->
-                            GuideRow(c, i == selRow && gridFocused, i == selRow, selTime, winStart, dpPerSec)
+                            GuideRow(c, i == selRow && gridFocused, i == selRow, selTime, winStart, dpPerSec) { t ->
+                                // Touch: first tap selects, tapping the selected programme again opens it.
+                                val same = selRow == i && c.programmes.firstOrNull { selTime >= it.start && selTime < it.stop }?.let { t >= it.start && t < it.stop } == true
+                                selRow = i; selTime = t
+                                runCatching { gridFr.requestFocus() }
+                                if (same) activate(false)
+                            }
                         }
                     }
                     // "now" line
@@ -261,7 +280,7 @@ fun GuideScreen() {
 }
 
 @Composable
-private fun GuideRow(c: Channel, focused: Boolean, selectedRow: Boolean, selTime: Long, winStart: Long, dpPerSec: Float) {
+private fun GuideRow(c: Channel, focused: Boolean, selectedRow: Boolean, selTime: Long, winStart: Long, dpPerSec: Float, onTap: (Long) -> Unit = {}) {
     val winEnd = winStart + SPAN
     val n = nowS()
     Row(Modifier.fillMaxWidth().height(ROW_H).padding(vertical = 1.5.dp)) {
@@ -292,7 +311,8 @@ private fun GuideRow(c: Channel, focused: Boolean, selectedRow: Boolean, selTime
                     else -> Color.White.copy(alpha = 0.08f)
                 }
                 Box(
-                    Modifier.offset(x = ((s - winStart) * dpPerSec).dp).width((((e - s) * dpPerSec).dp - 2.dp).coerceAtLeast(1.dp)).fillMaxHeight()
+                    Modifier.offset(x = ((s - winStart) * dpPerSec).dp)
+                        .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { onTap(maxOf(p.start, nowS().coerceAtMost(p.stop - 1)).let { if (p.start > nowS() || p.stop <= nowS()) p.start else it }) }.width((((e - s) * dpPerSec).dp - 2.dp).coerceAtLeast(1.dp)).fillMaxHeight()
                         .clip(RoundedCornerShape(5.dp)).background(bg)
                         .then(if (selectedRow && !isSel && p.start <= n && p.stop > n) Modifier.border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(5.dp)) else Modifier)
                         .padding(horizontal = 8.dp, vertical = 4.dp),

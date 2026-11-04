@@ -84,6 +84,9 @@ class PlayerState {
     var liveBtn by mutableIntStateOf(2)
     var badges by mutableStateOf<List<String>>(emptyList())
     var providerName by mutableStateOf("")
+    var poster by mutableStateOf<String?>(null)
+    var context by mutableStateOf("")
+    var metaLine by mutableStateOf("")
 }
 
 /**
@@ -148,6 +151,37 @@ class PlayerActivity : ComponentActivity() {
         }
         setContent { LumenTheme(Net.prefs.uiScale) { PlayerOverlay(st, view) } }
         PlayerBus.player = WeakReference(this)
+        playerActions = object : PlayerActions {
+            override fun tap() {
+                when {
+                    st.panel != null -> st.panel = null
+                    st.chList -> st.chList = false
+                    st.controls -> { st.controls = false; st.zone = 0 }
+                    else -> { st.liveBtn = 2; poke() }
+                }
+            }
+            override fun button(id: String) { st.zone = 1; st.btn = st.buttons.indexOfFirst { it.id == id }.coerceAtLeast(0); activate(id) }
+            override fun liveButton(i: Int) { st.liveBtn = i; liveAction(i); poke() }
+            override fun scrubTo(fraction: Float) {
+                if (st.live || st.dur <= 0) return
+                st.scrub = (fraction.coerceIn(0f, 1f) * st.dur); scrubCommitAt = System.currentTimeMillis() + 60_000; poke()
+            }
+            override fun commitScrub() { this@PlayerActivity.commitScrub() }
+            override fun panelPick(i: Int) {
+                val p = st.panel ?: return
+                val item = p.items.getOrNull(i) ?: return
+                if (item.header) return
+                st.panel = null
+                item.action()
+                poke()
+            }
+            override fun channelPick(i: Int) { st.chList = false; zapTo(i) }
+            override fun skip() { st.skip?.let { skip(it) } }
+            override fun upNext() { playNext() }
+            override fun openChannels() { if (Playback.zapList.size > 1) { st.chList = true; st.controls = false } }
+            override fun openGuide() { lifecycleScope.launch { programmesPanel()?.let { st.panel = it; poke() } } }
+            override fun openOptions() { source?.let { st.panel = if (it.isLive) liveOptions(it) else vodSettings(it); poke() } }
+        }
 
         val req = intent.getStringExtra("req")?.let { runCatching { JSONObject(it) }.getOrNull() }
         val webJson = intent.getStringExtra("json")
@@ -214,6 +248,7 @@ class PlayerActivity : ComponentActivity() {
             try {
                 src.prepare()
                 st.title = src.title; st.subtitle = src.subtitle
+                st.poster = src.poster; st.context = src.context; st.metaLine = src.metaLine
                 val d = src.open(offset, mode)
                 if (d.url.isBlank()) throw IllegalStateException("The server didn't return a stream")
                 desc = d
@@ -353,7 +388,7 @@ class PlayerActivity : ComponentActivity() {
         if (st.scrub != null && now > scrubCommitAt) commitScrub()
         if (st.sleepAt > 0 && now >= st.sleepAt) { finish(); return }
         updateThumb()
-        if (st.live) updateBadges()
+        updateBadges()
         if (st.message != null && now > hideAt + 2000) st.message = null
         if (st.digits.isNotEmpty() && now - digitsAt > 1500) commitDigits()
         if (src == null) return
@@ -688,6 +723,14 @@ class PlayerActivity : ComponentActivity() {
         items += PanelItem("Aspect ratio  ›") { st.panel = aspectPanel(me) }
         items += PanelItem("Sleep timer  ›") { st.panel = sleepPanel(me) }
         if (src.chapters.size > 1) items += PanelItem("Chapters  ›") { st.panel = chaptersPanel(src).copy(parent = me) }
+        if (src is PlexSource && src.versions.size > 1) items += PanelItem("Version  ·  ${src.versions.getOrNull(src.versionIndex) ?: ""}  ›") {
+            st.panel = sub(me, "Version", src.versions.mapIndexed { i, v -> PanelItem(v, i == src.versionIndex) { src.chooseVersion(i); start(src, st.pos, keepState = true) } })
+        }
+        if (src is PlexSource) items += PanelItem("Audio boost  ·  ${if (src.audioBoost == 100) "Off" else "${src.audioBoost}%"}  ›") {
+            st.panel = sub(me, "Audio boost (Plex transcodes the audio)", listOf(100 to "Off", 150 to "Small (150%)", 200 to "Medium (200%)", 300 to "Large (300%)").map { (v, l) ->
+                PanelItem(l, src.audioBoost == v) { src.chooseBoost(v); start(src, st.pos, keepState = true) }
+            })
+        }
         items += PanelItem("Playback info  ›") { st.panel = infoPanel(me) }
         me = Panel("Settings", items, 0)
         return me
@@ -840,6 +883,7 @@ class PlayerActivity : ComponentActivity() {
         v?.height?.takeIf { it > 0 }?.let { h -> l += when { h >= 2000 -> "4K"; h >= 1000 -> "FHD"; h >= 700 -> "HD"; else -> "SD" } }
         v?.frameRate?.takeIf { it > 1 }?.let { l += "${Math.round(it)} FPS" }
         a?.channelCount?.takeIf { it > 0 }?.let { c -> l += when (c) { 1 -> "MONO"; 2 -> "STEREO"; 6 -> "5.1"; 8 -> "7.1"; else -> "${c}CH" } }
+        if (!st.live) desc?.method?.let { m -> l += if (m.startsWith("direct")) "DIRECT PLAY" else if (m.contains("copy") || m.contains("remux")) "DIRECT STREAM" else "TRANSCODE" }
         if (l != st.badges) st.badges = l
     }
 
@@ -978,6 +1022,7 @@ class PlayerActivity : ComponentActivity() {
     override fun onDestroy() {
         close()
         if (PlayerBus.player?.get() === this) PlayerBus.player = null
+        playerActions = null
         exo.release()
         super.onDestroy()
     }

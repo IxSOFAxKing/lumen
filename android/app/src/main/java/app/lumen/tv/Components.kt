@@ -178,6 +178,7 @@ fun Focusable(
             .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
+                onLongClick = onMenu, // touch screens: long-press opens the menu
                 onClick = { if (!longFired) onClick() },
             )
             .graphicsLayer { scaleX = scale; scaleY = scale }

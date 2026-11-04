@@ -60,8 +60,10 @@ object C {
 fun LumenTheme(scalePercent: Int, content: @Composable () -> Unit) {
     val ctx = LocalContext.current
     val dm = ctx.resources.displayMetrics
+    // Fit the 960 × 540 canvas inside the screen: TVs are exactly 16:9; phones are wider, so the height decides there.
     val widthPx = maxOf(dm.widthPixels, dm.heightPixels).toFloat()
-    val base = widthPx / 960f
+    val heightPx = minOf(dm.widthPixels, dm.heightPixels).toFloat()
+    val base = minOf(widthPx / 960f, heightPx / 540f)
     val density = Density(base * (scalePercent.coerceIn(70, 150) / 100f), 1f)
     CompositionLocalProvider(LocalDensity provides density) {
         MaterialTheme(

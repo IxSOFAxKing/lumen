@@ -84,6 +84,14 @@ abstract class Source {
     /** Episodes in the same season (Plex), for the Episodes panel. */
     open suspend fun siblings(): List<PlexItem> = emptyList()
     open val ratingKey: String? = null
+    /** Poster and the small line above the title ("Show • Season 2", "Movies"). */
+    open val poster: String? = null
+    open val context: String = ""
+    open val metaLine: String = ""
+    /** Plex: other versions of this title (4K / 1080p…) and audio boost. */
+    open val versions: List<String> = emptyList()
+    open val versionIndex: Int = 0
+    open val audioBoost: Int = 100
 
     /** Load/reload the stream. mode = fallback mode after an error (remux/transcode/builtin). */
     abstract suspend fun open(offset: Double, mode: String? = null): Desc
@@ -124,6 +132,16 @@ class PlexSource(override val ratingKey: String, private val queue: List<String>
     override val subtitles get() = last.optJSONArray("subtitles").objects().map { StreamOpt(it.optInt("id"), it.optString("label"), it.optBoolean("selected")) }
     override val hasNext get() = nextItem != null
     override val hasPrev get() = prevItem != null
+    override val poster get() = meta?.poster?.let { Net.plexImg(it, 240, 360) }
+    override val context get() = meta?.let { m -> if (m.isEpisode) listOfNotNull(m.grandparentTitle, m.parentTitle ?: m.parentIndex?.let { "Season $it" }).joinToString("  •  ") else m.raw.str("librarySectionTitle") ?: "" } ?: ""
+    override val metaLine get() = meta?.let { m -> listOfNotNull(if (m.isEpisode) listOfNotNull(m.episodeLabel, m.title).joinToString(" · ") else null, m.year?.toString(), m.contentRating, m.durationMs.takeIf { it > 0 }?.let { fmtRuntime(it / 1000) }, (m.audienceRating ?: m.rating)?.let { "★ ${"%.1f".format(it)}" }).joinToString("   ") } ?: ""
+    override val versions get() = last.optJSONArray("media").objects().map { it.optString("label").ifBlank { "Version ${it.optInt("index") + 1}" } }
+    override val versionIndex get() = mediaIndex
+    override val audioBoost get() = boost
+    private var mediaIndex = 0
+    private var boost = 100
+    fun chooseVersion(i: Int) { mediaIndex = i }
+    fun chooseBoost(v: Int) { boost = v; if (v != 100) forceTranscode = true }
     override val chapters get() = last.optJSONArray("chapters").objects().mapIndexed { i, c -> Marker(c.str("tag") ?: "Chapter ${i + 1}", c.optDouble("startTimeOffset") / 1000, c.optDouble("endTimeOffset") / 1000) }
     override suspend fun siblings(): List<PlexItem> = meta?.takeIf { it.isEpisode }?.parentRatingKey?.let { runCatching { Repo.children(it) }.getOrNull() } ?: emptyList()
     override suspend fun previous(): Source? = prevItem?.let { if (queue != null) PlexSource(it.ratingKey, queue, (queueIndex - 1).coerceAtLeast(0)) else PlexSource(it.ratingKey) }
@@ -154,6 +172,8 @@ class PlexSource(override val ratingKey: String, private val queue: List<String>
         val body = JSONObject().put("ratingKey", ratingKey).put("offset", offset).put("client", "native").put("prefs", uiPrefs())
             .put("forceTranscode", forceTranscode)
         quality?.let { body.put("quality", it) }
+        if (mediaIndex > 0) body.put("mediaIndex", mediaIndex)
+        if (boost != 100) body.put("audioBoost", boost)
         audioId?.let { body.put("audioStreamID", it) }
         subtitleId?.let { body.put("subtitleStreamID", it) }
         transcoder?.let { body.put("transcoder", it) }

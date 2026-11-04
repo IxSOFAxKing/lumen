@@ -6,6 +6,11 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -54,12 +59,33 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
 
+/** Touch controls (phones/tablets): the player activity implements these; the remote uses key handling instead. */
+interface PlayerActions {
+    fun tap()
+    fun button(id: String)
+    fun liveButton(i: Int)
+    fun scrubTo(fraction: Float)
+    fun commitScrub()
+    fun panelPick(i: Int)
+    fun channelPick(i: Int)
+    fun skip()
+    fun upNext()
+    fun openChannels()
+    fun openGuide()
+    fun openOptions()
+}
+var playerActions: PlayerActions? = null
+
+private fun Modifier.tap(onTap: () -> Unit) = this.clickable(interactionSource = androidx.compose.foundation.interaction.MutableInteractionSource(), indication = null, onClick = onTap)
+
 @Composable
 fun PlayerOverlay(st: PlayerState, view: PlayerView) {
     var clock by remember { mutableLongStateOf(nowS()) }
     LaunchedEffect(Unit) { while (true) { clock = nowS(); delay(15_000) } }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(factory = { view }, modifier = Modifier.fillMaxSize())
+        // Tap anywhere: show / hide the controls.
+        Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onTap = { playerActions?.tap() }) })
 
         if (st.buffering && st.error == null) {
             CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp, modifier = Modifier.align(Alignment.Center).size(44.dp))
@@ -78,8 +104,8 @@ fun PlayerOverlay(st: PlayerState, view: PlayerView) {
         // Skip intro / credits
         st.skip?.let { m ->
             if (st.error == null && st.upNext == null) {
-                Box(Modifier.align(Alignment.BottomEnd).padding(end = 40.dp, bottom = if (st.controls) 150.dp else 48.dp)
-                    .clip(RoundedCornerShape(50)).background(Color.White).padding(horizontal = 20.dp, vertical = 10.dp)) {
+                Box(Modifier.align(Alignment.BottomEnd).padding(end = 40.dp, bottom = if (st.controls) 190.dp else 48.dp)
+                    .clip(RoundedCornerShape(50)).background(Color.White).tap { playerActions?.skip() }.padding(horizontal = 20.dp, vertical = 10.dp)) {
                     T(if (m.type == "intro") "Skip intro" else "Skip credits", 15.sp, Color.Black, FontWeight.Bold)
                 }
             }
@@ -94,7 +120,7 @@ fun PlayerOverlay(st: PlayerState, view: PlayerView) {
                 T("Playing in $left s", 13.sp, C.text2)
                 Spacer(Modifier.height(10.dp))
                 Row {
-                    Box(Modifier.clip(RoundedCornerShape(50)).background(Color.White).padding(horizontal = 14.dp, vertical = 6.dp)) { T("OK  Play now", 12.sp, Color.Black, FontWeight.Bold) }
+                    Box(Modifier.clip(RoundedCornerShape(50)).background(Color.White).tap { playerActions?.upNext() }.padding(horizontal = 14.dp, vertical = 6.dp)) { T("OK  Play now", 12.sp, Color.Black, FontWeight.Bold) }
                     Spacer(Modifier.width(8.dp))
                     Box(Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.15f)).padding(horizontal = 14.dp, vertical = 6.dp)) { T("BACK  Cancel", 12.sp, weight = FontWeight.SemiBold) }
                 }
@@ -139,66 +165,87 @@ fun PlayerOverlay(st: PlayerState, view: PlayerView) {
 
 @Composable
 private fun VodControls(st: PlayerState, clock: Long) {
+    val dateFmt = remember { java.text.SimpleDateFormat("EEE, MMM d, h:mm a", java.util.Locale.getDefault()) }
     Box(Modifier.fillMaxSize()) {
-        // top
-        Box(Modifier.fillMaxWidth().height(150.dp).background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.85f), Color.Transparent))))
-        Row(Modifier.fillMaxWidth().padding(start = 40.dp, end = 40.dp, top = 28.dp)) {
-            Column(Modifier.weight(1f)) {
-                T(st.title, 24.sp, weight = FontWeight.Bold)
-                if (st.subtitle.isNotBlank()) T(st.subtitle, 14.sp, C.text2)
-            }
-            T(fmtTime(clock), 18.sp, weight = FontWeight.SemiBold)
+        // ---- top: show • season (or library)   |   date and time ----
+        Box(Modifier.fillMaxWidth().height(110.dp).background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.7f), Color.Transparent))))
+        Row(Modifier.fillMaxWidth().padding(start = 34.dp, end = 34.dp, top = 22.dp), verticalAlignment = Alignment.CenterVertically) {
+            T(st.context, 15.sp, C.text, FontWeight.Medium)
+            Grow()
+            T(dateFmt.format(java.util.Date(clock * 1000)), 15.sp, C.text, FontWeight.Medium)
         }
-        // bottom
-        Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(200.dp).background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f)))))
-        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 40.dp, end = 40.dp, bottom = 26.dp)) {
+        // ---- bottom panel ----
+        Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(300.dp).background(Brush.verticalGradient(0f to Color.Transparent, 0.35f to Color.Black.copy(alpha = 0.75f), 1f to Color.Black.copy(alpha = 0.95f))))
+        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 34.dp, end = 34.dp, bottom = 22.dp)) {
             val dur = st.dur
             val shown = st.scrub ?: st.pos
+            Row(verticalAlignment = Alignment.Bottom) {
+                st.poster?.let { Img(it, Modifier.size(62.dp, 93.dp).clip(RoundedCornerShape(6.dp))); Spacer(Modifier.width(18.dp)) }
+                Column(Modifier.weight(1f)) {
+                    T(st.title, 22.sp, weight = FontWeight.Bold)
+                    Spacer(Modifier.height(4.dp))
+                    T(st.metaLine.ifBlank { st.subtitle }, 13.sp, C.text)
+                    if (st.badges.isNotEmpty()) {
+                        Spacer(Modifier.height(6.dp))
+                        Row { st.badges.forEach { b -> Box(Modifier.padding(end = 8.dp).clip(RoundedCornerShape(4.dp)).background(Color.White.copy(alpha = 0.85f)).padding(horizontal = 5.dp, vertical = 1.dp)) { T(b, 10.sp, Color.Black, FontWeight.Bold) } } }
+                    }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
             SeekBar(if (dur > 0) (shown / dur).toFloat() else 0f, if (dur > 0) (st.pos / dur).toFloat() else 0f, st.zone == 0, st.scrub != null, fmtClock(shown), st.thumb)
-            Spacer(Modifier.height(6.dp))
-            Row {
-                T(fmtClock(shown), 13.sp, C.text, FontWeight.SemiBold)
-                Grow()
-                if (dur > 0) {
-                    val ends = nowS() + (dur - shown).toLong()
-                    T("−${fmtClock(dur - shown)}   ·   Ends at ${fmtTime(ends)}", 13.sp, C.text2)
+            Spacer(Modifier.height(8.dp))
+            val centre = setOf("prev", "back", "play", "fwd", "next")
+            Box(Modifier.fillMaxWidth()) {
+                Column(Modifier.align(Alignment.CenterStart)) {
+                    T("${fmtClock(shown)} / ${fmtClock(dur)}", 15.sp, C.text, FontWeight.Medium)
+                    if (dur > 0) T("Ends at ${fmtTime(nowS() + (dur - shown).toLong())}", 11.sp, C.text2)
+                }
+                Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    st.buttons.forEachIndexed { i, b -> if (b.id in centre) VodBtn(st, b, i) }
+                }
+                Row(Modifier.align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    st.buttons.forEachIndexed { i, b -> if (b.id !in centre) VodBtn(st, b, i) }
                 }
             }
-            Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                st.buttons.forEachIndexed { i, b ->
-                    val sel = st.zone == 1 && st.btn == i
-                    val icon: ImageVector = when (b.id) {
-                        "play" -> if (st.playing) Ico.Pause else Icons.Filled.PlayArrow
-                        "back" -> Ico.Rewind
-                        "fwd" -> Ico.Forward
-                        "restart" -> Ico.Restart
-                        "tracks" -> Ico.Subtitles
-                        "quality", "settings" -> Icons.Filled.Settings
-                        "next" -> Ico.SkipNext
-                        "prev" -> Ico.SkipPrev
-                        "episodes" -> Ico.Channels
-                        "chapters" -> Ico.Guide
-                        else -> Icons.Filled.List
-                    }
-                    Row(
-                        Modifier.clip(RoundedCornerShape(50)).background(if (sel) Color.White else Color.White.copy(alpha = 0.12f)).padding(horizontal = if (sel) 14.dp else 10.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(icon, null, tint = if (sel) Color.Black else Color.White, modifier = Modifier.size(20.dp))
-                        if (sel) { Spacer(Modifier.width(8.dp)); T(b.label, 13.sp, Color.Black, FontWeight.SemiBold) }
-                    }
-                }
-                Grow()
-                T(if (st.zone == 0) "◀ ▶ seek   ·   ▼ more options" else "▲ back to the timeline", 11.sp, C.text3)
-            }
+            val sel = st.buttons.getOrNull(st.btn)
+            T(if (st.zone == 1 && sel != null) sel.label else "◀ ▶ seek   ·   ▼ buttons", 11.sp, C.text3, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 6.dp))
         }
     }
 }
 
 @Composable
+private fun VodBtn(st: PlayerState, b: Btn, i: Int) {
+    val icon: ImageVector = when (b.id) {
+        "play" -> if (st.playing) Ico.Pause else Icons.Filled.PlayArrow
+        "back" -> Ico.Rewind
+        "fwd" -> Ico.Forward
+        "restart" -> Ico.Restart
+        "tracks" -> Ico.Subtitles
+        "quality", "settings" -> Icons.Filled.Settings
+        "next" -> Ico.SkipNext
+        "prev" -> Ico.SkipPrev
+        "episodes" -> Ico.Channels
+        "chapters" -> Ico.Guide
+        else -> Icons.Filled.List
+    }
+    val sel = st.zone == 1 && st.btn == i
+    val big = b.id == "play"
+    Box(Modifier.size(if (big) 46.dp else 36.dp).clip(CircleShape).background(if (sel) Color.White else Color.Transparent).tap { playerActions?.button(b.id) }, contentAlignment = Alignment.Center) {
+        Icon(icon, null, tint = if (sel) Color.Black else Color.White, modifier = Modifier.size(if (big) 26.dp else 21.dp))
+    }
+}
+
+@Composable
 private fun SeekBar(fraction: Float, played: Float, focused: Boolean, scrubbing: Boolean, label: String, thumb: androidx.compose.ui.graphics.ImageBitmap? = null) {
-    BoxWithConstraints(Modifier.fillMaxWidth().height(22.dp)) {
+    var barW by remember { androidx.compose.runtime.mutableFloatStateOf(1f) }
+    BoxWithConstraints(Modifier.fillMaxWidth().height(22.dp)
+        .onSizeChanged { barW = it.width.toFloat().coerceAtLeast(1f) }
+        .pointerInput(Unit) {
+            detectTapGestures { o -> playerActions?.scrubTo(o.x / barW); playerActions?.commitScrub() }
+        }
+        .pointerInput(Unit) {
+            detectHorizontalDragGestures(onDragEnd = { playerActions?.commitScrub() }) { change, _ -> playerActions?.scrubTo(change.position.x / barW) }
+        }) {
         val w = maxWidth
         Box(Modifier.align(Alignment.CenterStart).fillMaxWidth().height(if (focused) 6.dp else 4.dp).clip(RoundedCornerShape(3.dp)).background(Color.White.copy(alpha = 0.25f))) {
             Box(Modifier.fillMaxHeight().fillMaxWidth(played.coerceIn(0f, 1f)).background(C.accent))
@@ -231,6 +278,13 @@ private fun LiveBanner(st: PlayerState, clock: Long) {
             T(listOf(st.providerName, st.group).filter { it.isNotBlank() }.joinToString("  •  "), 15.sp, C.text, FontWeight.Medium)
             Grow()
             T(dateFmt.format(java.util.Date(clock * 1000)), 15.sp, C.text, FontWeight.Medium)
+            // Touch shortcuts (phones): channel list, programme guide, options.
+            Spacer(Modifier.width(14.dp))
+            Icon(Ico.Channels, "Channels", tint = Color.White, modifier = Modifier.size(30.dp).clip(CircleShape).tap { playerActions?.openChannels() }.padding(4.dp))
+            Spacer(Modifier.width(6.dp))
+            Icon(Ico.Guide, "Guide", tint = Color.White, modifier = Modifier.size(30.dp).clip(CircleShape).tap { playerActions?.openGuide() }.padding(4.dp))
+            Spacer(Modifier.width(6.dp))
+            Icon(Icons.Filled.Settings, "Options", tint = Color.White, modifier = Modifier.size(30.dp).clip(CircleShape).tap { playerActions?.openOptions() }.padding(4.dp))
         }
         // ---- bottom panel ----
         Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(300.dp).background(Brush.verticalGradient(0f to Color.Transparent, 0.35f to Color.Black.copy(alpha = 0.75f), 1f to Color.Black.copy(alpha = 0.95f))))
@@ -283,20 +337,20 @@ private fun LiveBanner(st: PlayerState, clock: Long) {
                 }
                 // centre: ⏮ ⏪ ▶ ⏩ ⏭
                 Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    LiveBtn(Ico.SkipPrev, st.liveBtn == 0)
-                    LiveBtn(Ico.Rewind, st.liveBtn == 1)
-                    LiveBtn(if (st.playing) Ico.Pause else Icons.Filled.PlayArrow, st.liveBtn == 2, big = true)
-                    LiveBtn(Ico.Forward, st.liveBtn == 3)
-                    LiveBtn(Ico.SkipNext, st.liveBtn == 4)
+                    LiveBtn(Ico.SkipPrev, st.liveBtn == 0, index = 0)
+                    LiveBtn(Ico.Rewind, st.liveBtn == 1, index = 1)
+                    LiveBtn(if (st.playing) Ico.Pause else Icons.Filled.PlayArrow, st.liveBtn == 2, big = true, index = 2)
+                    LiveBtn(Ico.Forward, st.liveBtn == 3, index = 3)
+                    LiveBtn(Ico.SkipNext, st.liveBtn == 4, index = 4)
                 }
                 // right: restart, LIVE, record
                 Row(Modifier.align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    LiveBtn(Ico.Restart, st.liveBtn == 5)
-                    Box(Modifier.clip(RoundedCornerShape(5.dp)).background(if (st.liveBtn == 6) Color.White else Color.Transparent)
+                    LiveBtn(Ico.Restart, st.liveBtn == 5, index = 5)
+                    Box(Modifier.clip(RoundedCornerShape(5.dp)).background(if (st.liveBtn == 6) Color.White else Color.Transparent).tap { playerActions?.liveButton(6) }
                         .border(1.5.dp, if (st.liveBtn == 6) Color.White else C.text, RoundedCornerShape(5.dp)).padding(horizontal = 7.dp, vertical = 3.dp)) {
                         T("LIVE", 12.sp, if (st.liveBtn == 6) Color.Black else C.text, FontWeight.Bold)
                     }
-                    Box(Modifier.size(36.dp).clip(CircleShape).background(if (st.liveBtn == 7) Color.White else Color.Transparent), contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(36.dp).clip(CircleShape).background(if (st.liveBtn == 7) Color.White else Color.Transparent).tap { playerActions?.liveButton(7) }, contentAlignment = Alignment.Center) {
                         Box(Modifier.size(16.dp).clip(CircleShape).background(if (st.liveBtn == 7) C.live else C.text))
                     }
                 }
@@ -306,9 +360,9 @@ private fun LiveBanner(st: PlayerState, clock: Long) {
 }
 
 @Composable
-private fun LiveBtn(icon: ImageVector, selected: Boolean, big: Boolean = false) {
+private fun LiveBtn(icon: ImageVector, selected: Boolean, big: Boolean = false, index: Int = -1) {
     val size = if (big) 46.dp else 36.dp
-    Box(Modifier.size(size).clip(CircleShape).background(if (selected) Color.White else Color.Transparent), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(size).clip(CircleShape).background(if (selected) Color.White else Color.Transparent).tap { if (index >= 0) playerActions?.liveButton(index) }, contentAlignment = Alignment.Center) {
         Icon(icon, null, tint = if (selected) Color.Black else Color.White, modifier = Modifier.size(if (big) 26.dp else 22.dp))
     }
 }
@@ -333,7 +387,7 @@ private fun ChannelListPanel(st: PlayerState) {
                 val sel = i == st.chIndex
                 val playing = c.id == st.channel?.id
                 Row(
-                    Modifier.fillMaxWidth().padding(vertical = 1.dp).clip(RoundedCornerShape(8.dp)).background(if (sel) Color.White else Color.Transparent).padding(horizontal = 10.dp, vertical = 7.dp),
+                    Modifier.fillMaxWidth().padding(vertical = 1.dp).clip(RoundedCornerShape(8.dp)).background(if (sel) Color.White else Color.Transparent).tap { playerActions?.channelPick(i) }.padding(horizontal = 10.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     T(c.num?.toString() ?: "", 12.sp, if (sel) Color.DarkGray else C.text3, FontWeight.SemiBold, modifier = Modifier.width(34.dp))
@@ -361,7 +415,7 @@ private fun SidePanel(p: Panel) {
                 if (it.header) T(it.label.uppercase(), 11.sp, C.accent, FontWeight.Bold, modifier = Modifier.padding(start = 8.dp, top = 14.dp, bottom = 4.dp))
                 else {
                     val sel = i == p.index
-                    Row(Modifier.fillMaxWidth().padding(vertical = 1.dp).clip(RoundedCornerShape(8.dp)).background(if (sel) Color.White else Color.Transparent).padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().padding(vertical = 1.dp).clip(RoundedCornerShape(8.dp)).background(if (sel) Color.White else Color.Transparent).tap { playerActions?.panelPick(i) }.padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
                         T(it.label, 14.sp, if (sel) Color.Black else C.text, if (it.selected) FontWeight.Bold else FontWeight.Normal, modifier = Modifier.weight(1f))
                         if (it.selected) T("✓", 14.sp, if (sel) Color.Black else C.accent, FontWeight.Bold)
                     }

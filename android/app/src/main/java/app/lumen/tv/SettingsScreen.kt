@@ -2,6 +2,7 @@ package app.lumen.tv
 
 import android.content.Intent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
@@ -247,7 +248,8 @@ fun PinDialog(user: String, onDismiss: () -> Unit, onDone: (String) -> Unit) {
                 keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { if (pin.isNotEmpty()) onDone(pin) }),
                 modifier = Modifier.focusRequester(fr).size(1.dp),
             )
-            Row {
+            val kb = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+            Row(Modifier.clickable { runCatching { fr.requestFocus() }; kb?.show() }) {
                 repeat(4) { i ->
                     Box(Modifier.padding(6.dp).size(46.dp).clip(RoundedCornerShape(8.dp)).background(Color.White.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
                         T(if (i < pin.length) "•" else "", 26.sp, weight = FontWeight.Bold)
