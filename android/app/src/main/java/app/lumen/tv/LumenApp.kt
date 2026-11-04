@@ -18,7 +18,7 @@ class LumenApp : Application(), ImageLoaderFactory {
             when (e) {
                 androidx.lifecycle.Lifecycle.Event.ON_STOP -> awaySince = System.currentTimeMillis()
                 androidx.lifecycle.Lifecycle.Event.ON_START -> {
-                    if (awaySince > 0 && System.currentTimeMillis() - awaySince > 5 * 60_000 && AppState.loaded) AppState.profileCheckTick++
+                    if (awaySince > 0 && AppState.loaded) AppState.profileCheckTick++
                     awaySince = 0
                 }
                 else -> {}

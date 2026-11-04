@@ -21,6 +21,9 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -85,7 +88,15 @@ fun MenuHost() {
     androidx.compose.ui.window.Dialog(onDismissRequest = { Menus.current = null }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
         val first = remember(m) { FocusRequester() }
         LaunchedEffect(m) { delay(60); runCatching { first.requestFocus() } }
-        Column(Modifier.width(380.dp).clip(RoundedCornerShape(14.dp)).background(C.bg2).padding(18.dp)) {
+        // The menu usually opens while OK is still held: ignore OK until it has been released and pressed again.
+        var armed by remember(m) { mutableStateOf(false) }
+        Column(Modifier.width(380.dp).clip(RoundedCornerShape(14.dp)).background(C.bg2).padding(18.dp).onPreviewKeyEvent { ev ->
+            val c = ev.nativeKeyEvent.keyCode
+            val ok = c == android.view.KeyEvent.KEYCODE_DPAD_CENTER || c == android.view.KeyEvent.KEYCODE_ENTER || c == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER
+            if (!ok) false
+            else if (ev.type == KeyEventType.KeyDown && ev.nativeKeyEvent.repeatCount == 0) { armed = true; false }
+            else !armed
+        }) {
             T(m.title, 18.sp, weight = FontWeight.Bold, maxLines = 2, modifier = Modifier.padding(start = 6.dp))
             m.subtitle?.takeIf { it.isNotBlank() }?.let { T(it, 12.sp, C.text2, maxLines = 2, modifier = Modifier.padding(start = 6.dp, top = 2.dp)) }
             androidx.compose.foundation.layout.Spacer(Modifier.padding(top = 10.dp))

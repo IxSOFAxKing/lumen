@@ -76,6 +76,8 @@ class MainActivity : ComponentActivity() {
             }
         }
         scale.intValue = Net.prefs.uiScale
+        // Opening the app (even if Android kept it in memory) asks "Who's watching?".
+        if (AppState.loaded) AppState.profileCheckTick++
         setContent {
             LumenTheme(scale.intValue) { Shell(onExit = { moveTaskToBack(true) }) }
         }

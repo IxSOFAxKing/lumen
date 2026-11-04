@@ -57,6 +57,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -135,6 +136,7 @@ fun Focusable(
     content: @Composable BoxScope.(focused: Boolean) -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
+    var longFired by remember { mutableStateOf(false) }
     // Springy zoom + soft glow on focus.
     val scale by animateFloatAsState(if (focused) focusedScale else 1f, tween(220, easing = androidx.compose.animation.core.FastOutSlowInEasing), label = "focusScale")
     val ring by animateFloatAsState(if (focused && outline) 1f else 0f, tween(180), label = "ring")
@@ -160,16 +162,23 @@ fun Focusable(
                     }
                 }
             }
-            .onKeyEvent { ev ->
-                if (onMenu != null && ev.type == KeyEventType.KeyUp && (ev.nativeKeyEvent.keyCode == AKey.KEYCODE_MENU || ev.nativeKeyEvent.keyCode == AKey.KEYCODE_INFO)) {
-                    onMenu(); true
-                } else false
+            .onPreviewKeyEvent { ev ->
+                if (onMenu == null) return@onPreviewKeyEvent false
+                val code = ev.nativeKeyEvent.keyCode
+                val ok = code == AKey.KEYCODE_DPAD_CENTER || code == AKey.KEYCODE_ENTER || code == AKey.KEYCODE_NUMPAD_ENTER
+                when {
+                    // Holding OK: the remote repeats the key — open the options menu once, and swallow the rest.
+                    ok && ev.type == KeyEventType.KeyDown && ev.nativeKeyEvent.repeatCount > 0 -> { if (!longFired) { longFired = true; onMenu() }; true }
+                    ok && ev.type == KeyEventType.KeyDown -> { longFired = false; false }
+                    ok && ev.type == KeyEventType.KeyUp && longFired -> { longFired = false; true }
+                    (code == AKey.KEYCODE_MENU || code == AKey.KEYCODE_INFO) && ev.type == KeyEventType.KeyUp -> { onMenu(); true }
+                    else -> false
+                }
             }
             .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
-                onLongClick = onMenu,
-                onClick = onClick,
+                onClick = { if (!longFired) onClick() },
             )
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(shape)

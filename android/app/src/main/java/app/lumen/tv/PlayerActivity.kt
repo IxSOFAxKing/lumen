@@ -556,18 +556,27 @@ class PlayerActivity : ComponentActivity() {
     private var bifFor: String? = null
     private var thumbIdx = -1
     private var thumbJob: Job? = null
+    private var noThumbs = false
 
     private fun loadThumbnails(src: Source, d: Desc) {
         if (!src.isPlex) { bif = null; bifFor = null; st.thumb = null; return }
         val part = d.raw.str("partId") ?: return
         if (bifFor == part) return
         bifFor = part; bif = null; thumbIdx = -1; st.thumb = null
-        lifecycleScope.launch { val b = Bif.load(this@PlayerActivity, part); if (bifFor == part) bif = b }
+        lifecycleScope.launch {
+            val b = Bif.load(this@PlayerActivity, part)
+            if (bifFor == part) bif = b
+            if (b == null) noThumbs = true
+        }
     }
 
     private fun updateThumb() {
         val t = st.scrub
         val b = bif
+        if (t != null && b == null && noThumbs) {
+            noThumbs = false
+            Toast.makeText(this, "No preview thumbnails for this video. In Plex, turn on \"Generate video preview thumbnails\" for the library (Manage Library → Edit → Advanced).", Toast.LENGTH_LONG).show()
+        }
         if (t == null || b == null) { if (st.thumb != null && t == null) { st.thumb = null; thumbIdx = -1 }; return }
         val i = b.indexAt(t)
         if (i == thumbIdx || thumbJob?.isActive == true) return

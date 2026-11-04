@@ -179,7 +179,7 @@ private fun HomeContent(d: HomeData) {
     // Once you move down into the rows the banner shrinks, giving the rows more room (like Netflix).
     var rowIdx by remember { mutableIntStateOf(0) }
     val compact = !billboardFocused
-    val heroH by androidx.compose.animation.core.animateDpAsState(if (compact) 150.dp else if (showBillboard) 236.dp else 215.dp, tween(380), label = "heroH")
+    val heroH by androidx.compose.animation.core.animateDpAsState(if (compact) 178.dp else if (showBillboard) 236.dp else 215.dp, tween(380), label = "heroH")
     val bbH by androidx.compose.animation.core.animateDpAsState(if (compact) 0.dp else 46.dp, tween(320), label = "bbH")
 
     // Debounced: the backdrop only changes once you settle on a card.
@@ -298,11 +298,11 @@ fun HeroInfo(hero: Hero?, modifier: Modifier = Modifier, compact: Boolean = fals
 private fun HeroBody(h: Hero?, compact: Boolean) {
     Column {
         if (h == null) return@Column
-        if (h.logo != null) {
-            Img(h.logo, Modifier.height(44.dp).width(120.dp), ContentScale.Fit)
-            Spacer(Modifier.height(8.dp))
+        androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+            if (h.logo != null) { Img(h.logo, Modifier.height(22.dp).width(48.dp), ContentScale.Fit); Spacer(Modifier.width(8.dp)) }
+            h.kicker?.let { T(it.uppercase(), 11.sp, if (it.startsWith("LIVE")) C.live else C.accent, FontWeight.Bold) }
         }
-        h.kicker?.let { T(it.uppercase(), 11.sp, if (it.startsWith("LIVE")) C.live else C.accent, FontWeight.Bold) ; Spacer(Modifier.height(4.dp)) }
+        Spacer(Modifier.height(4.dp))
         T(h.title, if (compact) 24.sp else if (h.title.length > 28) 26.sp else 32.sp, weight = FontWeight.Bold, maxLines = if (compact) 1 else 2, lineHeight = 34.sp)
         Spacer(Modifier.height(6.dp))
         h.meta?.takeIf { it.isNotBlank() }?.let { T(it, 13.sp, C.text2) }
