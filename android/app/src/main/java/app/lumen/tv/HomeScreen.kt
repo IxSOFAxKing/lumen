@@ -179,8 +179,8 @@ private fun HomeContent(d: HomeData) {
     // Once you move down into the rows the banner shrinks, giving the rows more room (like Netflix).
     var rowIdx by remember { mutableIntStateOf(0) }
     val compact = !billboardFocused
-    val heroH by androidx.compose.animation.core.animateDpAsState(if (compact) 178.dp else if (showBillboard) 236.dp else 215.dp, tween(380), label = "heroH")
-    val bbH by androidx.compose.animation.core.animateDpAsState(if (compact) 0.dp else 46.dp, tween(320), label = "bbH")
+    val heroH = if (compact) 178.dp else if (showBillboard) 236.dp else 215.dp
+    val bbH = if (compact) 0.dp else 46.dp
 
     // Debounced: the backdrop only changes once you settle on a card.
     // Only the banner reads these, so moving between cards doesn't redraw the rows.

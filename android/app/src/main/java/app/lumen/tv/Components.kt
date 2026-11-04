@@ -343,7 +343,7 @@ fun PlexRow(rowKey: String, title: String, items: List<PlexItem>, wide: Boolean,
     val unique = remember(items) { items.distinctBy { it.ratingKey } }
     CardRow(title, startPad = startPad, onRowFocused = onRowFocused) {
         itemsIndexed(unique, key = { _, it -> it.ratingKey }) { i, it ->
-          Box(Modifier.animateItem(fadeInSpec = tween(320), placementSpec = spring(stiffness = 500f), fadeOutSpec = tween(150))) {
+          Box {
             val fr = if (i == 0) firstFocus else null
             if (wide) WideCard(it, "$rowKey/${it.ratingKey}", onFocus = { onItemFocus(it) }, onMenu = { Menus.item(it, inContinue = rowKey == "continue") }, fr = fr) { onOpen(it) }
             else PosterCard(it, "$rowKey/${it.ratingKey}", onFocus = { onItemFocus(it) }, onMenu = { Menus.item(it) }, fr = fr) { onOpen(it) }
@@ -359,8 +359,7 @@ val SmoothScroll: androidx.compose.animation.core.AnimationSpec<Float> = tween(3
 /** Scroll a list so [index] sits at the top, with a smooth eased animation. */
 suspend fun androidx.compose.foundation.lazy.LazyListState.smoothScrollToItem(index: Int) {
     val info = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
-    if (info != null) animateScrollBy((info.offset + layoutInfo.viewportStartOffset).toFloat(), SmoothScroll)
-    else animateScrollToItem(index)
+    animateScrollToItem(index)
 }
 
 val NoScroll = object : androidx.compose.foundation.gestures.BringIntoViewSpec {
@@ -371,12 +370,11 @@ val NoScroll = object : androidx.compose.foundation.gestures.BringIntoViewSpec {
 /** Keep the focused item fully visible with some breathing room (room for the focus zoom). */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 val EdgeScroll = object : androidx.compose.foundation.gestures.BringIntoViewSpec {
-    override val scrollAnimationSpec: androidx.compose.animation.core.AnimationSpec<Float> get() = SmoothScroll
     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
-        val margin = containerSize * 0.08f
+        // Standard scrolling: move only as far as needed to show the focused card (plus room for its zoom).
+        val margin = size * 0.06f
         val trailing = offset + size
         return when {
-            size > containerSize - 2 * margin -> offset - margin
             offset < margin -> offset - margin
             trailing > containerSize - margin -> trailing - (containerSize - margin)
             else -> 0f
