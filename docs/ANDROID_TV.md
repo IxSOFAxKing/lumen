@@ -127,7 +127,7 @@ Then add three repository secrets (GitHub → Settings → Secrets and variables
 
 | Secret | Value |
 |---|---|
-| `LUMEN_KEYSTORE_BASE64` | output of `base64 -w0 lumen-release.jks` (macOS: `base64 -i lumen-release.jks`) |
+| `LUMEN_KEYSTORE_BASE64` | output of `base64 -w0 lumen-release.jks; echo` (macOS: `base64 -i lumen-release.jks`). Copy **all** of it; the `; echo` keeps the end of the text from running into your prompt. Check the length with `base64 -w0 lumen-release.jks \| wc -c`. The build log prints the length it received. |
 | `LUMEN_KEYSTORE_PASSWORD` | the keystore password |
 | `LUMEN_KEY_ALIAS` | `lumen` |
 | `LUMEN_KEY_PASSWORD` | optional, not needed (keytool's default PKCS12 keystores use the keystore password for the key) |

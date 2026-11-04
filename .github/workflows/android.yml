@@ -49,13 +49,20 @@ jobs:
         env:
           PW: ${{ secrets.LUMEN_KEYSTORE_PASSWORD }}
           ALIAS: ${{ secrets.LUMEN_KEY_ALIAS }}
+          B64: ${{ secrets.LUMEN_KEYSTORE_BASE64 }}
         run: |
+          B64="$(printf '%s' "$B64" | tr -d ' \r\n')"
+          echo "LUMEN_KEYSTORE_BASE64 is ${#B64} characters (compare with: base64 -w0 lumen-release.jks | wc -c)"
           PW="$(printf '%s' "$PW" | tr -d '\r\n')"; ALIAS="$(printf '%s' "${ALIAS:-lumen}" | tr -d '\r\n ')"
-          echo "Decoded keystore: $(wc -c < "$LUMEN_KEYSTORE") bytes, type: $(file -b "$LUMEN_KEYSTORE")"
+          echo "Decoded keystore: $(wc -c < "$LUMEN_KEYSTORE") bytes (compare with: ls -l lumen-release.jks)"
           echo "Password length: ${#PW} characters"
           if ! keytool -list -keystore "$LUMEN_KEYSTORE" -storepass "$PW" > "$RUNNER_TEMP/ks.txt" 2>&1; then
             echo "keytool says: $(head -c 300 "$RUNNER_TEMP/ks.txt")"
-            echo "::error::Could not open the keystore. Either LUMEN_KEYSTORE_BASE64 is not the complete base64 of the .jks file, or LUMEN_KEYSTORE_PASSWORD is wrong."
+            if grep -q EOFException "$RUNNER_TEMP/ks.txt"; then
+              echo "::error::The keystore is incomplete: LUMEN_KEYSTORE_BASE64 was cut off when it was copied. Re-copy the whole base64 text (see the lengths above) and update the secret."
+            else
+              echo "::error::Could not open the keystore. Either LUMEN_KEYSTORE_BASE64 is not the complete base64 of the .jks file, or LUMEN_KEYSTORE_PASSWORD is wrong."
+            fi
             exit 1
           fi
           if ! grep -qi "^${ALIAS}," "$RUNNER_TEMP/ks.txt"; then
