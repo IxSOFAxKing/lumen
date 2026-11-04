@@ -18,6 +18,25 @@ class Prefs(context: Context) {
         get() = sp.getString("serverName", null)
         set(v) = sp.edit().putString("serverName", v).apply()
 
+    /** Interface size on this TV (percent). */
+    var uiScale: Int
+        get() = sp.getInt("uiScale", 100)
+        set(v) = sp.edit().putInt("uiScale", v).apply()
+
+    /** Selected IPTV provider on this TV. */
+    var providerId: Int
+        get() = sp.getInt("provider", -1)
+        set(v) = sp.edit().putInt("provider", v).apply()
+
+    /** Last Live TV group shown. */
+    var liveGroup: String?
+        get() = sp.getString("liveGroup", null)
+        set(v) = sp.edit().putString("liveGroup", v).apply()
+
+    var lastChannel: String?
+        get() = sp.getString("lastChannel", null)
+        set(v) = sp.edit().putString("lastChannel", v).apply()
+
     val isPaired: Boolean get() = !server.isNullOrBlank() && !token.isNullOrBlank()
 
     fun clearPairing() = sp.edit().remove("token").apply()

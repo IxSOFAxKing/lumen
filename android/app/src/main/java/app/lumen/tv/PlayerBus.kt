@@ -7,7 +7,7 @@ import org.json.JSONObject
 import java.lang.ref.WeakReference
 
 /**
- * Glue between the Lumen web UI (in MainActivity's WebView) and the native player (PlayerActivity).
+ * Glue between the Lumen web UI (in WebActivity's WebView) and the native player (PlayerActivity).
  * Web → native: LumenNative.play(json) → PlayerBus.play()
  * Native → web: window.lumenNative.progress / ended / closed / zap / error (see docs/ANDROID_TV.md)
  */
@@ -17,7 +17,7 @@ object PlayerBus {
 
     fun play(ctx: Context, json: String) {
         val p = player?.get()
-        if (p != null && !p.isFinishing && !p.isDestroyed) p.load(json)
+        if (p != null && !p.isFinishing && !p.isDestroyed) p.loadWeb(json)
         else ctx.startActivity(Intent(ctx, PlayerActivity::class.java).putExtra("json", json))
     }
 

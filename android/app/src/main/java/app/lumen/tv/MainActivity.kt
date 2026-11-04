@@ -1,153 +1,222 @@
 package app.lumen.tv
 
-import android.annotation.SuppressLint
 import android.content.Intent
-import android.graphics.Color
-import android.net.Uri
 import android.os.Bundle
-import android.view.Gravity
-import android.view.KeyEvent
-import android.view.View
-import android.view.ViewGroup
-import android.webkit.CookieManager
-import android.webkit.JavascriptInterface
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceError
-import android.webkit.WebResourceRequest
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import android.widget.FrameLayout
-import android.widget.LinearLayout
 import androidx.activity.ComponentActivity
-import androidx.activity.OnBackPressedCallback
-import app.lumen.tv.Ui.dp
-import java.lang.ref.WeakReference
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /**
- * Hosts the Lumen web interface (all browsing, guide, settings…) in a full-screen WebView.
- * Video is handed to the native player through the LumenNative JavaScript bridge.
+ * The native Lumen interface for Android TV (Jetpack Compose). Data comes from the paired Lumen server;
+ * advanced server configuration opens the web settings in [WebActivity].
  */
 class MainActivity : ComponentActivity() {
-    private lateinit var prefs: Prefs
-    private lateinit var web: WebView
-    private lateinit var root: FrameLayout
-    private var errorView: View? = null
+    companion object {
+        /** Bumped to re-apply the interface size after it's changed in Settings. */
+        var scale = mutableIntStateOf(100)
+    }
 
-    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        prefs = Prefs(this)
-        if (!prefs.isPaired) { openSetup(); finish(); return }
-
-        WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
-        web = WebView(this).apply {
-            setBackgroundColor(Ui.BG)
-            isFocusable = true
-            isFocusableInTouchMode = true
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            settings.databaseEnabled = true
-            settings.mediaPlaybackRequiresUserGesture = false
-            settings.userAgentString = settings.userAgentString + " LumenTV/" + BuildConfig.VERSION_NAME + " AndroidTV"
-            webChromeClient = WebChromeClient()
-            webViewClient = object : WebViewClient() {
-                override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                    if (request.isForMainFrame) showError(error.description?.toString() ?: "Can't reach the server")
+        Net.init(this)
+        Nav.appContext = applicationContext
+        if (!Net.prefs.isPaired) { startActivity(Intent(this, SetupActivity::class.java)); finish(); return }
+        Net.onUnauthorized = {
+            runOnUiThread {
+                if (Net.prefs.isPaired) {
+                    Net.prefs.clearPairing()
+                    startActivity(Intent(this, SetupActivity::class.java).putExtra("server", Net.prefs.server))
                 }
-                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                    // Stay inside Lumen; open anything else (e.g. trailers) externally
-                    val server = Uri.parse(prefs.server)
-                    return if (request.url.host == server.host) false else { runCatching { startActivity(Intent(Intent.ACTION_VIEW, request.url)) }; true }
-                }
-                override fun onPageFinished(view: WebView, url: String?) { view.requestFocus() }
             }
-            addJavascriptInterface(Bridge(), "LumenNative")
         }
-        root = FrameLayout(this).apply { setBackgroundColor(Ui.BG); addView(web, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)) }
-        setContentView(root)
-        PlayerBus.web = WeakReference(web)
-
-        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() {
-                // Let Lumen handle Back (close dialogs, go back a page); exit only when it has nowhere to go.
-                web.evaluateJavascript("(window.lumenBack ? lumenBack() : false)") { res -> if (res != "true") moveTaskToBack(true) }
-            }
-        })
-        loadLumen()
-    }
-
-    private fun loadLumen() {
-        val server = prefs.server ?: return openSetup()
-        // The device token authenticates the WebView (cookie) — the player sends it as a Bearer header.
-        val cm = CookieManager.getInstance()
-        cm.setAcceptCookie(true)
-        cm.setCookie(server, "lumen_device=${prefs.token}; Path=/; Max-Age=315360000")
-        cm.flush()
-        errorView?.let { root.removeView(it) }; errorView = null
-        web.loadUrl("$server/?tv=1")
-        web.requestFocus()
-    }
-
-    private fun showError(msg: String) {
-        if (errorView != null) return
-        val box = Ui.vbox(this, Gravity.CENTER).apply { setBackgroundColor(Ui.BG); setPadding(dp(40), dp(40), dp(40), dp(40)) }
-        box.addView(Ui.text(this, "Can't reach your Lumen server", 28f, bold = true))
-        box.addView(Ui.gap(this, 10))
-        box.addView(Ui.text(this, "${prefs.serverName ?: ""} ${prefs.server ?: ""}\n$msg", 17f, Ui.TEXT2).apply { gravity = Gravity.CENTER })
-        box.addView(Ui.gap(this, 26))
-        val row = Ui.hbox(this)
-        val retry = Ui.button(this, "Retry", primary = true) { loadLumen() }
-        row.addView(retry)
-        row.addView(View(this), LinearLayout.LayoutParams(dp(14), 1))
-        row.addView(Ui.button(this, "Change server") { openSetup() })
-        box.addView(row)
-        errorView = box
-        root.addView(box, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        retry.requestFocus()
-    }
-
-    fun openSetup() {
-        startActivity(Intent(this, SetupActivity::class.java))
+        scale.intValue = Net.prefs.uiScale
+        setContent {
+            LumenTheme(scale.intValue) { Shell(onExit = { moveTaskToBack(true) }) }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (::web.isInitialized && prefs.isPaired) loadLumen() // returning from setup with a (new) server/token
+        // Back from pairing with a (new) server: reload everything.
+        Net.clearCache()
+        Nav.root(Screen.Home)
+        AppState.loaded = false
     }
 
     override fun onResume() {
         super.onResume()
-        if (::web.isInitialized) web.requestFocus()
+        Net.clearCache() // watch progress may have changed in the player
+        AppState.resumeTick++
     }
+}
 
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        // Media keys on the browse screens: let the web app see them as normal keys
-        if (event.keyCode == KeyEvent.KEYCODE_MENU && event.action == KeyEvent.ACTION_UP && ::web.isInitialized) {
-            web.evaluateJavascript("document.activeElement && document.activeElement.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true}))", null)
-            return true
-        }
-        return super.dispatchKeyEvent(event)
-    }
+private data class RailEntry(val id: String, val label: String, val icon: ImageVector, val screen: Screen)
 
-    override fun onDestroy() {
-        if (::web.isInitialized) { root.removeView(web); web.destroy() }
-        super.onDestroy()
-    }
-
-    /** window.LumenNative — see docs/ANDROID_TV.md for the contract. */
-    inner class Bridge {
-        @JavascriptInterface fun play(json: String) { runOnUiThread { PlayerBus.play(this@MainActivity, json) } }
-        @JavascriptInterface fun stop() { runOnUiThread { PlayerBus.stop() } }
-        @JavascriptInterface fun isTV(): Boolean = true
-        @JavascriptInterface fun version(): String = BuildConfig.VERSION_NAME
-        @JavascriptInterface fun serverUrl(): String = prefs.server ?: ""
-        @JavascriptInterface fun openAppSettings() { runOnUiThread { openSetup() } }
-        /** The server rejected our device token (removed in Settings → Devices): pair again. */
-        @JavascriptInterface fun unpaired() {
-            runOnUiThread {
-                prefs.clearPairing()
-                startActivity(Intent(this@MainActivity, SetupActivity::class.java).putExtra("server", prefs.server))
+@Composable
+fun Shell(onExit: () -> Unit) {
+    LaunchedEffect(AppState.loaded) {
+        if (!AppState.loaded) {
+            AppState.refresh()
+            // Start page from Settings → Appearance (shared with the web app) — only when the app starts.
+            if (!AppState.startApplied) {
+                AppState.startApplied = true
+                when (AppState.uiStr("startPage", "home")) {
+                    "live" -> if (AppState.providers.isNotEmpty()) Nav.root(Screen.Live)
+                    "guide" -> if (AppState.providers.isNotEmpty()) Nav.root(Screen.Guide)
+                }
             }
         }
+    }
+    if (!AppState.loaded) { Box(Modifier.fillMaxSize().background(C.bg)) { Loading(Modifier.align(Alignment.Center)) }; return }
+    if (AppState.loadError != null && AppState.providers.isEmpty() && !AppState.plexConfigured) {
+        Box(Modifier.fillMaxSize().background(C.bg), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Message("Can't reach your Lumen server", "${Net.prefs.serverName ?: ""} ${Net.server}")
+                Row {
+                    PillButton("Retry", primary = true) { AppState.loaded = false }
+                    Spacer(Modifier.width(12.dp))
+                    PillButton("Change server") { Nav.appContext.startActivity(Intent(Nav.appContext, SetupActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                }
+            }
+        }
+        return
+    }
+
+    val entries = remember(AppState.libraries, AppState.providers, AppState.ui) { railEntries() }
+    val screen = Nav.current
+    val railFocus = remember { mutableStateOf(false) }
+    val railRequesters = remember(entries) { entries.associate { it.id to FocusRequester() } + ("settings" to FocusRequester()) }
+    val holder = rememberSaveableStateHolder()
+
+    BackHandler {
+        when {
+            Nav.pop() -> {}
+            !railFocus.value && screen.topLevel -> {
+                val id = entries.firstOrNull { it.screen == screen }?.id ?: if (screen == Screen.Settings) "settings" else entries.firstOrNull()?.id
+                runCatching { id?.let { railRequesters[it] }?.requestFocus() }
+            }
+            screen != Screen.Home -> Nav.root(Screen.Home)
+            else -> onExit()
+        }
+    }
+
+    Box(Modifier.fillMaxSize().background(C.bg)) {
+        val showRail = screen.topLevel
+        Box(Modifier.fillMaxSize().padding(start = if (showRail) 64.dp else 0.dp)) {
+            CompositionLocalProvider(LocalMemory provides Nav.mem(screen)) {
+                holder.SaveableStateProvider(screen.key) {
+                    when (screen) {
+                        Screen.Home -> HomeScreen()
+                        Screen.Search -> SearchScreen()
+                        Screen.Live -> LiveScreen()
+                        Screen.Guide -> GuideScreen()
+                        Screen.Recordings -> RecordingsScreen()
+                        Screen.Settings -> SettingsScreen()
+                        is Screen.Lib -> LibraryScreen(screen.lib)
+                        is Screen.Detail -> DetailScreen(screen)
+                        is Screen.Grid -> GridScreen(screen)
+                    }
+                }
+            }
+        }
+        if (showRail) Rail(entries, screen, railFocus, railRequesters) { e -> Nav.root(e) }
+    }
+}
+
+private fun railEntries(): List<RailEntry> {
+    val list = mutableListOf(RailEntry("search", "Search", Icons.Filled.Search, Screen.Search), RailEntry("home", "Home", Icons.Filled.Home, Screen.Home))
+    if (AppState.providers.isNotEmpty()) {
+        list += RailEntry("live", "Live TV", Ico.LiveTv, Screen.Live)
+        list += RailEntry("guide", "Guide", Ico.Guide, Screen.Guide)
+        list += RailEntry("dvr", "Recordings", Ico.Rec, Screen.Recordings)
+    }
+    for (l in AppState.libraries) list += RailEntry("lib:${l.key}", l.title, if (l.type == "movie") Ico.Movie else Ico.Tv, Screen.Lib(l))
+    // Same order / visibility as the web app's sidebar (Settings → Appearance → Sidebar).
+    val hidden = AppState.uiList("navHidden").toSet()
+    return AppState.applyOrder(list, AppState.uiList("navOrder")) { it.id }.filter { it.id !in hidden || it.id == "home" }
+}
+
+@Composable
+private fun Rail(entries: List<RailEntry>, screen: Screen, railFocus: androidx.compose.runtime.MutableState<Boolean>, requesters: Map<String, FocusRequester>, onSelect: (Screen) -> Unit) {
+    val expanded = railFocus.value
+    val width by animateDpAsState(if (expanded) 210.dp else 64.dp, label = "rail")
+    val currentId = entries.firstOrNull { it.screen == screen }?.id ?: if (screen == Screen.Settings) "settings" else null
+    Box(
+        Modifier.fillMaxHeight().width(if (expanded) 420.dp else 64.dp)
+            .background(if (expanded) Brush.horizontalGradient(listOf(Color.Black.copy(alpha = 0.92f), Color.Black.copy(alpha = 0.75f), Color.Transparent)) else Brush.horizontalGradient(listOf(C.bg, C.bg.copy(alpha = 0.9f))))
+    ) {
+        Column(
+            Modifier.fillMaxHeight().width(width).padding(vertical = 18.dp, horizontal = 10.dp)
+                .onFocusChanged { f ->
+                    val was = railFocus.value
+                    railFocus.value = f.hasFocus
+                    // Entering the menu lands on the current section, like Netflix.
+                    if (f.hasFocus && !was && currentId != null) runCatching { requesters[currentId]?.requestFocus() }
+                },
+        ) {
+            Row(Modifier.padding(start = 8.dp, bottom = 22.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(26.dp).clip(RoundedCornerShape(7.dp)).background(C.accent), contentAlignment = Alignment.Center) { T("▶", 12.sp, Color.Black, FontWeight.Bold) }
+                if (expanded) { Spacer(Modifier.width(10.dp)); T("Lumen", 18.sp, weight = FontWeight.Bold) }
+            }
+            entries.forEach { e -> RailItem(e.label, e.icon, e.id == currentId, expanded, requesters[e.id]) { onSelect(e.screen) } }
+            Spacer(Modifier.weight(1f))
+            RailItem("Settings", Icons.Filled.Settings, currentId == "settings", expanded, requesters["settings"]) { onSelect(Screen.Settings) }
+        }
+    }
+}
+
+@Composable
+private fun RailItem(label: String, icon: ImageVector, selected: Boolean, expanded: Boolean, fr: FocusRequester?, onClick: () -> Unit) {
+    Focusable(
+        onClick = onClick, focusRequester = fr, shape = RoundedCornerShape(10.dp), focusedScale = 1f, outline = false,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), background = Color.Transparent, focusedBackground = Color.White,
+    ) { f ->
+        Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = if (f) Color.Black else if (selected) C.text else C.text3, modifier = Modifier.size(22.dp))
+            if (expanded) {
+                Spacer(Modifier.width(14.dp))
+                T(label, 15.sp, if (f) Color.Black else if (selected) C.text else C.text2, if (selected) FontWeight.Bold else FontWeight.Medium)
+            }
+        }
+        if (selected && !expanded) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 2.dp).width(14.dp).height(2.dp).background(C.accent))
     }
 }

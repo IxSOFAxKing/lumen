@@ -10,6 +10,7 @@
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
     <application
+        android:name=".LumenApp"
         android:allowBackup="true"
         android:banner="@drawable/banner"
         android:icon="@drawable/ic_launcher"
@@ -35,6 +36,13 @@
         <activity
             android:name=".SetupActivity"
             android:configChanges="orientation|screenSize|keyboard|keyboardHidden|navigation"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".WebActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode"
             android:exported="false"
             android:screenOrientation="landscape"
             android:windowSoftInputMode="adjustResize" />

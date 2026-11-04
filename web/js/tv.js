@@ -79,6 +79,11 @@ export function goBack() {
 }
 
 export function initTv() {
+  // Inside the Android TV app the page is laid out at a fixed width so it fits the screen at a readable size.
+  try {
+    const vw = window.LumenNative?.viewportWidth?.();
+    if (vw) document.querySelector('meta[name=viewport]')?.setAttribute('content', `width=${vw}`);
+  } catch { /* older app */ }
   applyTvMode();
   window.lumenBack = () => (isPlayerOpen() ? (document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), true) : goBack());
 
@@ -92,7 +97,17 @@ export function initTv() {
     if (dirs[k]) {
       // Let text fields keep left/right for the caret, selects and ranges keep their own keys.
       if (isTyping(active) && (k === 'ArrowLeft' || k === 'ArrowRight')) return;
-      if (active?.tagName === 'SELECT' || (active?.type === 'range' && (k === 'ArrowLeft' || k === 'ArrowRight'))) return;
+      if (active?.tagName === 'SELECT') return;
+      // Sliders (e.g. interface size): Left/Right change the value with the remote.
+      if (active?.type === 'range' && (k === 'ArrowLeft' || k === 'ArrowRight')) {
+        const step = Number(active.step) || 1;
+        const v = Math.min(Number(active.max || 100), Math.max(Number(active.min || 0), Number(active.value) + (k === 'ArrowRight' ? step : -step)));
+        active.value = String(v);
+        active.dispatchEvent(new Event('input', { bubbles: true }));
+        active.dispatchEvent(new Event('change', { bubbles: true }));
+        e.preventDefault();
+        return;
+      }
       const root = scope();
       const list = candidates(root);
       if (!list.length) return;
