@@ -2,7 +2,8 @@ import { api } from '../api.js';
 import { h, btn, toast, toastErr, modal, confirmDialog, fmtDateTime, spinner, select, empty, sortableList, debounce } from '../ui.js';
 import { icon } from '../icons.js';
 import { store, refreshStore, navEntries, rerenderNav } from '../app.js';
-import { homeSections, ACCENTS, applyAppearance } from '../appearance.js';
+import { homeSections, ACCENTS, applyAppearance, saveUi, deviceMode, setDeviceMode, withDeviceOverrides, startClock } from '../appearance.js';
+import { tvModeSetting, setTvModeSetting, tvDetected } from '../tv.js';
 
 export default async function settings(el, route) {
   el.className = 'page settings';
@@ -84,6 +85,7 @@ function connectFlow(el) {
 // ---------------- IPTV ----------------
 async function iptvTab(el) {
   const list = h('div');
+  const extras = h('div', { style: { marginTop: '24px' } });
   const iptvConf = (await api.get('/api/settings')).iptv;
   const vodSwitch = h('label', { class: 'check', style: { margin: 0 } },
     h('input', { type: 'checkbox', checked: iptvConf.vodEnabled !== false, onChange: async e => {
@@ -121,6 +123,8 @@ async function iptvTab(el) {
     }));
   }
   await render();
+  el.append(extras);
+  extras.append(await favListsCard(), await parentalCard());
 }
 
 function providerForm(p, done) {
@@ -162,24 +166,44 @@ function providerForm(p, done) {
 async function groupsModal(p) {
   const kinds = [['live', 'Live TV'], ['vod', 'Movies'], ['series', 'Series']];
   let kind = 'live';
-  const list = h('div', { style: { maxHeight: '55vh', overflow: 'auto' } });
+  const list = h('div', { style: { maxHeight: '58vh', overflow: 'auto' } });
   const tabsEl = h('div', { class: 'tabs' });
-  const filter = h('input', { class: 'input', placeholder: 'Filter…', style: { width: '100%', marginBottom: '10px' } });
+  const filter = h('input', { class: 'input', placeholder: 'Filter… (clear to reorder)', style: { width: '100%' } });
   let cats = [];
+  const put = (c, body) => api.put(`/api/iptv/categories/${p.id}/${kind}/${encodeURIComponent(c.id)}`, body);
+  const actions = (x, rerender) => {
+    const c = cats.find(cc => cc.id === x.id);
+    return h('div', { class: 'row', style: { gap: '2px' } },
+      h('button', { class: 'btn ghost sm icon', title: 'Rename', html: icon('edit'), onClick: async () => {
+        const n = window.prompt(`Rename "${c.original_name}" (empty = original name)`, c.name === c.original_name ? '' : c.name);
+        if (n === null) return; await put(c, { name: n }); c.name = n.trim() || c.original_name; x.label = `${c.name}  ·  ${c.count}`; rerender(); } }),
+      h('button', { class: `btn ghost sm icon ${c.locked ? 'fav-star' : ''}`, title: c.locked ? 'Locked with PIN (click to unlock)' : 'Lock with PIN', html: c.locked ? '🔒' : '🔓', onClick: async () => {
+        try { await put(c, { locked: !c.locked }); c.locked = c.locked ? 0 : 1; rerender(); } catch (e) { toastErr(e); } } }));
+  };
   const draw = () => {
     const q = filter.value.toLowerCase();
-    list.replaceChildren(...cats.filter(c => !q || c.name.toLowerCase().includes(q)).map(c => h('label', { class: 'check', style: { padding: '4px 0' } },
-      h('input', { type: 'checkbox', checked: !c.hidden, onChange: async e => { c.hidden = !e.target.checked; await api.put(`/api/iptv/categories/${p.id}/${kind}/${encodeURIComponent(c.id)}`, { hidden: c.hidden }); } }),
-      h('span', { class: 'grow' }, c.name), h('span', { class: 'dim small' }, c.count))));
+    if (q) {
+      list.replaceChildren(...cats.filter(c => c.name.toLowerCase().includes(q)).map(c => h('label', { class: 'check', style: { padding: '4px 0' } },
+        h('input', { type: 'checkbox', checked: !c.hidden, onChange: async e => { c.hidden = !e.target.checked; await put(c, { hidden: c.hidden }); } }),
+        h('span', { class: 'grow' }, c.name), h('span', { class: 'dim small' }, c.count))));
+      return;
+    }
+    list.replaceChildren(sortableList(cats.map(c => ({ id: c.id, label: `${c.name}  ·  ${c.count}`, hidden: !!c.hidden, note: c.name !== c.original_name ? `Provider name: ${c.original_name}` : null })), async items => {
+      const changed = items.filter(x => !!cats.find(c => c.id === x.id).hidden !== !!x.hidden);
+      for (const x of changed) { const c = cats.find(cc => cc.id === x.id); c.hidden = x.hidden; await put(c, { hidden: x.hidden }); }
+      await api.put(`/api/iptv/categories-order/${p.id}/${kind}`, { order: items.map(x => x.id) });
+      cats = items.map(x => cats.find(c => c.id === x.id));
+    }, { actions }));
   };
   const load = async () => {
-    tabsEl.replaceChildren(...kinds.map(([k, l]) => h('div', { class: `tab ${k === kind ? 'active' : ''}`, onClick: () => { kind = k; load(); } }, l)));
+    tabsEl.replaceChildren(...kinds.map(([k, l]) => h('div', { tabindex: 0, class: `tab ${k === kind ? 'active' : ''}`, onClick: () => { kind = k; load(); } }, l)));
     cats = await api.get(`/api/iptv/providers/${p.id}/categories?kind=${kind}&all=1`);
     draw();
   };
   filter.addEventListener('input', draw);
-  const bulk = (hidden) => async () => { for (const c of cats) if (!!c.hidden !== hidden) { c.hidden = hidden; await api.put(`/api/iptv/categories/${p.id}/${kind}/${encodeURIComponent(c.id)}`, { hidden }); } draw(); };
-  modal({ title: `Groups · ${p.name}`, size: 'lg', body: h('div', {}, h('p', { class: 'muted small', style: { marginTop: 0 } }, 'Uncheck groups to hide them from Live TV, the guide and VOD.'), tabsEl,
+  const bulk = (hidden) => async () => { for (const c of cats) if (!!c.hidden !== hidden) { c.hidden = hidden; await put(c, { hidden }); } draw(); };
+  modal({ title: `Groups · ${p.name}`, size: 'lg', body: h('div', {},
+    h('p', { class: 'muted small', style: { marginTop: 0 } }, 'Drag to reorder, rename (✎), lock with your PIN (🔓), or hide (eye) groups. Changes apply to Live TV, the guide and VOD.'), tabsEl,
     h('div', { class: 'row', style: { marginBottom: '8px' } }, filter, btn('Show all', bulk(false), { cls: 'sm' }), btn('Hide all', bulk(true), { cls: 'sm' })), list) });
   load();
 }
@@ -220,28 +244,30 @@ async function transcodeTab(el) {
     h('div', { class: 'set-grid' },
       field('Transcoder for Plex content', select([{ value: 'plex', label: 'Plex Media Server (recommended)' }, { value: 'builtin', label: 'Lumen built-in (uses settings above)' }], t.plexTranscoder, v => save({ plexTranscoder: v })),
         'Plex server transcoding supports subtitles burn-in and uses Plex\'s own hardware acceleration (Plex Pass).'),
-      field('Default quality', select([{ value: 'auto', label: 'Auto (direct play when possible)' }, { value: 'original', label: 'Original' },
-        { value: '20000', label: '20 Mbps 1080p' }, { value: '12000', label: '12 Mbps 1080p' }, { value: '8000', label: '8 Mbps 1080p' }, { value: '4000', label: '4 Mbps 720p' }, { value: '2000', label: '2 Mbps 720p' }, { value: '720', label: '1.5 Mbps 480p' }], t.plexQuality, v => save({ plexQuality: v }))))));
+      h('div', { class: 'dim small' }, 'Default Plex quality (at home / away) is under Settings → Appearance → Player.'))));
 }
 
 // ---------------- Playback / UI ----------------
 async function playbackTab(el) {
   const all = await api.get('/api/settings');
-  const ui = all.ui, iptv = all.iptv;
-  const saveUi = async patch => { Object.assign(ui, await api.put('/api/settings/ui', patch)); await refreshStore(); toast('Saved', { type: 'ok', timeout: 1200 }); };
+  const ui = withDeviceOverrides(all.ui), iptv = all.iptv;
+  const saveUiPB = async patch => { await saveUi(patch, api.put); Object.assign(ui, patch); await refreshStore(); toast('Saved', { type: 'ok', timeout: 1200 }); };
   const saveIptv = async patch => { Object.assign(iptv, await api.put('/api/settings/iptv', patch)); toast('Saved', { type: 'ok', timeout: 1200 }); };
   const field = (label, control, hint) => h('label', { class: 'field' }, label, control, hint ? h('span', { class: 'dim small' }, hint) : null);
   const num = (obj, key, saver, min, max) => h('input', { class: 'input', type: 'number', min, max, value: obj[key], onChange: e => saver({ [key]: Number(e.target.value) }) });
   el.append(h('div', { class: 'card-box' }, h('h3', { style: { marginTop: 0 } }, 'Interface'),
     h('div', { class: 'set-grid' },
-      field('Start page', select([{ value: 'home', label: 'Home' }, { value: 'live', label: 'Live TV' }, { value: 'guide', label: 'TV Guide' }], ui.startPage, v => saveUi({ startPage: v }))),
-      field('Channel info banner (seconds)', num(ui, 'zapOverlaySeconds', saveUi, 1, 20)),
+      field('Start page', select(navEntries().filter(e => e.id !== 'search').map(e => ({ value: e.href.slice(2), label: e.label })), ui.startPage, v => saveUiPB({ startPage: v })), 'What opens first when you launch Lumen.'),
+      field('Clock', select([{ value: 'off', label: 'Hidden' }, { value: '12', label: '12-hour (3:45 PM)' }, { value: '24', label: '24-hour (15:45)' }], ui.clock || 'off', v => { saveUiPB({ clock: v }); setTimeout(startClock, 50); }), 'Shown in the top-right corner and in the player.'),
+      field('Channel info banner (seconds)', num(ui, 'zapOverlaySeconds', saveUiPB, 1, 20)),
       field('Live TV buffering', select([
         { value: 'smooth', label: 'Smooth (recommended) — extra buffer, no frame skipping' },
         { value: 'balanced', label: 'Balanced' },
-        { value: 'low', label: 'Low latency — closest to live, may stutter' }], ui.liveBuffer || 'smooth', v => saveUi({ liveBuffer: v })),
+        { value: 'low', label: 'Low latency — closest to live, may stutter' }], ui.liveBuffer || 'smooth', v => saveUiPB({ liveBuffer: v })),
         'If channels still buffer, also try Settings → Transcoding → Live TV playback → "Always remux".')),
-    h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: ui.showPreview, onChange: e => saveUi({ showPreview: e.target.checked }) }), 'Show live preview when selecting a channel')),
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: ui.showPreview, onChange: e => saveUiPB({ showPreview: e.target.checked }) }), 'Show live preview when selecting a channel'),
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!ui.resumeLastChannel, onChange: e => saveUiPB({ resumeLastChannel: e.target.checked }) }), 'Start playing the last watched channel when Lumen opens'),
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: ui.zapWrap !== false, onChange: e => saveUiPB({ zapWrap: e.target.checked }) }), 'Channel up/down wraps around from the last channel to the first')),
   h('div', { class: 'card-box', style: { marginTop: '18px' } }, h('h3', { style: { marginTop: 0 } }, 'IPTV'),
     h('div', { class: 'set-grid' },
       field('Playlist refresh (hours)', num(iptv, 'playlistRefreshHours', saveIptv, 1, 168)),
@@ -249,6 +275,8 @@ async function playbackTab(el) {
       field('Keep past EPG (hours)', num(iptv, 'epgPastHours', saveIptv, 0, 336), 'Needed for catch-up browsing in the guide.'),
       field('Load future EPG (days)', num(iptv, 'epgFutureDays', saveIptv, 1, 14)),
       field('Catch-up time offset (minutes)', num(iptv, 'timeshiftOffsetMinutes', saveIptv, -720, 720), 'Adjust if catch-up starts at the wrong time (provider timezone).'),
+      field('Start recordings early (minutes)', num(iptv, 'recordPadBefore', saveIptv, 0, 30), 'Covers programmes that start early.'),
+      field('End recordings late (minutes)', num(iptv, 'recordPadAfter', saveIptv, 0, 120), 'Covers overruns (sports, live events).'),
       field('Default User-Agent', h('input', { class: 'input', value: iptv.userAgent, placeholder: 'Browser default', onChange: e => saveIptv({ userAgent: e.target.value }) }))),
   ), h('div', { class: 'card-box', style: { marginTop: '18px' } }, h('h3', { style: { marginTop: 0 } }, 'Keyboard shortcuts (player)'),
     h('dl', { class: 'kv' }, ...[['Space / K', 'Play / pause'], ['← / →', 'Seek −10s / +30s'], ['↑ / ↓', 'Channel up / down (live) or volume'], ['0–9', 'Type a channel number'],
@@ -261,9 +289,28 @@ async function systemTab(el) {
   const auth = await api.get('/api/auth/status');
   const sess = h('div');
   el.append(h('div', { class: 'card-box' }, h('h3', { style: { marginTop: 0 } }, 'Active transcoding sessions'), sess),
+
     h('div', { class: 'card-box', style: { marginTop: '18px' } }, h('h3', { style: { marginTop: 0 } }, 'Security'),
       h('p', { class: 'muted' }, auth.required ? 'Password protection is enabled (APP_PASSWORD).' : 'Password protection is disabled. Set APP_PASSWORD in docker-compose.yml to require a login.'),
       auth.required ? btn('Sign out', async () => { await api.post('/api/auth/logout'); location.reload(); }, { iconName: 'logout' }) : null));
+  // Backup / restore
+  const withProv = h('input', { type: 'checkbox' });
+  const file = h('input', { type: 'file', accept: '.json,application/json', style: { display: 'none' }, onChange: async e => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      const data = JSON.parse(await f.text());
+      if (!(await confirmDialog('Import settings?', `This applies appearance, player, IPTV and transcoding settings, favourite lists, channel names/numbers/order and group settings from "${f.name}".`, { okLabel: 'Import' }))) return;
+      const r = await api.post('/api/settings/import', data);
+      toast(`Imported: ${r.settings} setting groups, ${r.favorites} favourites, ${r.channelPrefs} channel customisations${r.providersCreated ? `, ${r.providersCreated} providers` : ''}`, { type: 'ok', timeout: 8000 });
+      await refreshStore();
+    } catch (err) { toastErr(err); } finally { file.value = ''; }
+  } });
+  el.append(h('div', { class: 'card-box', style: { marginTop: '18px' } }, h('h3', { style: { marginTop: 0 } }, 'Backup & restore'),
+    h('p', { class: 'muted small', style: { marginTop: 0 } }, 'Export your settings and customisations (appearance, player, favourites lists, channel names/numbers/order, groups) to a file, and import them on this or another Lumen install.'),
+    h('label', { class: 'check' }, withProv, h('span', {}, 'Include IPTV provider logins', h('div', { class: 'dim small' }, 'The file will then contain your provider passwords — keep it private.'))),
+    h('div', { class: 'row wrap' },
+      btn('Export settings', () => { const a = h('a', { href: `/api/settings/export${withProv.checked ? '?providers=1' : ''}`, download: '' }); document.body.append(a); a.click(); a.remove(); }, { cls: 'primary', iconName: 'down' }),
+      btn('Import settings…', () => file.click(), { iconName: 'up' }), file)));
   const load = async () => {
     const list = await api.get('/api/system/sessions');
     sess.replaceChildren(list.length ? h('table', { class: 'tbl' }, h('thead', {}, h('tr', {}, ['Content', 'Mode', 'Accel', 'Idle', ''].map(x => h('th', {}, x)))),
@@ -278,13 +325,22 @@ async function systemTab(el) {
 // ---------------- Appearance ----------------
 async function appearanceTab(el) {
   const all = await api.get('/api/settings');
+  all.ui = withDeviceOverrides(all.ui);
   window.lumenSettings = all;
   let u = all.ui;
+  el.append(h('div', { class: 'card-box', style: { marginBottom: '18px', padding: '14px 18px' } },
+    h('label', { class: 'check', style: { margin: 0 } }, h('input', { type: 'checkbox', checked: deviceMode(), onChange: async e => {
+      setDeviceMode(e.target.checked);
+      if (!e.target.checked) { const fresh = await api.get('/api/settings'); window.lumenSettings = fresh; applyAppearance(fresh.ui); rerenderNav(); }
+      toast(e.target.checked ? 'This device now keeps its own appearance & player settings' : 'This device uses the shared settings again', { type: 'ok' });
+      el.replaceChildren(); appearanceTab(el);
+    } }), h('span', {}, h('b', {}, 'Separate settings for this device'),
+      h('div', { class: 'dim small' }, deviceMode() ? 'On: changes below only affect this browser/TV. Pinned rows stay shared.' : 'Off: changes below apply to every device that opens Lumen. Turn on to give e.g. your TV its own scale and sidebar.')))));
   // Apply instantly (optimistic); changes are batched and saved in the background.
   let pending = {};
   const persist = debounce(async () => {
     const patch = pending; pending = {};
-    try { await api.put('/api/settings/ui', patch); } catch (e) { toastErr(e); }
+    try { await saveUi(patch, api.put); } catch (e) { toastErr(e); }
   }, 300);
   const save = (patch, { nav = false } = {}) => {
     Object.assign(u, patch); Object.assign(pending, patch);
@@ -307,6 +363,14 @@ async function appearanceTab(el) {
     return h('div', { class: 'range-row' }, h('input', { type: 'range', min, max, step, value: u[key], onInput: e => { val.textContent = fmt(Number(e.target.value)); save({ [key]: Number(e.target.value) }); } }), val);
   };
 
+  // --- TV mode (per device) ---
+  const tvChips = h('div', { class: 'chips' });
+  const drawTv = () => tvChips.replaceChildren(...[['auto', `Auto${tvDetected() ? ' (TV detected)' : ''}`], ['on', 'On'], ['off', 'Off']].map(([v, l]) =>
+    h('button', { class: `chip ${tvModeSetting() === v ? 'active' : ''}`, onClick: () => { setTvModeSetting(v); drawTv(); } }, l)));
+  drawTv();
+  el.append(card('TV mode', field('Optimise for TV & remote control on this device', tvChips,
+    'Bigger focus highlights, no hover-only buttons, remote-friendly navigation (arrows / OK / Back). Turns on automatically on TV browsers and the Android TV app.')));
+
   // --- Theme ---
   const swatches = h('div', { class: 'swatches' });
   const drawSwatches = () => swatches.replaceChildren(
@@ -322,6 +386,7 @@ async function appearanceTab(el) {
     field('Interface scale', range('uiScale', 75, 140, 5, v => `${v}%`), 'Makes everything bigger or smaller, handy on TVs and small laptops.'),
     field('Poster size', chips([['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']], 'cardSize')),
     field('Sidebar style', chips([['rail', 'Compact (icons + labels)'], ['wide', 'Wide (labels beside icons)'], ['icons', 'Icons only']], 'navStyle', { nav: true })),
+    field('Ratings shown', chips([['audience', 'Audience'], ['critic', 'Critics'], ['both', 'Both'], ['none', 'None']], 'ratingDisplay'), 'Used on detail pages, the featured banner and list views (Rotten Tomatoes scores when your Plex agent provides them).'),
     check('showCardTitles', 'Show titles under posters'),
     check('blurSpoilers', 'Hide spoilers', 'Blurs thumbnails and descriptions of episodes you haven\'t watched (hover to read).')));
 
@@ -353,7 +418,7 @@ async function appearanceTab(el) {
       : h('div', {}, h('div', { class: 'small muted', style: { marginBottom: '6px' } }, 'Hidden Plex rows (click to show again):'),
         h('div', { class: 'chips' }, hubs.map(hb => h('button', { class: 'chip', onClick: () => { save({ hiddenHubs: (u.hiddenHubs || []).filter(x => x.id !== hb.id) }); drawHubs(); } }, '↺ ', hb.title)))));
   };
-  homeBox.append(sortableList(homeSections().map(s => ({ id: s.id, label: s.label, hidden: s.hidden, note: s.source === 'iptv' ? 'IPTV' : 'Plex' })),
+  homeBox.append(sortableList(homeSections().map(s => ({ id: s.id, label: s.label, hidden: s.hidden, note: s.note || (s.source === 'iptv' ? 'IPTV' : 'Plex') })),
     list => save({ homeOrder: list.map(x => x.id), homeHidden: [...((u.homeHidden || []).includes('hero') ? ['hero'] : []), ...list.filter(x => x.hidden).map(x => x.id)] })));
   drawHubs();
   el.append(card('Home screen', h('p', { class: 'muted small', style: { marginTop: 0 } }, 'Choose which rows appear on Home and in what order. Rows with nothing to show are skipped automatically.'),
@@ -362,7 +427,29 @@ async function appearanceTab(el) {
       h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !(u.homeHidden || []).includes('hero'), onChange: e => {
         const rest = (u.homeHidden || []).filter(x => x !== 'hero'); save({ homeHidden: e.target.checked ? rest : [...rest, 'hero'] }); } }),
         h('span', {}, 'Show the featured banner at the top of Home', h('div', { class: 'dim small' }, 'Rotating spotlight of newly added movies and shows.'))),
-      field('Featured banner: seconds per slide', range('heroInterval', 4, 20, 1, v => `${v}s`))), hubsBox));
+      field('Featured banner shows', heroSourceField()),
+      check('heroAutoplay', 'Rotate banner slides automatically'),
+      field('Featured banner: seconds per slide', range('heroInterval', 4, 20, 1, v => `${v}s`))), hubsBox,
+    h('p', { class: 'dim small' }, '📌 Pin more rows to Home from any Plex collection or playlist ("Pin to Home"), a library genre, or a Live TV group / favourites list (right-click it).')));
+
+  function heroSourceField() {
+    const wrap = h('div');
+    const colSel = h('select', { class: 'input', style: { marginTop: '8px', minWidth: '260px' }, onChange: e => save({ heroCollection: e.target.value, heroCollectionTitle: e.target.selectedOptions[0]?.textContent || '' }) },
+      h('option', { value: '' }, 'Loading collections…'));
+    const draw = () => {
+      wrap.replaceChildren(chips([['recent', 'Newly added'], ['continue', 'Continue watching'], ['random', 'Random picks'], ['collection', 'A collection']], 'heroSource'),
+        u.heroSource === 'collection' ? colSel : '');
+    };
+    wrap.addEventListener('click', () => setTimeout(draw, 0));
+    draw();
+    Promise.all((store.libraries || []).filter(l => l.type === 'movie' || l.type === 'show').map(l => api.get(`/api/plex/library/${l.key}/collections`).then(cs => cs.map(c => ({ ...c, lib: l.title }))).catch(() => [])))
+      .then(all => {
+        const cols = all.flat();
+        colSel.replaceChildren(h('option', { value: '' }, cols.length ? 'Choose a collection…' : 'No collections found'),
+          ...cols.map(c => h('option', { value: c.ratingKey, selected: String(c.ratingKey) === String(u.heroCollection) }, `${c.title} (${c.lib})`)));
+      });
+    return wrap;
+  }
 
   // --- Player ---
   const prev = h('div', { class: 'sub-preview' }, h('span', {}, 'This is how subtitles will look.'));
@@ -380,6 +467,22 @@ async function appearanceTab(el) {
     field('Autoplay countdown', range('autoplayCountdown', 3, 30, 1, v => `${v}s`)),
     check('autoSkipIntro', 'Automatically skip intros', 'Uses Plex intro markers. Otherwise a "Skip Intro" button is shown.'),
     check('autoSkipCredits', 'Automatically skip credits', 'Jumps to the next episode, or to the end, when credits start.'),
+    h('div', { class: 'set-grid', style: { marginTop: '10px' } },
+      field('When resuming', chips([['resume', 'Resume'], ['start', 'Start over'], ['ask', 'Ask me']], 'resumeMode')),
+      field('Mark as watched at', chips([[90, '90%'], [95, '95%'], ['credits', 'When credits start']], 'watchedAt'))),
+    h('h4', { style: { margin: '18px 0 10px' } }, 'Languages'),
+    h('div', { class: 'set-grid' },
+      field('Preferred audio language', langSelect('audioLang', 'Plex default')),
+      field('Subtitle language', langSelect('subtitleLang', 'Same as audio'))),
+    field('Show subtitles', chips([['plex', 'Plex default'], ['always', 'Always'], ['foreign', 'Only for foreign audio'], ['never', 'Never']], 'subtitleMode'),
+      '"Only for foreign audio" turns subtitles on when the audio isn\'t in your subtitle language (and uses forced subtitles otherwise).'),
+    h('h4', { style: { margin: '18px 0 10px' } }, 'Default quality (Plex)'),
+    h('div', { class: 'set-grid' },
+      field('At home (local network)', qualitySelect('qualityLocal')),
+      field('Away from home', qualitySelect('qualityRemote'))),
+    h('h4', { style: { margin: '18px 0 10px' } }, 'Controls'),
+    field('Hide controls after', range('controlsHideSeconds', 2, 10, 1, v => `${v}s`)),
+    field('Buttons shown in the player bar', buttonToggles()),
     h('h4', { style: { margin: '18px 0 10px' } }, 'Subtitles'),
     prev,
     h('div', { class: 'set-grid', style: { marginTop: '12px' } },
@@ -387,18 +490,89 @@ async function appearanceTab(el) {
       field('Background', subRange('subtitleBg', 0, 100, v => `${v}%`))),
     field('Colour', subColors, 'Applies to subtitles the browser renders. Subtitles burned in by Plex\'s transcoder use the size setting only.')));
 
+  // --- Live TV ---
+  el.append(card('Live TV channel list',
+    h('div', { class: 'set-grid' },
+      field('Row density', chips([['comfortable', 'Comfortable'], ['compact', 'Compact']], 'chDensity')),
+      field('Logo size', chips([['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']], 'chLogoSize'))),
+    check('chShowNumbers', 'Show channel numbers'),
+    check('chShowLogos', 'Show channel logos'),
+    check('chShowProgress', 'Show progress bar of the current programme'),
+    check('chShowNext', 'Show the next programme under each channel')));
+
+  function langSelect(key, emptyLabel) {
+    const langs = [['', emptyLabel], ['en', 'English'], ['es', 'Spanish'], ['fr', 'French'], ['de', 'German'], ['it', 'Italian'], ['pt', 'Portuguese'], ['nl', 'Dutch'], ['sv', 'Swedish'], ['no', 'Norwegian'], ['da', 'Danish'], ['fi', 'Finnish'], ['pl', 'Polish'], ['ru', 'Russian'], ['uk', 'Ukrainian'], ['tr', 'Turkish'], ['el', 'Greek'], ['ar', 'Arabic'], ['he', 'Hebrew'], ['hi', 'Hindi'], ['ja', 'Japanese'], ['ko', 'Korean'], ['zh', 'Chinese'], ['th', 'Thai'], ['vi', 'Vietnamese']];
+    return select(langs.map(([value, label]) => ({ value, label })), u[key] || '', v => save({ [key]: v }));
+  }
+  function qualitySelect(key) {
+    const q = [['auto', 'Auto (direct play when possible)'], ['original', 'Original'], ['20000', '20 Mbps 1080p'], ['12000', '12 Mbps 1080p'], ['8000', '8 Mbps 1080p'], ['4000', '4 Mbps 720p'], ['2000', '2 Mbps 720p'], ['720', '1.5 Mbps 480p']];
+    return select(q.map(([value, label]) => ({ value, label })), u[key] || 'auto', v => save({ [key]: v }));
+  }
+  function buttonToggles() {
+    const btns = [['rw', 'Skip back'], ['ff', 'Skip forward'], ['volume', 'Volume'], ['prevCh', 'Previous channel'], ['guide', 'Mini guide'], ['list', 'Channel list'],
+      ['audio', 'Audio tracks'], ['subs', 'Subtitles'], ['quality', 'Quality / settings'], ['info', 'Stream info'], ['pip', 'Picture-in-picture'], ['fullscreen', 'Fullscreen']];
+    const box = h('div', { class: 'chips' });
+    const draw = () => box.replaceChildren(...btns.map(([k, l]) => {
+      const on = (u.playerButtons || {})[k] !== false;
+      return h('button', { class: `chip ${on ? 'active' : ''}`, onClick: () => { save({ playerButtons: { ...(u.playerButtons || {}), [k]: !on } }); draw(); } }, l);
+    }));
+    draw();
+    return box;
+  }
+
   // --- TV Guide ---
   el.append(card('TV Guide',
     h('div', { class: 'set-grid' },
       field('Zoom (time scale)', range('guideScale', 3, 12, 1, v => `${Math.round((v / 6) * 100)}%`)),
-      field('Row height', range('guideRowHeight', 44, 96, 2, v => `${v}px`)))));
+      field('Row height', range('guideRowHeight', 44, 96, 2, v => `${v}px`)),
+      field('Hours shown', range('guideHours', 2, 24, 1, v => `${v}h`)),
+      field('Guide starts at', chips([['now', 'Just before now'], ['hour', 'Start of the hour']], 'guideStart'))),
+    check('guideCategoryColors', 'Colour-code programmes by category (sports, news, movies, kids…)')));
 
   el.append(h('div', { class: 'row' }, btn('Reset appearance to defaults', async () => {
     if (!(await confirmDialog('Reset appearance?', 'Theme, sizes, sidebar, home screen and player preferences go back to their defaults.', { okLabel: 'Reset', danger: true }))) return;
     const defaults = { theme: 'dark', accent: '#ff9f3d', uiScale: 100, cardSize: 'medium', showCardTitles: true, blurSpoilers: false, navStyle: 'rail', navOrder: [], navHidden: [],
       homeOrder: [], homeHidden: [], hiddenHubs: [], heroInterval: 8, autoplayNext: true, autoplayCountdown: 10, autoSkipIntro: false, autoSkipCredits: false,
       seekBack: 10, seekForward: 30, subtitleSize: 100, subtitleColor: '#ffffff', subtitleBg: 60, guideScale: 6, guideRowHeight: 62 };
+    if (deviceMode()) setDeviceMode(false);
     u = await api.put('/api/settings/ui', defaults); window.lumenSettings.ui = u; applyAppearance(u); rerenderNav();
     el.replaceChildren(); appearanceTab(el);
   }, { cls: 'danger', iconName: 'refresh' })));
+}
+
+// ---------------- Favourite lists ----------------
+async function favListsCard() {
+  const box = h('div');
+  const draw = async () => {
+    const lists = await api.get('/api/iptv/fav-lists');
+    box.replaceChildren(sortableList(lists.map(l => ({ id: l.id, label: `★ ${l.name}`, note: `${l.count} channel${l.count === 1 ? '' : 's'}` })),
+      items => api.put('/api/iptv/fav-lists-order', { order: items.map(x => x.id) }).catch(toastErr),
+      { toggles: false, actions: (x) => h('div', { class: 'row', style: { gap: '2px' } },
+        h('button', { class: 'btn ghost sm icon', title: 'Rename', html: icon('edit'), onClick: async () => { const n = window.prompt('Rename list', x.label.slice(2)); if (n?.trim()) { await api.put(`/api/iptv/fav-lists/${x.id}`, { name: n.trim() }); draw(); } } }),
+        h('button', { class: 'btn ghost sm icon danger', title: 'Delete', html: icon('trash'), onClick: async () => {
+          if (await confirmDialog(`Delete ${x.label}?`, 'Only the list is removed; the channels stay.', { okLabel: 'Delete', danger: true })) { try { await api.del(`/api/iptv/fav-lists/${x.id}`); draw(); } catch (e) { toastErr(e); } } } })) }));
+  };
+  await draw();
+  return h('div', { class: 'card-box', style: { marginBottom: '18px' } }, h('div', { class: 'row', style: { marginBottom: '10px' } }, h('h3', { class: 'grow', style: { margin: 0 } }, 'Favourite lists'),
+    btn('New list', async () => { const n = window.prompt('Name for the new list (e.g. Sports, Kids, News):'); if (n?.trim()) { await api.post('/api/iptv/fav-lists', { name: n.trim() }); draw(); } }, { cls: 'sm', iconName: 'plus' })),
+    h('p', { class: 'muted small', style: { marginTop: 0 } }, 'Each list appears as its own group in Live TV and the guide. Add channels with the ☆ button (you can pick the lists when you have more than one).'), box);
+}
+
+// ---------------- Parental lock ----------------
+async function parentalCard() {
+  const box = h('div', { class: 'card-box', style: { marginBottom: '18px' } });
+  const draw = async () => {
+    const st = await api.get('/api/iptv/parental');
+    const pin = h('input', { class: 'input', type: 'password', inputmode: 'numeric', maxlength: 8, placeholder: st.enabled ? 'New PIN' : '4–8 digits' });
+    const cur = h('input', { class: 'input', type: 'password', inputmode: 'numeric', maxlength: 8, placeholder: 'Current PIN' });
+    box.replaceChildren(h('h3', { style: { marginTop: 0 } }, '🔒 Parental lock'),
+      h('p', { class: 'muted small', style: { marginTop: 0 } }, st.enabled
+        ? 'PIN is set. Lock groups from Groups (🔓 button) or a group\'s right-click menu in Live TV. Locked groups are hidden from Live TV, the guide, VOD and search until the PIN is entered (unlocks for 4 hours on that device).'
+        : 'Set a PIN, then lock any channel or VOD group (adult, kids, sports…).'),
+      h('div', { class: 'row wrap' }, st.enabled ? cur : null, pin,
+        btn(st.enabled ? 'Change PIN' : 'Set PIN', async () => { try { await api.post('/api/iptv/parental/pin', { current: cur.value, pin: pin.value }); toast('PIN saved', { type: 'ok' }); draw(); } catch (e) { toastErr(e); } }, { cls: 'primary' }),
+        st.enabled ? btn('Remove PIN', async () => { try { await api.post('/api/iptv/parental/pin', { current: cur.value, pin: '' }); toast('Parental lock removed (all groups unlocked)', { type: 'ok' }); draw(); } catch (e) { toastErr(e); } }, { cls: 'danger' }) : null));
+  };
+  await draw();
+  return box;
 }

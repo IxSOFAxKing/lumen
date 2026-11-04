@@ -35,9 +35,11 @@ export function applyOrder(items, order = []) {
 
 export const heroHidden = () => (ui().homeHidden || []).includes('hero');
 
+const PIN_LABEL = { favList: 'Favourites list', iptvGroup: 'Live TV group', plexCollection: 'Plex collection', plexPlaylist: 'Plex playlist', plexGenre: 'Plex genre' };
 export function homeSections() {
   const u = ui();
-  return applyOrder(HOME_SECTIONS, u.homeOrder).map(s => ({ ...s, hidden: (u.homeHidden || []).includes(s.id) }));
+  const pins = (u.pinnedRows || []).map(p => ({ id: `pin:${p.id}`, label: `📌 ${p.title}`, source: 'pinned', note: PIN_LABEL[p.type] || 'Pinned', pin: p }));
+  return applyOrder([...pins, ...HOME_SECTIONS], u.homeOrder).map(s => ({ ...s, hidden: (u.homeHidden || []).includes(s.id) }));
 }
 
 // ---------- colour helpers ----------
@@ -87,4 +89,71 @@ export function applyAppearance(u = ui()) {
   if (!st) { st = document.createElement('style'); st.id = 'lumen-dynamic-style'; document.head.append(st); }
   const bg = Math.max(0, Math.min(100, Number(u.subtitleBg ?? 60))) / 100;
   st.textContent = `.player video::cue { font-size: ${(Number(u.subtitleSize) || 100) * 0.011}em; color: ${u.subtitleColor || '#fff'}; background: rgba(0,0,0,${bg}); }`;
+}
+
+// ---------- Pinned Home rows ----------
+// pin: { id, type: 'plexCollection'|'plexPlaylist'|'plexGenre'|'iptvGroup'|'favList', title, ...params }
+export const pinnedRows = () => ui().pinnedRows || [];
+export async function addPin(pin, apiPut) {
+  const list = pinnedRows().filter(p => p.id !== pin.id);
+  list.push(pin);
+  await saveUi({ pinnedRows: list }, apiPut);
+}
+export async function removePin(id, apiPut) {
+  const list = pinnedRows().filter(p => p.id !== id);
+  await saveUi({ pinnedRows: list }, apiPut);
+}
+export const isPinned = id => pinnedRows().some(p => p.id === id);
+
+// ---------- Ratings ----------
+/** Rating label(s) for a Plex item according to Settings → Appearance → Ratings. */
+export function ratingText(m) {
+  const mode = ui().ratingDisplay || 'audience';
+  if (mode === 'none' || !m) return null;
+  const critic = m.rating ? (/rottentomatoes/.test(m.ratingImage || '') ? `🍅 ${Math.round(m.rating * 10)}%` : `Critics ${Number(m.rating).toFixed(1)}`) : null;
+  const aud = m.audienceRating ? (/rottentomatoes/.test(m.audienceRatingImage || '') ? `🍿 ${Math.round(m.audienceRating * 10)}%` : `★ ${Number(m.audienceRating).toFixed(1)}`) : null;
+  if (mode === 'critic') return critic || aud;
+  if (mode === 'both') return [critic, aud].filter(Boolean).join('  ') || null;
+  return aud || critic;
+}
+
+// ---------- Per-device settings ----------
+// When enabled, appearance/player settings for this browser are stored locally (e.g. a TV can use a
+// bigger scale and a different sidebar than the desktop). Pinned rows and hidden Plex rows stay shared.
+const DEVICE_KEY = 'lumen.deviceUi';
+const SHARED_KEYS = ['pinnedRows', 'hiddenHubs'];
+function readDevice() { try { return JSON.parse(localStorage.getItem(DEVICE_KEY) || 'null'); } catch { return null; } }
+function writeDevice(v) { try { if (v) localStorage.setItem(DEVICE_KEY, JSON.stringify(v)); else localStorage.removeItem(DEVICE_KEY); } catch { /* storage blocked */ } }
+const omitShared = o => Object.fromEntries(Object.entries(o || {}).filter(([k]) => !SHARED_KEYS.includes(k)));
+
+export const deviceMode = () => !!readDevice();
+/** Server UI settings with this device's overrides applied. */
+export function withDeviceOverrides(serverUi) { const d = readDevice(); return d ? { ...serverUi, ...omitShared(d) } : serverUi; }
+export function setDeviceMode(on) { writeDevice(on ? omitShared(window.lumenSettings?.ui) : null); }
+
+/** Save UI settings — to this device when per-device mode is on (except shared keys), otherwise to the server. */
+export async function saveUi(patch, apiPut) {
+  Object.assign(window.lumenSettings.ui, patch);
+  const d = readDevice();
+  if (!d) return apiPut('/api/settings/ui', patch);
+  const shared = {}, local = { ...d };
+  for (const [k, v] of Object.entries(patch)) (SHARED_KEYS.includes(k) ? shared : local)[k] = v;
+  writeDevice(local);
+  if (Object.keys(shared).length) return apiPut('/api/settings/ui', shared);
+}
+
+// ---------- Clock ----------
+let clockTimer = null;
+export function clockText() {
+  const mode = ui().clock;
+  if (!mode || mode === 'off') return '';
+  return new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: mode === '12' });
+}
+export function startClock() {
+  let el = document.getElementById('lumen-clock');
+  if (!ui().clock || ui().clock === 'off') { el?.remove(); clearInterval(clockTimer); clockTimer = null; return; }
+  if (!el) { el = document.createElement('div'); el.id = 'lumen-clock'; document.body.append(el); }
+  const tick = () => { el.textContent = clockText(); };
+  tick();
+  clearInterval(clockTimer); clockTimer = setInterval(tick, 10000);
 }

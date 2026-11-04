@@ -19,6 +19,7 @@ export const DEFAULTS = {
   },
   iptv: {
     vodEnabled: true,                   // global switch for IPTV movies & series
+    recordPadBefore: 1, recordPadAfter: 3, // minutes
     epgRefreshHours: 12,
     playlistRefreshHours: 24,
     epgPastHours: 72,
@@ -28,6 +29,9 @@ export const DEFAULTS = {
   },
   ui: {
     startPage: 'home', zapOverlaySeconds: 4, showPreview: true, liveBuffer: 'smooth',
+    // Live TV
+    chShowNumbers: true, chShowLogos: true, chShowProgress: true, chShowNext: false,
+    chDensity: 'comfortable', chLogoSize: 'medium', zapWrap: true, resumeLastChannel: false,
     // Appearance
     theme: 'dark',                // dark | light | oled | system
     accent: '#ff9f3d',
@@ -38,14 +42,20 @@ export const DEFAULTS = {
     navStyle: 'rail',             // rail | wide | icons
     navOrder: [], navHidden: [],
     homeOrder: [], homeHidden: [], hiddenHubs: [],
-    heroInterval: 8,
+    heroInterval: 8, heroSource: 'recent', heroCollection: '', heroCollectionTitle: '', heroAutoplay: true,
+    ratingDisplay: 'audience', pinnedRows: [], libraryViews: {},
     // Player
     autoplayNext: true, autoplayCountdown: 10,
+    audioLang: '', subtitleMode: 'plex', subtitleLang: '',
+    qualityLocal: 'auto', qualityRemote: '8000',
+    resumeMode: 'resume', watchedAt: 90,
+    controlsHideSeconds: 3, playerButtons: {},
+    clock: 'off',
     autoSkipIntro: false, autoSkipCredits: false,
     seekBack: 10, seekForward: 30,
     subtitleSize: 100, subtitleColor: '#ffffff', subtitleBg: 60,
     // TV Guide
-    guideScale: 6, guideRowHeight: 62,
+    guideScale: 6, guideRowHeight: 62, guideHours: 8, guideStart: 'now', guideCategoryColors: true,
   },
 };
 

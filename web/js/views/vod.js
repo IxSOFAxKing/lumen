@@ -125,7 +125,7 @@ async function vodItem(el, route) {
   const tabs = h('div', { class: 'tabs' });
   const list = h('div', { class: 'ep-list' });
   const render = () => {
-    tabs.replaceChildren(...seasons.map(se => h('div', { class: `tab ${String(se.season) === cur ? 'active' : ''}`, onClick: () => { cur = String(se.season); render(); } }, `Season ${se.season}`)));
+    tabs.replaceChildren(...seasons.map(se => h('div', { tabindex: 0, class: `tab ${String(se.season) === cur ? 'active' : ''}`, onClick: () => { cur = String(se.season); render(); } }, `Season ${se.season}`)));
     const se = seasons.find(x => String(x.season) === cur);
     list.replaceChildren(...(se?.episodes || []).map(ep => {
       const e = allEps.find(x => x.id === ep.id);

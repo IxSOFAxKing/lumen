@@ -230,21 +230,60 @@ const DIRECT_CONTAINERS = ['mp4', 'm4v', 'mov', 'webm'];
 const DIRECT_VIDEO = ['h264', 'vp9', 'av1', 'vp8'];
 const DIRECT_AUDIO = ['aac', 'mp3', 'opus', 'vorbis', 'flac'];
 const TEXT_SUBS = ['srt', 'vtt', 'webvtt', 'subrip'];
+// The Android TV app's native player (ExoPlayer) can direct-play far more than a browser.
+const NATIVE = {
+  containers: ['mp4', 'm4v', 'mov', 'webm', 'mkv', 'mpegts', 'ts', 'avi'],
+  video: ['h264', 'hevc', 'h265', 'vp9', 'av1', 'vp8', 'mpeg2video', 'mpeg4'],
+  audio: ['aac', 'mp3', 'opus', 'vorbis', 'flac', 'ac3', 'eac3', 'dca', 'dts', 'truehd', 'pcm', 'alac'],
+  subs: ['srt', 'vtt', 'webvtt', 'subrip', 'ass', 'ssa', 'pgs', 'dvd_subtitle'],
+};
 
 const QUALITY = {
   20000: { bitrate: 20000, res: '1920x1080' }, 12000: { bitrate: 12000, res: '1920x1080' }, 8000: { bitrate: 8000, res: '1920x1080' },
   4000: { bitrate: 4000, res: '1280x720' }, 2000: { bitrate: 2000, res: '1280x720' }, 720: { bitrate: 1500, res: '854x480' },
 };
 
+// 3-letter → 2-letter language codes for matching Plex streams against preferences
+const LANG3 = { eng: 'en', spa: 'es', fre: 'fr', fra: 'fr', ger: 'de', deu: 'de', ita: 'it', por: 'pt', jpn: 'ja', kor: 'ko', chi: 'zh', zho: 'zh', rus: 'ru', ara: 'ar', hin: 'hi',
+  dut: 'nl', nld: 'nl', swe: 'sv', nor: 'no', nob: 'no', dan: 'da', fin: 'fi', pol: 'pl', tur: 'tr', gre: 'el', ell: 'el', heb: 'he', tha: 'th', vie: 'vi', ind: 'id', ces: 'cs', cze: 'cs', hun: 'hu', ukr: 'uk', ron: 'ro', rum: 'ro' };
+const langOf = s => { const t = String(s.languageTag || '').slice(0, 2).toLowerCase(); if (t) return t; const c = String(s.languageCode || '').toLowerCase(); return LANG3[c] || c.slice(0, 2); };
+const isPrivateIp = ip => /^(::ffff:)?(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.)|^::1$|^f[cd][0-9a-f]{2}:/i.test(ip || '');
+
 r.post('/play', ah(async (req, res) => {
-  const { ratingKey, offset = 0, mediaIndex = 0, audioStreamID, subtitleStreamID } = req.body || {};
+  const { ratingKey, offset = 0, mediaIndex = 0 } = req.body || {};
+  let { audioStreamID, subtitleStreamID } = req.body || {};
   const tconf = getConfig('transcode');
-  const quality = String(req.body.quality || tconf.plexQuality || 'auto');
+  // Preferences come from the client (they can be per-device); fall back to server settings.
+  const prefs = { ...getConfig('ui'), ...(req.body.prefs || {}) };
+  const local = isPrivateIp(req.ip);
+  const quality = String(req.body.quality || (local ? prefs.qualityLocal : prefs.qualityRemote) || tconf.plexQuality || 'auto');
   const meta = MC(await plex.plexFetch(`/library/metadata/${encodeURIComponent(ratingKey)}`, { params: { includeMarkers: 1, includeChapters: 1 } })).Metadata?.[0];
   if (!meta) return res.status(404).json({ error: 'Item not found' });
   const media = meta.Media?.[mediaIndex] || meta.Media?.[0];
   const part = media?.Part?.[0];
   if (!part) return res.status(404).json({ error: 'No playable media' });
+
+  // Preferred audio / subtitle languages (only when the user hasn't picked tracks explicitly)
+  {
+    const sts = part.Stream || [];
+    const audios = sts.filter(s => s.streamType === 2), subs = sts.filter(s => s.streamType === 3);
+    let audio = audios.find(s => s.selected) || audios[0];
+    if (audioStreamID === undefined && prefs.audioLang) {
+      const want = audios.find(s => langOf(s) === prefs.audioLang);
+      if (want && want !== audio) { audioStreamID = want.id; audio = want; }
+    }
+    if (subtitleStreamID === undefined && prefs.subtitleMode && prefs.subtitleMode !== 'plex') {
+      const subLang = prefs.subtitleLang || prefs.audioLang || 'en';
+      const pick = subs.find(s => langOf(s) === subLang && !s.forced) || subs.find(s => langOf(s) === subLang);
+      const forced = subs.find(s => s.forced && langOf(s) === subLang);
+      const current = subs.find(s => s.selected);
+      let want = null;
+      if (prefs.subtitleMode === 'always') want = pick || null;
+      else if (prefs.subtitleMode === 'foreign') want = audio && langOf(audio) && langOf(audio) !== subLang ? (pick || null) : (forced || null);
+      else if (prefs.subtitleMode === 'never') want = null;
+      if ((want?.id || 0) !== (current?.id || 0)) subtitleStreamID = want?.id || 0;
+    }
+  }
 
   // Persist stream selection on the Plex server so its transcoder honours it.
   if (audioStreamID !== undefined || subtitleStreamID !== undefined) {
@@ -258,9 +297,12 @@ r.post('/play', ah(async (req, res) => {
   const subId = subtitleStreamID !== undefined ? Number(subtitleStreamID) : (streams.find(s => s.streamType === 3 && s.selected)?.id || 0);
   const selSub = streams.find(s => s.streamType === 3 && s.id === subId) || null;
 
-  const direct = DIRECT_CONTAINERS.includes(media.container) && DIRECT_VIDEO.includes(media.videoCodec)
-    && DIRECT_AUDIO.includes(selAudio?.codec || media.audioCodec) && (!selAudio || selAudio === streams.find(s => s.streamType === 2))
-    && (!selSub || (selSub.key && TEXT_SUBS.includes(selSub.codec)));
+  const isNative = req.body.client === 'native';
+  const direct = isNative
+    ? NATIVE.containers.includes(media.container) && NATIVE.video.includes(media.videoCodec) && NATIVE.audio.includes(selAudio?.codec || media.audioCodec)
+    : DIRECT_CONTAINERS.includes(media.container) && DIRECT_VIDEO.includes(media.videoCodec)
+      && DIRECT_AUDIO.includes(selAudio?.codec || media.audioCodec) && (!selAudio || selAudio === streams.find(s => s.streamType === 2))
+      && (!selSub || (selSub.key && TEXT_SUBS.includes(selSub.codec)));
   const wantsOriginal = quality === 'original' || quality === 'auto';
 
   const base = {
@@ -270,7 +312,7 @@ r.post('/play', ah(async (req, res) => {
     media: (meta.Media || []).map((m, i) => ({ index: i, label: `${m.videoResolution || ''}${/^\d+$/.test(m.videoResolution) ? 'p' : ''} ${m.videoCodec || ''} ${m.container || ''}`.trim(), bitrate: m.bitrate })),
     audio: streams.filter(s => s.streamType === 2).map(s => ({ id: s.id, label: s.displayTitle || s.language || `Track ${s.index}`, selected: s.id === selAudio?.id })),
     subtitles: streams.filter(s => s.streamType === 3).map(s => ({ id: s.id, label: s.displayTitle || s.language || 'Subtitle', selected: s.id === selSub?.id })),
-    quality, sourceBitrate: media.bitrate,
+    quality, sourceBitrate: media.bitrate, network: local ? 'local' : 'remote',
   };
 
   if (direct && wantsOriginal && !req.body.forceTranscode) {
@@ -300,7 +342,7 @@ r.post('/play', ah(async (req, res) => {
   const session = crypto.randomUUID();
   const params = new URLSearchParams({
     path: `/library/metadata/${meta.ratingKey}`, mediaIndex: String(meta.Media.indexOf(media)), partIndex: '0', protocol: 'hls', fastSeek: '1',
-    directPlay: '0', directStream: wantsOriginal ? '1' : '0', directStreamAudio: '1', subtitleSize: String(Math.round(Number(getConfig('ui').subtitleSize) || 100)), audioBoost: '100',
+    directPlay: '0', directStream: wantsOriginal ? '1' : '0', directStreamAudio: '1', subtitleSize: String(Math.round(Number(prefs.subtitleSize) || 100)), audioBoost: '100',
     location: 'lan', offset: String(Math.floor(offset)), session, maxVideoBitrate: String(q.bitrate), videoBitrate: String(q.bitrate),
     videoQuality: '100', videoResolution: q.res, copyts: '1', mediaBufferSize: '102400', autoAdjustQuality: '0', hasMDE: '1',
     subtitles: selSub ? 'burn' : 'none',

@@ -14,6 +14,7 @@ import { syncProvider, applyVodSwitch } from './services/iptv.js';
 import { syncEpg, purgeOldProgrammes } from './services/epg.js';
 import { initRecorder, stopAllRecordings } from './services/recorder.js';
 import { serveCachedImage } from './services/imgcache.js';
+import { exportAll, importAll } from './services/backup.js';
 import { verifyImg } from './services/proxy.js';
 
 const app = express();
@@ -22,7 +23,7 @@ app.disable('x-powered-by');
 // gzip JSON / JS / CSS, but never the media streams (they must flow unbuffered).
 const NO_COMPRESS = /^\/api\/(stream|img|plex\/(t|file|image))\b/;
 app.use(compression({ filter: (req, res) => !NO_COMPRESS.test(req.path) && compression.filter(req, res) }));
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '25mb' }));
 
 // ---------- Auth ----------
 app.get('/api/auth/status', (req, res) => res.json({ required: auth.authEnabled(), authed: auth.isAuthed(req) }));
@@ -40,6 +41,15 @@ app.put('/api/settings/:section', (req, res) => {
   const after = setConfig(section, req.body || {});
   if (section === 'iptv' && (before.vodEnabled !== false) !== (after.vodEnabled !== false)) applyVodSwitch(after.vodEnabled !== false);
   res.json(after);
+});
+app.get('/api/settings/export', (req, res) => {
+  const data = exportAll({ includeProviders: req.query.providers === '1' });
+  res.setHeader('Content-Disposition', `attachment; filename="lumen-settings-${new Date().toISOString().slice(0, 10)}.json"`);
+  res.json(data);
+});
+app.post('/api/settings/import', (req, res, next) => {
+  try { const report = importAll(req.body); res.json(report); for (const p of db.prepare('SELECT id FROM providers WHERE last_sync IS NULL').all()) syncProvider(p.id).catch(() => {}); }
+  catch (e) { next(e); }
 });
 app.get('/api/system/hardware', async (req, res, next) => { try { res.json(await detectHardware()); } catch (e) { next(e); } });
 app.get('/api/system/sessions', (req, res) => res.json(listSessions()));

@@ -86,7 +86,7 @@ export default async function multiview(el, route) {
     grid.replaceChildren();
     for (let i = 0; i < layout; i++) {
       const t = tiles[i];
-      const tileEl = h('div', { class: `tile ${i === focus ? 'focus' : ''}`, onClick: () => setFocus(i) });
+      const tileEl = h('div', { tabindex: 0, class: `tile ${i === focus ? 'focus' : ''}`, onClick: () => setFocus(i) });
       if (t) {
         tileEl.append(h('div', { class: 'lbl' }, t.name || 'Channel'),
           h('div', { class: 'acts' },

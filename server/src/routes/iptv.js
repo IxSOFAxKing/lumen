@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { db } from '../db.js';
+import { db, tx } from '../db.js';
+import * as parental from '../services/parental.js';
 import { ah } from '../util.js';
 import * as iptv from '../services/iptv.js';
 import * as epg from '../services/epg.js';
@@ -83,7 +84,7 @@ r.put('/providers/:id', ah(async (req, res) => {
 
 r.delete('/providers/:id', (req, res) => {
   const id = Number(req.params.id);
-  for (const t of ['programmes', 'favorites', 'history', 'vod_progress']) db.prepare(`DELETE FROM ${t} WHERE provider_id = ?`).run(id);
+  for (const t of ['programmes', 'favorites', 'history', 'vod_progress', 'channel_prefs', 'category_prefs']) db.prepare(`DELETE FROM ${t} WHERE provider_id = ?`).run(id);
   db.prepare('DELETE FROM providers WHERE id = ?').run(id);
   res.json({ ok: true });
 });
@@ -97,94 +98,196 @@ r.post('/providers/:id/epg', ah(async (req, res) => res.json(await epg.syncEpg(r
 
 // ---------- Categories & channels ----------
 
+// Channel columns with the user's custom name / number applied (channel_prefs survives provider re-syncs).
+const CH_COLS = `c.id, COALESCE(cp.num, c.num) AS num, COALESCE(cp.name, c.name) AS name, c.name AS original_name, c.num AS original_num,
+  c.logo, c.category_id, c.epg_id, c.archive, c.archive_days, c.hidden,
+  (SELECT GROUP_CONCAT(f.list_id) FROM favorites f WHERE f.provider_id = c.provider_id AND f.channel_id = c.id) AS fav_lists`;
+const CH_JOIN = 'LEFT JOIN channel_prefs cp ON cp.provider_id = c.provider_id AND cp.channel_id = c.id';
+const shapeCh = r2 => { const lists = r2.fav_lists ? String(r2.fav_lists).split(',').map(Number) : []; return { ...r2, fav: lists.length ? 1 : 0, fav_lists: lists }; };
+
+// ---------- Categories ----------
+
 r.get('/providers/:id/categories', (req, res) => {
   const kind = req.query.kind || 'live';
   const all = req.query.all === '1';
   const table = kind === 'live' ? 'channels' : 'vod';
   const kindFilter = kind === 'live' ? '' : `AND t.kind = '${kind === 'series' ? 'series' : 'movie'}'`;
-  const rows = db.prepare(`SELECT c.id, c.name, c.hidden, c.sort,
+  const rows = db.prepare(`SELECT c.id, COALESCE(gp.name, c.name) AS name, c.name AS original_name, c.hidden, COALESCE(gp.sort, c.sort) AS sort,
+      COALESCE(gp.locked, 0) AS locked,
       (SELECT COUNT(*) FROM ${table} t WHERE t.provider_id = c.provider_id AND t.category_id = c.id ${kindFilter}) AS count
-    FROM categories c WHERE c.provider_id = ? AND c.kind = ? ${all ? '' : 'AND c.hidden = 0'} ORDER BY c.sort`).all(Number(req.params.id), kind);
+    FROM categories c LEFT JOIN category_prefs gp ON gp.provider_id = c.provider_id AND gp.kind = c.kind AND gp.id = c.id
+    WHERE c.provider_id = ? AND c.kind = ? ${all ? '' : 'AND c.hidden = 0'}
+    ORDER BY (gp.sort IS NULL), gp.sort, c.sort`).all(Number(req.params.id), kind);
   res.json(rows);
 });
 
+const upsertCatPref = db.prepare(`INSERT INTO category_prefs(provider_id, kind, id) VALUES (?,?,?) ON CONFLICT DO NOTHING`);
 r.put('/categories/:pid/:kind/:id', (req, res) => {
-  db.prepare('UPDATE categories SET hidden = ? WHERE provider_id = ? AND kind = ? AND id = ?')
-    .run(req.body.hidden ? 1 : 0, Number(req.params.pid), req.params.kind, req.params.id);
+  const pid = Number(req.params.pid), { kind, id } = req.params, b = req.body || {};
+  if (b.hidden !== undefined) db.prepare('UPDATE categories SET hidden = ? WHERE provider_id = ? AND kind = ? AND id = ?').run(b.hidden ? 1 : 0, pid, kind, id);
+  if (b.name !== undefined || b.locked !== undefined) {
+    upsertCatPref.run(pid, kind, id);
+    if (b.name !== undefined) db.prepare('UPDATE category_prefs SET name = ? WHERE provider_id = ? AND kind = ? AND id = ?').run(String(b.name || '').trim() || null, pid, kind, id);
+    if (b.locked !== undefined) {
+      if (b.locked && !parental.pinEnabled()) return res.status(400).json({ error: 'Set a parental PIN first (Settings → IPTV Providers → Parental lock).' });
+      db.prepare('UPDATE category_prefs SET locked = ? WHERE provider_id = ? AND kind = ? AND id = ?').run(b.locked ? 1 : 0, pid, kind, id);
+    }
+  }
+  res.json({ ok: true });
+});
+r.put('/categories-order/:pid/:kind', (req, res) => {
+  const pid = Number(req.params.pid), kind = req.params.kind;
+  const upd = db.prepare('UPDATE category_prefs SET sort = ? WHERE provider_id = ? AND kind = ? AND id = ?');
+  tx(() => (req.body.order || []).forEach((id, i) => { upsertCatPref.run(pid, kind, String(id)); upd.run(i, pid, kind, String(id)); }));
   res.json({ ok: true });
 });
 
-function channelRows(pid, { category, q, fav, includeHidden } = {}) {
-  const where = ['c.provider_id = ?'];
+// ---------- Channels ----------
+
+function channelRows(req, pid, { category, q, favList, includeHidden } = {}) {
+  const where = ['c.provider_id = ?', parental.lockClause(req, 'c', 'live')];
   const args = [Number(pid)];
   if (!includeHidden) where.push('c.hidden = 0', `(c.category_id IS NULL OR c.category_id NOT IN (SELECT id FROM categories WHERE provider_id = c.provider_id AND kind = 'live' AND hidden = 1))`);
   if (category) { where.push('c.category_id = ?'); args.push(String(category)); }
-  if (q) { where.push('c.name LIKE ?'); args.push(`%${q}%`); }
-  if (fav) where.push('f.channel_id IS NOT NULL');
-  return db.prepare(`SELECT c.id, c.num, c.name, c.logo, c.category_id, c.epg_id, c.archive, c.archive_days, c.hidden,
-      CASE WHEN f.channel_id IS NULL THEN 0 ELSE 1 END AS fav
-    FROM channels c LEFT JOIN favorites f ON f.provider_id = c.provider_id AND f.channel_id = c.id
-    WHERE ${where.join(' AND ')} ORDER BY ${fav ? 'f.position, ' : ''}c.num, c.name LIMIT 5000`).all(...args);
+  if (q) { where.push('(c.name LIKE ? OR cp.name LIKE ?)'); args.push(`%${q}%`, `%${q}%`); }
+  // Custom drag order applies inside a group; mixed lists (All channels, search) sort by channel number.
+  let join = '', order = category ? '(cp.sort IS NULL), cp.sort, COALESCE(cp.num, c.num), c.name' : 'COALESCE(cp.num, c.num), c.name';
+  if (favList) { join = 'JOIN favorites fl ON fl.provider_id = c.provider_id AND fl.channel_id = c.id AND fl.list_id = ?'; args.unshift(Number(favList)); order = 'fl.position, COALESCE(cp.num, c.num)'; }
+  return db.prepare(`SELECT ${CH_COLS} FROM channels c ${CH_JOIN} ${join}
+    WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT 5000`).all(...args).map(shapeCh);
 }
 
 function withNowNext(pid, rows) {
-  const nn = epg.nowNext(pid, rows.length < 900 ? rows.map(r => r.id) : null);
-  return rows.map(r => ({ ...r, now: nn[r.id]?.[0] || null, next: nn[r.id]?.[1] || null }));
+  const nn = epg.nowNext(pid, rows.length < 900 ? rows.map(r2 => r2.id) : null);
+  return rows.map(r2 => ({ ...r2, now: nn[r2.id]?.[0] || null, next: nn[r2.id]?.[1] || null }));
+}
+/** category param: '__all' | '__recent' | '__fav' (first list) | '__fav:<listId>' | <category id> */
+function favListFromCat(category) {
+  if (category === '__fav') return db.prepare('SELECT id FROM fav_lists ORDER BY position, id LIMIT 1').get()?.id || 1;
+  const m = /^__fav:(\d+)$/.exec(category || ''); return m ? Number(m[1]) : null;
+}
+function rowsForCategory(req, pid, category, extra = {}) {
+  const favList = favListFromCat(category);
+  if (favList) return channelRows(req, pid, { favList, ...extra });
+  if (category === '__recent') {
+    return db.prepare(`SELECT ${CH_COLS} FROM history h JOIN channels c ON c.provider_id = h.provider_id AND c.id = h.channel_id ${CH_JOIN}
+      WHERE h.provider_id = ? AND ${parental.lockClause(req, 'c', 'live')} ORDER BY h.watched_at DESC LIMIT 50`).all(Number(pid)).map(shapeCh);
+  }
+  return channelRows(req, pid, { category: category && category !== '__all' ? category : null, ...extra });
 }
 
 r.get('/providers/:id/channels', (req, res) => {
   const { category, q, all } = req.query;
-  const special = category === '__fav' ? { fav: true } : category === '__all' || !category ? {} : { category };
-  if (category === '__recent') {
-    const rows = db.prepare(`SELECT c.id, c.num, c.name, c.logo, c.category_id, c.epg_id, c.archive, c.archive_days,
-        CASE WHEN f.channel_id IS NULL THEN 0 ELSE 1 END AS fav
-      FROM history h JOIN channels c ON c.provider_id = h.provider_id AND c.id = h.channel_id
-      LEFT JOIN favorites f ON f.provider_id = c.provider_id AND f.channel_id = c.id
-      WHERE h.provider_id = ? ORDER BY h.watched_at DESC LIMIT 50`).all(Number(req.params.id));
-    return res.json(withNowNext(req.params.id, rows));
-  }
-  const rows = channelRows(req.params.id, { ...special, q, includeHidden: all === '1' });
+  const rows = q ? channelRows(req, req.params.id, { q, includeHidden: all === '1' }) : rowsForCategory(req, req.params.id, category, { includeHidden: all === '1' });
   res.json(req.query.epg === '0' ? rows : withNowNext(req.params.id, rows));
 });
 
 r.put('/channels/:pid/:id', (req, res) => {
-  db.prepare('UPDATE channels SET hidden = ? WHERE provider_id = ? AND id = ?').run(req.body.hidden ? 1 : 0, Number(req.params.pid), req.params.id);
+  const pid = Number(req.params.pid), id = req.params.id, b = req.body || {};
+  if (b.hidden !== undefined) db.prepare('UPDATE channels SET hidden = ? WHERE provider_id = ? AND id = ?').run(b.hidden ? 1 : 0, pid, id);
+  if (b.name !== undefined || b.num !== undefined) {
+    db.prepare('INSERT INTO channel_prefs(provider_id, channel_id) VALUES (?,?) ON CONFLICT DO NOTHING').run(pid, id);
+    if (b.name !== undefined) db.prepare('UPDATE channel_prefs SET name = ? WHERE provider_id = ? AND channel_id = ?').run(String(b.name || '').trim() || null, pid, id);
+    if (b.num !== undefined) db.prepare('UPDATE channel_prefs SET num = ? WHERE provider_id = ? AND channel_id = ?').run(b.num === '' || b.num === null ? null : Number(b.num), pid, id);
+  }
+  res.json({ ok: true });
+});
+/** Custom order of channels (within a group). */
+r.put('/channels-order/:pid', (req, res) => {
+  const pid = Number(req.params.pid);
+  const ins = db.prepare('INSERT INTO channel_prefs(provider_id, channel_id) VALUES (?,?) ON CONFLICT DO NOTHING');
+  const upd = db.prepare('UPDATE channel_prefs SET sort = ? WHERE provider_id = ? AND channel_id = ?');
+  tx(() => (req.body.order || []).forEach((id, i) => { ins.run(pid, String(id)); upd.run(i, pid, String(id)); }));
+  res.json({ ok: true });
+});
+r.delete('/channels-order/:pid', (req, res) => {
+  const ids = req.body?.ids || [];
+  const upd = db.prepare('UPDATE channel_prefs SET sort = NULL WHERE provider_id = ? AND channel_id = ?');
+  tx(() => ids.forEach(id => upd.run(Number(req.params.pid), String(id))));
   res.json({ ok: true });
 });
 
-// ---------- Favorites & history ----------
+// ---------- Favourite lists ----------
+
+r.get('/fav-lists', (req, res) => {
+  res.json(db.prepare(`SELECT l.id, l.name, l.position, (SELECT COUNT(*) FROM favorites f WHERE f.list_id = l.id) AS count
+    FROM fav_lists l ORDER BY l.position, l.id`).all());
+});
+r.post('/fav-lists', (req, res) => {
+  const name = String(req.body?.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Name is required' });
+  const pos = db.prepare('SELECT COALESCE(MAX(position), 0) + 1 AS p FROM fav_lists').get().p;
+  res.json({ id: Number(db.prepare('INSERT INTO fav_lists(name, position) VALUES (?,?)').run(name, pos).lastInsertRowid), name });
+});
+r.put('/fav-lists/:id', (req, res) => {
+  const name = String(req.body?.name || '').trim();
+  if (name) db.prepare('UPDATE fav_lists SET name = ? WHERE id = ?').run(name, Number(req.params.id));
+  res.json({ ok: true });
+});
+r.put('/fav-lists-order', (req, res) => {
+  const upd = db.prepare('UPDATE fav_lists SET position = ? WHERE id = ?');
+  tx(() => (req.body.order || []).forEach((id, i) => upd.run(i, Number(id))));
+  res.json({ ok: true });
+});
+r.delete('/fav-lists/:id', (req, res) => {
+  if (db.prepare('SELECT COUNT(*) AS n FROM fav_lists').get().n <= 1) return res.status(400).json({ error: 'You need at least one favourites list.' });
+  tx(() => { db.prepare('DELETE FROM favorites WHERE list_id = ?').run(Number(req.params.id)); db.prepare('DELETE FROM fav_lists WHERE id = ?').run(Number(req.params.id)); });
+  res.json({ ok: true });
+});
+
+// ---------- Favorites ----------
 
 r.get('/favorites', (req, res) => {
-  const rows = db.prepare(`SELECT f.provider_id, c.id, c.num, c.name, c.logo, c.archive, c.epg_id, 1 AS fav
-    FROM favorites f JOIN channels c ON c.provider_id = f.provider_id AND c.id = f.channel_id ORDER BY f.position, c.num`).all();
+  const list = Number(req.query.list) || favListFromCat('__fav');
+  const rows = db.prepare(`SELECT f.provider_id, ${CH_COLS} FROM favorites f JOIN channels c ON c.provider_id = f.provider_id AND c.id = f.channel_id ${CH_JOIN}
+    WHERE f.list_id = ? AND ${parental.lockClause(req, 'c', 'live')} ORDER BY f.position, COALESCE(cp.num, c.num)`).all(list).map(shapeCh);
   const byP = {};
   for (const r2 of rows) (byP[r2.provider_id] ||= []).push(r2);
   const out = [];
-  for (const [pid, list] of Object.entries(byP)) out.push(...withNowNext(pid, list));
+  for (const [pid, l] of Object.entries(byP)) out.push(...withNowNext(pid, l));
   res.json(out);
 });
 r.post('/favorites', (req, res) => {
   const { providerId, channelId } = req.body;
-  const max = db.prepare('SELECT COALESCE(MAX(position), 0) AS m FROM favorites').get().m;
-  db.prepare('INSERT OR IGNORE INTO favorites(provider_id, channel_id, position) VALUES (?,?,?)').run(Number(providerId), String(channelId), max + 1);
+  const list = Number(req.body.listId) || favListFromCat('__fav');
+  const max = db.prepare('SELECT COALESCE(MAX(position), 0) AS m FROM favorites WHERE list_id = ?').get(list).m;
+  db.prepare('INSERT OR IGNORE INTO favorites(list_id, provider_id, channel_id, position) VALUES (?,?,?,?)').run(list, Number(providerId), String(channelId), max + 1);
   res.json({ ok: true });
 });
 r.delete('/favorites/:pid/:cid', (req, res) => {
-  db.prepare('DELETE FROM favorites WHERE provider_id = ? AND channel_id = ?').run(Number(req.params.pid), req.params.cid);
+  if (req.query.list) db.prepare('DELETE FROM favorites WHERE list_id = ? AND provider_id = ? AND channel_id = ?').run(Number(req.query.list), Number(req.params.pid), req.params.cid);
+  else db.prepare('DELETE FROM favorites WHERE provider_id = ? AND channel_id = ?').run(Number(req.params.pid), req.params.cid);
   res.json({ ok: true });
 });
 r.put('/favorites/order', (req, res) => {
-  const upd = db.prepare('UPDATE favorites SET position = ? WHERE provider_id = ? AND channel_id = ?');
-  (req.body.order || []).forEach((f, i) => upd.run(i, Number(f.providerId), String(f.channelId)));
+  const list = Number(req.body.listId) || favListFromCat('__fav');
+  const upd = db.prepare('UPDATE favorites SET position = ? WHERE list_id = ? AND provider_id = ? AND channel_id = ?');
+  tx(() => (req.body.order || []).forEach((f, i) => upd.run(i, list, Number(f.providerId), String(f.channelId))));
   res.json({ ok: true });
 });
 
 r.get('/history', (req, res) => {
-  const rows = db.prepare(`SELECT h.provider_id, c.id, c.num, c.name, c.logo, c.archive, h.watched_at
-    FROM history h JOIN channels c ON c.provider_id = h.provider_id AND c.id = h.channel_id ORDER BY h.watched_at DESC LIMIT 30`).all();
+  const rows = db.prepare(`SELECT h.provider_id, h.watched_at, ${CH_COLS}
+    FROM history h JOIN channels c ON c.provider_id = h.provider_id AND c.id = h.channel_id ${CH_JOIN}
+    WHERE ${parental.lockClause(req, 'c', 'live')} ORDER BY h.watched_at DESC LIMIT 30`).all().map(shapeCh);
   const nn = {};
   for (const pid of new Set(rows.map(r2 => r2.provider_id))) nn[pid] = epg.nowNext(pid, rows.filter(r2 => r2.provider_id === pid).map(r2 => r2.id));
   res.json(rows.map(r2 => ({ ...r2, now: nn[r2.provider_id]?.[r2.id]?.[0] || null, next: nn[r2.provider_id]?.[r2.id]?.[1] || null })));
+});
+
+// ---------- Parental lock ----------
+
+r.get('/parental', (req, res) => res.json({ enabled: parental.pinEnabled(), unlocked: parental.isUnlocked(req) }));
+r.post('/parental/pin', (req, res) => {
+  const { current, pin } = req.body || {};
+  if (parental.pinEnabled() && !parental.checkPin(current || '')) return res.status(403).json({ error: 'Current PIN is incorrect' });
+  parental.setPin(pin || '');
+  if (!pin) db.prepare('UPDATE category_prefs SET locked = 0').run();
+  res.json({ ok: true, enabled: parental.pinEnabled() });
+});
+r.post('/parental/unlock', (req, res) => {
+  if (!parental.checkPin(req.body?.pin || '')) return res.status(403).json({ error: 'Incorrect PIN' });
+  res.json(parental.issueToken());
 });
 
 // ---------- EPG ----------
@@ -193,11 +296,7 @@ r.get('/guide/:pid', (req, res) => {
   const pid = req.params.pid;
   const from = Number(req.query.from) || now() - 3600;
   const to = Number(req.query.to) || from + 6 * 3600;
-  const { category } = req.query;
-  let channels;
-  if (category === '__fav') channels = channelRows(pid, { fav: true });
-  else if (category && category !== '__all') channels = channelRows(pid, { category });
-  else channels = channelRows(pid, {});
+  const channels = rowsForCategory(req, pid, req.query.category || '__all');
   const offset = Number(req.query.offset) || 0, limit = Math.min(Number(req.query.limit) || 100, 500);
   const page = channels.slice(offset, offset + limit);
   const programmes = epg.guide(pid, page.map(c => c.id), from, to);
@@ -225,8 +324,10 @@ async function hlsFor(input, { isLive, mode, label, startOffset, userAgent }) {
 r.post('/play/live', ah(async (req, res) => {
   const { providerId, channelId } = req.body;
   const p = iptv.getProvider(providerId);
-  const ch = db.prepare('SELECT * FROM channels WHERE provider_id = ? AND id = ?').get(p.id, String(channelId));
-  if (!ch) return res.status(404).json({ error: 'Channel not found' });
+  const ch0 = db.prepare('SELECT * FROM channels WHERE provider_id = ? AND id = ?').get(p.id, String(channelId));
+  if (!ch0) return res.status(404).json({ error: 'Channel not found' });
+  const pref = db.prepare('SELECT name, num FROM channel_prefs WHERE provider_id = ? AND channel_id = ?').get(p.id, ch0.id) || {};
+  const ch = { ...ch0, name: pref.name || ch0.name, num: pref.num ?? ch0.num };
   db.prepare('INSERT INTO history(provider_id, channel_id, watched_at) VALUES (?,?,unixepoch()) ON CONFLICT DO UPDATE SET watched_at = unixepoch()').run(p.id, ch.id);
   const mode = liveMode(req.body.mode);
   const info = { channel: { ...ch, providerId: p.id }, live: true };
@@ -258,7 +359,7 @@ r.post('/play/vod', ah(async (req, res) => {
   ext = (ext || 'mp4').toLowerCase();
   const url = kind === 'episode' ? iptv.episodeUrl(p, id, ext) : iptv.movieUrl(p, id, ext);
   const mode = req.body.mode || 'auto';
-  if ((mode === 'auto' || mode === 'direct') && ['mp4', 'm4v', 'webm', 'mov'].includes(ext)) {
+  if ((mode === 'auto' || mode === 'direct') && (['mp4', 'm4v', 'webm', 'mov'].includes(ext) || req.body.client === 'native')) {
     return res.json({ type: 'file', url: proxied(url, iptv.userAgent(p)), method: 'direct', startOffset: 0, seekTo: Number(offset) || 0 });
   }
   if (ext === 'm3u8') return res.json({ type: 'hls', url: proxied(url, iptv.userAgent(p)), method: 'direct-hls', startOffset: 0, seekTo: Number(offset) || 0 });
@@ -270,7 +371,7 @@ r.post('/play/vod', ah(async (req, res) => {
 
 r.get('/vod/:pid', (req, res) => {
   const { kind = 'movie', category, q, sort = 'added', start = 0, size = 60 } = req.query;
-  const where = ['v.provider_id = ?', 'v.kind = ?', `(v.category_id IS NULL OR v.category_id NOT IN (SELECT id FROM categories WHERE provider_id = v.provider_id AND kind = ? AND hidden = 1))`];
+  const where = ['v.provider_id = ?', 'v.kind = ?', `(v.category_id IS NULL OR v.category_id NOT IN (SELECT id FROM categories WHERE provider_id = v.provider_id AND kind = ? AND hidden = 1))`, parental.lockClause(req, 'v', kind === 'series' ? 'series' : 'vod')];
   const args = [Number(req.params.pid), kind, kind === 'series' ? 'series' : 'vod'];
   if (category && category !== '__all') { where.push('v.category_id = ?'); args.push(String(category)); }
   if (q) { where.push('v.name LIKE ?'); args.push(`%${q}%`); }
@@ -286,7 +387,7 @@ r.get('/vod/:pid/discover', (req, res) => {
   const pid = Number(req.params.pid);
   const kind = req.query.kind === 'series' ? 'series' : 'movie';
   const catKind = kind === 'series' ? 'series' : 'vod';
-  const visible = `v.provider_id = ? AND v.kind = ? AND (v.category_id IS NULL OR v.category_id NOT IN (SELECT id FROM categories WHERE provider_id = v.provider_id AND kind = ? AND hidden = 1))`;
+  const visible = `v.provider_id = ? AND v.kind = ? AND (v.category_id IS NULL OR v.category_id NOT IN (SELECT id FROM categories WHERE provider_id = v.provider_id AND kind = ? AND hidden = 1)) AND ${parental.lockClause(req, 'v', catKind)}`;
   const q = (order, limit, extra = '', args = []) => db.prepare(`SELECT v.*, pr.position, pr.duration FROM vod v
     LEFT JOIN vod_progress pr ON pr.provider_id = v.provider_id AND pr.kind = v.kind AND pr.id = v.id
     WHERE ${visible} ${extra} ORDER BY ${order} LIMIT ${limit}`).all(pid, kind, catKind, ...args);
@@ -325,7 +426,8 @@ r.get('/vod/:pid/series/:id', ah(async (req, res) => {
 
 r.post('/progress', (req, res) => {
   const { providerId, kind, id, position, duration, title, poster, parentId } = req.body;
-  if (duration && position / duration > 0.93) {
+  const threshold = Math.min(0.99, Math.max(0.5, (Number(req.body.watchedAt) || 93) / 100));
+  if (duration && position / duration >= threshold) {
     db.prepare('INSERT INTO vod_progress(provider_id, kind, id, position, duration, title, poster, parent_id, updated_at) VALUES (?,?,?,?,?,?,?,?,unixepoch()) ON CONFLICT DO UPDATE SET position = -1, updated_at = unixepoch()')
       .run(Number(providerId), kind, String(id), -1, duration, title, poster, parentId ? String(parentId) : null);
   } else {
@@ -346,7 +448,7 @@ r.get('/search', (req, res) => {
   const q = String(req.query.q || '').trim();
   if (q.length < 2) return res.json({ channels: [], movies: [], series: [], programmes: [] });
   const like = `%${q}%`;
-  const channels = db.prepare('SELECT provider_id, id, num, name, logo, archive FROM channels WHERE name LIKE ? AND hidden = 0 LIMIT 40').all(like);
+  const channels = db.prepare(`SELECT c.provider_id, ${CH_COLS} FROM channels c ${CH_JOIN} WHERE (c.name LIKE ? OR cp.name LIKE ?) AND c.hidden = 0 AND ${parental.lockClause(req, 'c', 'live')} LIMIT 40`).all(like, like).map(shapeCh);
   const vodOn = iptv.vodGloballyEnabled();
   const movies = !vodOn ? [] : db.prepare("SELECT v.* FROM vod v JOIN providers p ON p.id = v.provider_id WHERE p.enabled = 1 AND p.vod_enabled = 1 AND v.kind = 'movie' AND v.name LIKE ? LIMIT 40").all(like);
   const series = !vodOn ? [] : db.prepare("SELECT v.* FROM vod v JOIN providers p ON p.id = v.provider_id WHERE p.enabled = 1 AND p.series_enabled = 1 AND v.kind = 'series' AND v.name LIKE ? LIMIT 40").all(like);
@@ -365,6 +467,10 @@ r.post('/recordings', (req, res) => {
   start = Number(start) || now();
   stop = Number(stop) || start + 3600;
   if (stop <= now()) return res.status(400).json({ error: 'That programme has already ended — use catch-up instead.' });
+  // Padding (Settings → Playback → Recording): start early / end late to cover schedule drift.
+  const conf = getConfig('iptv');
+  const before = Math.max(0, Number(conf.recordPadBefore) || 0) * 60, after = Math.max(0, Number(conf.recordPadAfter) || 0) * 60;
+  if (req.body.pad !== false) { start = Math.max(now(), start - before); stop += after; }
   res.json({ id: dvr.schedule({ providerId, channelId, title, descr, start, stop }) });
 });
 r.post('/recordings/:id/cancel', (req, res) => { dvr.cancel(Number(req.params.id)); res.json({ ok: true }); });

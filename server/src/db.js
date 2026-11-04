@@ -122,6 +122,40 @@ const provCols = db.prepare('PRAGMA table_info(providers)').all().map(c => c.nam
 if (!provCols.includes('vod_enabled')) db.exec('ALTER TABLE providers ADD COLUMN vod_enabled INTEGER DEFAULT 1');
 if (!provCols.includes('series_enabled')) db.exec('ALTER TABLE providers ADD COLUMN series_enabled INTEGER DEFAULT 1');
 
+// User customisations that must survive provider re-syncs (channels/categories are rebuilt on sync).
+db.exec(`
+CREATE TABLE IF NOT EXISTS channel_prefs (
+  provider_id INTEGER NOT NULL, channel_id TEXT NOT NULL,
+  name TEXT, num INTEGER, sort INTEGER,
+  PRIMARY KEY (provider_id, channel_id)
+);
+CREATE TABLE IF NOT EXISTS category_prefs (
+  provider_id INTEGER NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL,
+  name TEXT, sort INTEGER, locked INTEGER DEFAULT 0,
+  PRIMARY KEY (provider_id, kind, id)
+);
+CREATE TABLE IF NOT EXISTS fav_lists (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  position INTEGER DEFAULT 0
+);
+`);
+if (!db.prepare('SELECT COUNT(*) AS n FROM fav_lists').get().n) db.prepare("INSERT INTO fav_lists(id, name, position) VALUES (1, 'Favorites', 0)").run();
+// favorites: one row per (list, channel) — migrate from the single-list schema
+if (!db.prepare('PRAGMA table_info(favorites)').all().some(c => c.name === 'list_id')) {
+  db.exec(`
+    BEGIN;
+    CREATE TABLE favorites_new (
+      list_id INTEGER NOT NULL DEFAULT 1, provider_id INTEGER NOT NULL, channel_id TEXT NOT NULL, position INTEGER DEFAULT 0,
+      PRIMARY KEY (list_id, provider_id, channel_id)
+    );
+    INSERT INTO favorites_new(list_id, provider_id, channel_id, position) SELECT 1, provider_id, channel_id, position FROM favorites;
+    DROP TABLE favorites;
+    ALTER TABLE favorites_new RENAME TO favorites;
+    COMMIT;
+  `);
+}
+
 const getStmt = db.prepare('SELECT value FROM settings WHERE key = ?');
 const setStmt = db.prepare('INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
 

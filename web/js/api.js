@@ -1,7 +1,9 @@
 async function request(method, url, body) {
+  const headers = body !== undefined ? { 'Content-Type': 'application/json' } : {};
+  try { const t = JSON.parse(sessionStorage.getItem('lumen.unlock') || 'null'); if (t && t.expires > Date.now()) headers['X-Lumen-Unlock'] = t.token; } catch { /* no storage */ }
   const res = await fetch(url, {
     method,
-    headers: body !== undefined ? { 'Content-Type': 'application/json' } : {},
+    headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
     credentials: 'same-origin',
   });
@@ -41,7 +43,7 @@ export const api = {
   clearCache: () => cache.clear(),
   post: (u, b = {}) => mutate('POST', u, b),
   put: (u, b = {}) => mutate('PUT', u, b),
-  del: (u) => mutate('DELETE', u),
+  del: (u, b) => mutate('DELETE', u, b),
 };
 
 export const qs = (o) => {

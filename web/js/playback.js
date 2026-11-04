@@ -1,6 +1,23 @@
 import { api } from './api.js';
 import { openPlayer } from './player.js';
-import { toast, toastErr, nowS, fmtTime } from './ui.js';
+import { toast, toastErr, nowS, fmtTime, fmtDuration, modal, h } from './ui.js';
+
+const uiPrefs = () => window.lumenSettings?.ui || {};
+
+/** Apply Settings → Appearance → Player → "When resuming": resume, start over, or ask. */
+async function resolveResume(offset, title) {
+  if (!offset || offset < 30) return offset || 0;
+  const mode = uiPrefs().resumeMode || 'resume';
+  if (mode === 'start') return 0;
+  if (mode !== 'ask') return offset;
+  return new Promise(resolve => {
+    let chosen = null;
+    modal({ title: title || 'Resume?', body: h('p', { class: 'muted' }, `You stopped at ${fmtDuration(offset)}.`), onClose: () => resolve(chosen ?? -1),
+      actions: [{ label: 'Start over', onClick: () => { chosen = 0; } }, { label: `Resume from ${fmtDuration(offset)}`, primary: true, onClick: () => { chosen = offset; } }] });
+  });
+}
+/** Fraction of an item after which it counts as watched (Settings → Player). */
+const watchedFraction = () => { const w = uiPrefs().watchedAt; return w === 'credits' ? null : Math.min(0.99, Math.max(0.5, (Number(w) || 90) / 100)); };
 
 const PLEX_QUALITIES = [
   { value: 'auto', label: 'Auto (direct play when possible)' }, { value: 'original', label: 'Original (direct stream)' },
@@ -24,12 +41,16 @@ async function plexNext(item) {
  */
 export async function playPlex(ratingKey, opts = {}) {
   const state = { quality: opts.quality, audio: undefined, subtitle: undefined, mediaIndex: opts.mediaIndex || 0, forceTranscode: false, transcoder: undefined };
+  const u = uiPrefs();
+  const prefs = { audioLang: u.audioLang, subtitleMode: u.subtitleMode, subtitleLang: u.subtitleLang, subtitleSize: u.subtitleSize, qualityLocal: u.qualityLocal, qualityRemote: u.qualityRemote };
   const fetchDesc = async (offset) => api.post('/api/plex/play', {
-    ratingKey, offset, quality: state.quality, mediaIndex: state.mediaIndex,
+    ratingKey, offset, quality: state.quality, mediaIndex: state.mediaIndex, prefs, client: window.LumenNative ? 'native' : 'web',
     audioStreamID: state.audio, subtitleStreamID: state.subtitle, forceTranscode: state.forceTranscode, transcoder: state.transcoder,
   });
   try {
-    const desc = await fetchDesc(opts.offset || 0);
+    const start = await resolveResume(opts.offset || 0);
+    if (start < 0) return; // dialog dismissed
+    const desc = await fetchDesc(start);
     const item = await api.get(`/api/plex/meta/${ratingKey}`).catch(() => ({}));
     let nextItem = null;
     if (opts.queue && opts.queueIndex !== undefined) nextItem = opts.queue[opts.queueIndex + 1] || null;
@@ -48,7 +69,16 @@ export async function playPlex(ratingKey, opts = {}) {
         label: nextItem.type === 'episode' ? `S${nextItem.parentIndex}E${nextItem.index} · ${nextItem.title}` : nextItem.title,
         run: () => playPlex(nextItem.ratingKey, opts.queue ? { queue: opts.queue, queueIndex: opts.queueIndex + 1 } : {}),
       } : null,
-      progress: (pos, dur, st) => api.post('/api/plex/timeline', { ratingKey, state: st, time: pos, duration: dur, session: currentDesc?.session }).catch(() => {}),
+      progress: (pos, dur, st) => {
+        api.post('/api/plex/timeline', { ratingKey, state: st, time: pos, duration: dur, session: currentDesc?.session }).catch(() => {});
+        // Mark as watched at the configured point (percentage, or when the credits start)
+        if (!scrobbled && dur > 60) {
+          const f = watchedFraction();
+          const credits = (currentDesc?.markers || []).find(m => m.type === 'credits');
+          const reached = f === null ? (credits ? pos * 1000 >= credits.startTimeOffset : pos / dur >= 0.95) : pos / dur >= f;
+          if (reached) { scrobbled = true; api.post(`/api/plex/watched/${ratingKey}`).catch(() => {}); }
+        }
+      },
       reload: async ({ offset, mode, audio, subtitle: sub, quality, mediaIndex }) => {
         if (audio !== undefined) state.audio = audio;
         if (sub !== undefined) state.subtitle = sub;
@@ -62,7 +92,7 @@ export async function playPlex(ratingKey, opts = {}) {
         return { desc: d, meta: buildMeta(d) };
       },
     });
-    let currentDesc = desc;
+    let currentDesc = desc, scrobbled = false;
     return openPlayer(desc, buildMeta(desc));
   } catch (e) { toastErr(e); }
 }
@@ -76,6 +106,7 @@ export async function playLive(providerId, channel, channels = [channel], title 
     const meta = {
       title: ch.name, subtitle: ch.now ? `${fmtTime(ch.now.start)} – ${fmtTime(ch.now.stop)} · ${ch.now.title}` : '',
       live: true, channel: ch, providerId,
+      catchup: (prog) => playCatchup(providerId, ch, prog),
       reload: async ({ mode: m }) => (await open(ch, m)),
     };
     return { desc: d, meta };
@@ -106,13 +137,15 @@ export async function playCatchup(providerId, channel, prog) {
 // ---------------- IPTV VOD ----------------
 
 export async function playVod(providerId, { kind = 'movie', id, ext, title, subtitle, poster, parentId, offset = 0, duration, next }) {
-  const req = (off, mode) => api.post('/api/iptv/play/vod', { providerId, kind, id, ext, offset: off, mode });
+  const req = (off, mode) => api.post('/api/iptv/play/vod', { providerId, kind, id, ext, offset: off, mode, client: window.LumenNative ? 'native' : 'web' });
   try {
+    offset = await resolveResume(offset, title);
+    if (offset < 0) return;
     const desc = await req(offset);
     return openPlayer(desc, {
       title, subtitle, duration,
       next,
-      progress: (pos, dur) => api.post('/api/iptv/progress', { providerId, kind, id, position: pos, duration: dur, title, poster, parentId }).catch(() => {}),
+      progress: (pos, dur) => api.post('/api/iptv/progress', { providerId, kind, id, position: pos, duration: dur, title, poster, parentId, watchedAt: Math.round((watchedFraction() ?? 0.95) * 100) }).catch(() => {}),
       reload: ({ offset: off, mode }) => req(off, mode),
     });
   } catch (e) { toastErr(e); }

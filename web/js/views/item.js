@@ -4,6 +4,7 @@ import { icon } from '../icons.js';
 import { go } from '../app.js';
 import { plexRow, plexCard } from '../plexcards.js';
 import { playPlex } from '../playback.js';
+import { ratingText, addPin, removePin, isPinned } from '../appearance.js';
 
 function hero(m, actions) {
   const art = plexImg(m.art || m.grandparentArt || m.parentArt, 1920, 1080);
@@ -12,8 +13,8 @@ function hero(m, actions) {
   if (m.year) meta.push(m.year);
   if (m.contentRating) meta.push(h('span', { class: 'badge' }, m.contentRating));
   if (m.duration && m.type !== 'show') meta.push(fmtRuntime(m.duration / 1000));
-  if (m.audienceRating) meta.push(`★ ${Number(m.audienceRating).toFixed(1)}`);
-  else if (m.rating) meta.push(`★ ${Number(m.rating).toFixed(1)}`);
+  const rt = ratingText(m);
+  if (rt) meta.push(rt);
   if (m.type === 'show' && m.childCount) meta.push(`${m.childCount} season${m.childCount > 1 ? 's' : ''}`);
   if (m.type === 'season' && m.leafCount) meta.push(`${m.leafCount} episodes`);
   const media = m.Media?.[0];
@@ -110,7 +111,7 @@ async function itemView(el, route) {
   }).catch(() => {});
 }
 
-async function listView(el, title, sub, items, art) {
+async function listView(el, title, sub, items, pin) {
   el.className = 'page';
   const playAll = (shuffle) => {
     const q = items.filter(i => ['movie', 'episode', 'clip'].includes(i.type));
@@ -118,7 +119,7 @@ async function listView(el, title, sub, items, art) {
     if (q[0]) playPlex(q[0].ratingKey, { queue: q, queueIndex: 0 });
   };
   el.append(h('div', { class: 'page-head' }, h('div', { class: 'grow' }, h('h1', {}, title), h('div', { class: 'muted' }, sub)),
-    btn('Play all', () => playAll(false), { cls: 'primary', iconName: 'play' }), btn('Shuffle', () => playAll(true), { iconName: 'shuffle' })));
+    btn('Play all', () => playAll(false), { cls: 'primary', iconName: 'play' }), btn('Shuffle', () => playAll(true), { iconName: 'shuffle' }), pin ? pinButton(pin) : null));
   if (!items.length) { el.append(empty('This list is empty')); return; }
   const allEps = items.every(i => i.type === 'episode');
   el.append(allEps ? h('div', { class: 'ep-list' }, items.map(episodeRow)) : h('div', { class: 'grid' }, items.map(i => plexCard(i))));
@@ -126,13 +127,23 @@ async function listView(el, title, sub, items, art) {
 
 async function playlistView(el, route) {
   const pl = await api.cached(`/api/plex/playlist/${route.parts[0]}`, 30000);
-  return listView(el, pl.title, `${pl.leafCount || pl.items.length} items${pl.duration ? ' · ' + fmtRuntime(pl.duration / 1000) : ''}`, pl.items);
+  return listView(el, pl.title, `${pl.leafCount || pl.items.length} items${pl.duration ? ' · ' + fmtRuntime(pl.duration / 1000) : ''}`, pl.items, { id: `plexPlaylist:${route.parts[0]}`, type: 'plexPlaylist', key: route.parts[0], title: pl.title });
 }
 
 async function collectionView(el, route) {
   const key = route.parts[0];
   const [meta, items] = await Promise.all([api.get(`/api/plex/meta/${key}`).catch(() => ({})), api.get(`/api/plex/collection/${key}/items`)]);
-  return listView(el, meta.title || 'Collection', meta.summary || `${items.length} items`, items);
+  return listView(el, meta.title || 'Collection', meta.summary || `${items.length} items`, items, { id: `plexCollection:${key}`, type: 'plexCollection', key, title: meta.title || 'Collection' });
+}
+
+/** "Pin to Home" toggle button for a Plex collection / playlist / genre. */
+export function pinButton(pin) {
+  const b = btn(isPinned(pin.id) ? 'Pinned to Home' : 'Pin to Home', async () => {
+    if (isPinned(pin.id)) { await removePin(pin.id, api.put); toast('Removed from Home'); }
+    else { await addPin(pin, api.put); toast(`"${pin.title}" pinned to Home`, { type: 'ok' }); }
+    b.querySelector('span').textContent = isPinned(pin.id) ? 'Pinned to Home' : 'Pin to Home';
+  }, { iconName: 'home' });
+  return b;
 }
 
 export const views = { item: itemView, playlist: playlistView, collection: collectionView };

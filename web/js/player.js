@@ -1,6 +1,8 @@
 import { h, esc, fmtDuration, fmtTime, nowS, logo, toast } from './ui.js';
 import { icon, seekIcon } from './icons.js';
 import { attachEngine, releaseDesc, nextMode } from './engine.js';
+import { channelRowContent } from './chrow.js';
+import { clockText } from './appearance.js';
 import { api } from './api.js';
 
 let current = null;
@@ -22,6 +24,7 @@ export function closePlayer() { current?.close(); }
  * }
  */
 export function openPlayer(desc, meta = {}) {
+  if (window.LumenNative?.play) return openNative(desc, meta);
   if (current && !current.closed) { current.report('stopped'); current.load(desc, meta); return current; }
   current = new Player(desc, meta);
   return current;
@@ -58,6 +61,7 @@ class Player {
     this.el = h('div', { class: 'player', onMousemove: () => this.poke(), onClick: (e) => { if (e.target === this.video || e.target.classList.contains('p-center')) { if (matchMedia('(pointer:coarse)').matches) this.poke(); else this.toggle(); } } });
     this.titleEl = h('div', { class: 'ttl' }); this.subEl = h('div', { class: 'sub' });
     this.top = h('div', { class: 'p-top' }, pbtn('back', 'Back (Esc)', () => this.close()), h('div', { class: 'grow' }, this.titleEl, this.subEl),
+      this.clockEl = h('span', { class: 'p-clock' }),
       this.recBtn = h('button', { class: 'p-rec hidden', title: 'Record this programme', onClick: e => { e.stopPropagation(); this.toggleRecord(); } }, h('i'), h('span', {}, 'REC')));
     // seekbar
     this.buf = h('div', { class: 'buf' }); this.fill = h('div', { class: 'fill' }); this.knob = h('div', { class: 'knob' }); this.tip = h('div', { class: 'tip' });
@@ -75,6 +79,8 @@ class Player {
     this.chUp = pbtn('up', 'Channel up (↑ / PgUp)', () => this.zap(-1));
     this.chDown = pbtn('down', 'Channel down (↓ / PgDn)', () => this.zap(1));
     this.listBtn = pbtn('list', 'Channel list (L)', () => this.toggleSide());
+    this.prevChBtn = pbtn('history', 'Previous channel (Backspace)', () => this.zapPrevious());
+    this.guideBtn = pbtn('guide', 'Mini guide (G)', () => this.toggleMiniGuide());
     this.nextBtn = pbtn('next', 'Next', () => this.meta.next?.run());
     this.audioBtn = pbtn('audio', 'Audio track', () => this.menu('audio'));
     this.ccBtn = pbtn('cc', 'Subtitles (C)', () => this.menu('subs'));
@@ -82,8 +88,13 @@ class Player {
     this.infoBtn = pbtn('info', 'Stream info (I)', () => this.toggleInfo());
     this.pipBtn = pbtn('pip', 'Picture-in-picture (P)', () => this.pip());
     this.fsBtn = pbtn('fs', 'Fullscreen (F)', () => this.fullscreen());
-    const ctrls = h('div', { class: 'p-ctrls' }, this.playBtn, this.rwBtn, this.ffBtn, this.chUp, this.chDown, this.nextBtn, this.volBtn, this.vol, this.timeEl,
-      h('div', { class: 'spacer' }), this.listBtn, this.audioBtn, this.ccBtn, this.qBtn, this.infoBtn, this.pipBtn, this.fsBtn);
+    const ctrls = h('div', { class: 'p-ctrls' }, this.playBtn, this.rwBtn, this.ffBtn, this.chUp, this.chDown, this.prevChBtn, this.nextBtn, this.volBtn, this.vol, this.timeEl,
+      h('div', { class: 'spacer' }), this.guideBtn, this.listBtn, this.audioBtn, this.ccBtn, this.qBtn, this.infoBtn, this.pipBtn, this.fsBtn);
+    // Settings → Appearance → Player → Controls: buttons the user chose to hide
+    const pb = (window.lumenSettings?.ui?.playerButtons) || {};
+    const map = { rw: [this.rwBtn], ff: [this.ffBtn], volume: [this.volBtn, this.vol], prevCh: [this.prevChBtn], guide: [this.guideBtn], list: [this.listBtn],
+      audio: [this.audioBtn], subs: [this.ccBtn], quality: [this.qBtn], info: [this.infoBtn], pip: [this.pipBtn], fullscreen: [this.fsBtn] };
+    for (const [k, els] of Object.entries(map)) if (pb[k] === false) els.forEach(e => e.classList.add('user-off'));
     this.bottom = h('div', { class: 'p-bottom' }, this.seekbar, ctrls);
     this.ui = h('div', { class: 'ui' }, this.top, this.bottom);
     this.center = h('div', { class: 'p-center' });
@@ -119,7 +130,8 @@ class Player {
     if (live) this.syncRecordState();
     this.seekbar.classList.toggle('hidden', live);
     for (const b of [this.rwBtn, this.ffBtn]) b.classList.toggle('hidden', live);
-    for (const b of [this.chUp, this.chDown, this.listBtn]) b.classList.toggle('hidden', !meta.zap);
+    for (const b of [this.chUp, this.chDown, this.listBtn, this.prevChBtn, this.guideBtn]) b.classList.toggle('hidden', !meta.zap);
+    this.miniGuideEl?.remove(); this.miniGuideEl = null;
     this.nextBtn.classList.toggle('hidden', !meta.next);
     this.audioBtn.classList.toggle('hidden', !(meta.audio?.length > 1));
     this.ccBtn.classList.toggle('hidden', !(meta.subtitles?.length));
@@ -220,6 +232,7 @@ class Player {
       this.updateSkip(p, d);
     }
     if (this.infoEl) this.renderInfo();
+    if (this.clockEl) this.clockEl.textContent = clockText();
   }
 
   // ---------- Markers / skip / up next ----------
@@ -336,7 +349,8 @@ class Player {
   poke() {
     this.el.classList.remove('hide-ui');
     clearTimeout(this.hideT);
-    this.hideT = setTimeout(() => { if (!this.video.paused && !this.menuEl && !this.sideEl) this.el.classList.add('hide-ui'); }, 3200);
+    const secs = Number(window.lumenSettings?.ui?.controlsHideSeconds) || 3;
+    this.hideT = setTimeout(() => { if (!this.video.paused && !this.menuEl && !this.sideEl && !this.miniGuideEl) this.el.classList.add('hide-ui'); }, secs * 1000 + 200);
   }
 
   report(state) {
@@ -410,7 +424,13 @@ class Player {
   async zap(dir, target) {
     const z = this.meta.zap;
     if (!z?.channels?.length) return;
-    let idx = target !== undefined ? target : (z.index + dir + z.channels.length) % z.channels.length;
+    let idx;
+    if (target !== undefined) idx = target;
+    else if (window.lumenSettings?.ui?.zapWrap === false) {
+      idx = z.index + dir;
+      if (idx < 0 || idx >= z.channels.length) { toast(dir > 0 ? 'Last channel in this list' : 'First channel in this list'); return; }
+    } else idx = (z.index + dir + z.channels.length) % z.channels.length;
+    if (idx !== z.index) this.prevChannel = z.index;
     const ch = z.channels[idx];
     z.index = idx;
     this.titleEl.textContent = ch.name;
@@ -423,6 +443,45 @@ class Player {
         this.load(desc, { ...meta, zap: z });
       } catch (e) { this.showError(e.message); }
     }, 350);
+  }
+
+  /** Mini guide for the current channel: past (catch-up), now and upcoming programmes. */
+  async toggleMiniGuide() {
+    if (this.miniGuideEl) { this.miniGuideEl.remove(); this.miniGuideEl = null; return; }
+    const ch = this.meta.channel, pid = this.meta.providerId;
+    if (!ch || !pid) return;
+    const box = h('div', { class: 'p-miniguide', onClick: e => e.stopPropagation() }, h('div', { class: 'spinner' }));
+    this.miniGuideEl = box; this.el.append(box); this.poke();
+    const t = nowS();
+    const list = await api.get(`/api/iptv/epg/${pid}/${encodeURIComponent(ch.id)}?from=${t - (ch.archive ? 3 * 3600 : 1800)}&to=${t + 12 * 3600}`).catch(() => []);
+    if (this.miniGuideEl !== box) return;
+    if (!list.length) { box.replaceChildren(h('div', { class: 'dim' }, 'No guide data for this channel.')); return; }
+    box.replaceChildren(h('div', { class: 'row', style: { marginBottom: '6px' } }, h('b', { class: 'grow' }, `${ch.name} · Guide`), h('span', { class: 'dim small' }, 'Enter: watch / record · G: close')),
+      ...list.map(p => {
+        const isNow = p.start <= t && p.stop > t, past = p.stop <= t, future = p.start > t;
+        const act = async () => {
+          if (isNow) { this.toggleMiniGuide(); return; }
+          if (past && ch.archive && this.meta.catchup) { this.toggleMiniGuide(); this.meta.catchup(p); return; }
+          if (future) {
+            try { await api.post('/api/iptv/recordings', { providerId: pid, channelId: ch.id, start: p.start, stop: p.stop, title: p.title, descr: p.descr }); toast(`Scheduled recording: ${p.title}`, { type: 'ok' }); }
+            catch (e) { toast(e.message, { type: 'err' }); }
+          }
+        };
+        return h('div', { class: `it ${isNow ? 'now' : ''} ${past ? 'past' : ''}`, tabindex: 0, onClick: act, onKeydown: e => { if (e.key === 'Enter') { e.stopPropagation(); act(); } } },
+          h('div', { class: 'tm' }, `${fmtTime(p.start)} – ${fmtTime(p.stop)}`),
+          h('div', { class: 'grow' }, h('div', { style: { fontWeight: 600 } }, p.title,
+            isNow ? h('span', { class: 'badge onair', style: { marginLeft: '8px' } }, 'NOW') : past && ch.archive ? h('span', { class: 'badge', style: { marginLeft: '8px' } }, '⟲ Watch') : future ? h('span', { class: 'badge', style: { marginLeft: '8px' } }, '● Record') : null),
+            isNow && p.descr ? h('div', { class: 'small', style: { color: '#c8ccd6' } }, p.descr) : null));
+      }));
+    box.querySelector('.it.now')?.scrollIntoView({ block: 'center' });
+    (box.querySelector('.it.now') || box.querySelector('.it'))?.focus();
+  }
+
+  /** Jump back to the previously watched channel (Backspace / ⟲ button). */
+  zapPrevious() {
+    const z = this.meta.zap;
+    if (!z || this.prevChannel === undefined || this.prevChannel === z.index) { toast('No previous channel yet'); return; }
+    this.zap(0, this.prevChannel);
   }
 
   showBanner(ch = this.meta.channel) {
@@ -446,13 +505,10 @@ class Player {
     if (this.sideEl) { this.sideEl.remove(); this.sideEl = null; return; }
     const z = this.meta.zap;
     if (!z) return;
-    const list = h('div', { class: 'chlist' }, z.channels.map((c, i) => {
-      const pct = c.now ? Math.min(100, ((nowS() - c.now.start) / (c.now.stop - c.now.start)) * 100) : 0;
-      return h('div', { class: `ch ${i === z.index ? 'active' : ''}`, onClick: (e) => { e.stopPropagation(); this.toggleSide(); this.zap(0, i); } },
-        h('div', { class: 'num' }, c.num ?? ''), logo(c.logo, c.name),
-        h('div', { class: 'grow' }, h('div', { class: 'nm ellipsis' }, c.name), h('div', { class: 'pr ellipsis' }, c.now?.title || ''),
-          c.now ? h('div', { class: 'progress' }, h('i', { style: { width: `${pct}%` } })) : null));
-    }));
+    const u = window.lumenSettings?.ui || {};
+    const list = h('div', { class: `chlist density-${u.chDensity || 'comfortable'} logos-${u.chLogoSize || 'medium'}` }, z.channels.map((c, i) =>
+      h('div', { class: `ch ${i === z.index ? 'active' : ''}`, tabindex: 0, onClick: (e) => { e.stopPropagation(); this.toggleSide(); this.zap(0, i); },
+        onKeydown: e => { if (e.key === 'Enter') { e.stopPropagation(); this.toggleSide(); this.zap(0, i); } } }, ...channelRowContent(c))));
     this.sideEl = h('div', { class: 'p-side', onClick: e => e.stopPropagation() }, h('div', { class: 'row', style: { padding: '14px' } }, h('b', { class: 'grow' }, z.title || 'Channels'),
       h('button', { class: 'pbtn', html: icon('close'), onClick: () => this.toggleSide() })), list);
     this.el.append(this.sideEl);
@@ -480,8 +536,19 @@ class Player {
     const live = this.meta.live;
     const k = e.key;
     let handled = true;
+    // Arrow keys move through an open overlay list (mini guide / channel list) — remote-friendly.
+    const overlay = this.miniGuideEl || this.sideEl;
+    if (overlay && (k === 'ArrowUp' || k === 'ArrowDown')) {
+      const items = [...overlay.querySelectorAll('[tabindex="0"]')];
+      const i = items.indexOf(document.activeElement);
+      const next = items[Math.max(0, Math.min(items.length - 1, (i < 0 ? items.findIndex(x => x.classList.contains('active') || x.classList.contains('now')) : i) + (k === 'ArrowDown' ? 1 : -1)))];
+      next?.focus(); next?.scrollIntoView({ block: 'nearest' });
+      e.preventDefault(); this.poke(); return;
+    }
+    if (overlay && k === 'Enter' && document.activeElement && overlay.contains(document.activeElement)) return; // item handles it
     if (k === ' ' || k === 'k' || k === 'MediaPlayPause') this.toggle();
-    else if (k === 'Escape' || k === 'Backspace') { if (this.menuEl) this.closeMenu(); else if (this.sideEl) this.toggleSide(); else this.close(); }
+    else if (k === 'Backspace' && live && this.meta.zap && !this.menuEl && !this.sideEl && this.prevChannel !== undefined) this.zapPrevious();
+    else if (k === 'Escape' || k === 'Backspace' || k === 'GoBack' || k === 'BrowserBack') { if (this.menuEl) this.closeMenu(); else if (this.sideEl) this.toggleSide(); else if (this.miniGuideEl) this.toggleMiniGuide(); else this.close(); }
     else if (k === 'f') this.fullscreen();
     else if (k === 'm') this.setMuted(!this.video.muted);
     else if (k === 'p') this.pip();
@@ -491,6 +558,7 @@ class Player {
     else if (k === 'ArrowLeft' && !live) this.seek(this.pos() - this.seekBack);
     else if (k === 'ArrowRight' && !live) this.seek(this.pos() + this.seekFwd);
     else if (k === 'r' && live) this.toggleRecord();
+    else if (k === 'g' && live && this.meta.zap) this.toggleMiniGuide();
     else if ((k === 'ArrowUp' || k === 'PageUp' || k === 'ChannelUp') && this.meta.zap && !this.sideEl) this.zap(-1);
     else if ((k === 'ArrowDown' || k === 'PageDown' || k === 'ChannelDown') && this.meta.zap && !this.sideEl) this.zap(1);
     else if (k === 'ArrowUp' && !this.sideEl) { this.video.volume = Math.min(1, this.video.volume + 0.05); }
@@ -524,3 +592,60 @@ class Player {
     this.meta.onClose?.();
   }
 }
+
+// ---------------------------------------------------------------------------
+// Native player bridge (Android TV app).
+//
+// When Lumen runs inside the Android TV app, the app injects `window.LumenNative` and playback is handed
+// to the native player (Media3/ExoPlayer), which decodes HEVC, Dolby audio, MKV etc. in hardware.
+// Contract (see docs/ANDROID_TV.md):
+//   LumenNative.play(json)   json = { url, type: 'hls'|'mpegts'|'file', startPosition, startOffset, title, subtitle,
+//                                     live, duration, subtitleUrl, markers:[{type,start,end}], hasNext, canZap }
+//   LumenNative.stop()
+// The app reports back through window.lumenNative.{progress(pos,dur,state), ended(), closed(pos), zap(dir), error(msg)}.
+// ---------------------------------------------------------------------------
+let native = null;
+const abs = u => (u ? new URL(u, location.href).toString() : null);
+
+function openNative(desc, meta) {
+  if (native) releaseDesc(native.desc);
+  clearInterval(native?.ping);
+  native = { desc, meta, ping: null };
+  if (desc.sessionId || desc.session) {
+    native.ping = setInterval(() => {
+      if (desc.sessionId) api.post(`/api/stream/session/${desc.sessionId}/ping`).catch(() => {});
+      if (desc.session) api.post('/api/plex/ping', { session: desc.session }).catch(() => {});
+    }, 20000);
+  }
+  const payload = {
+    url: abs(desc.url), type: desc.type, startPosition: Number(desc.seekTo) || 0, startOffset: Number(desc.startOffset) || 0,
+    title: meta.title || '', subtitle: meta.subtitle || '', live: !!meta.live, duration: meta.duration || desc.duration || 0,
+    subtitleUrl: abs(desc.subtitleUrl), markers: meta.markers || [], hasNext: !!meta.next, canZap: !!meta.zap,
+    channel: meta.channel ? { id: meta.channel.id, name: meta.channel.name, num: meta.channel.num, logo: abs(meta.channel.logo) } : null,
+  };
+  window.LumenNative.play(JSON.stringify(payload));
+  return { native: true };
+}
+
+window.lumenNative = {
+  progress(pos, dur, state) { if (native?.meta.progress && !native.meta.live) native.meta.progress(Number(pos) + (Number(native.desc.startOffset) || 0), Number(dur) || native.meta.duration, state || 'playing'); },
+  ended() { const n = native; if (n?.meta.next && (window.lumenSettings?.ui?.autoplayNext !== false)) n.meta.next.run(); },
+  closed(pos) {
+    const n = native; if (!n) return;
+    if (pos !== undefined && n.meta.progress && !n.meta.live) n.meta.progress(Number(pos) + (Number(n.desc.startOffset) || 0), n.meta.duration, 'stopped');
+    clearInterval(n.ping); releaseDesc(n.desc); native = null; api.clearCache();
+  },
+  async zap(dir) {
+    const z = native?.meta.zap; if (!z?.channels?.length) return;
+    z.index = (z.index + (dir > 0 ? 1 : -1) + z.channels.length) % z.channels.length;
+    const { desc, meta } = await z.open(z.channels[z.index]);
+    openNative(desc, { ...meta, zap: z });
+  },
+  async error(msg) {
+    const n = native; if (!n?.meta.reload) return;
+    const mode = nextMode(n.desc);
+    if (!mode) { toast(`Playback failed: ${msg}`, { type: 'err' }); return; }
+    const d = await n.meta.reload({ mode, offset: 0 }).catch(() => null);
+    if (d) d.meta ? openNative(d.desc, { ...n.meta, ...d.meta }) : openNative(d, n.meta);
+  },
+};

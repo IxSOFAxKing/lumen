@@ -79,7 +79,7 @@ label.check { display: flex; align-items: center; gap: 8px; cursor: pointer; mar
 .badge { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 5px; font-size: 11px; font-weight: 700; background: var(--bg-4); color: var(--text-2); letter-spacing: .3px; }
 .badge.rec { background: var(--rec); color: #fff; } .badge.ok { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); }
 .badge.warn { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); } .badge.err { background: color-mix(in srgb, var(--err) 20%, transparent); color: var(--err); }
-.badge.live { background: var(--err); color: #fff; }
+.badge.onair { background: var(--err); color: #fff; }
 .card-box { background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 18px; overflow-x: auto; }
 .tab { padding: 10px 14px; cursor: pointer; color: var(--text-2); border-bottom: 2px solid transparent; font-weight: 600; white-space: nowrap; }
@@ -389,3 +389,56 @@ h2.sec:hover .row-menu, h2.sec .row-menu:focus { opacity: 1; }
 .p-rec.on { background: var(--rec); border-color: var(--rec); }
 .p-rec.on i { background: #fff; animation: recpulse 1.2s ease-in-out infinite; }
 @keyframes recpulse { 50% { opacity: .25; } }
+
+/* Live TV channel list display options */
+.chlist.density-compact .ch { padding: 5px 12px; gap: 10px; }
+.chlist.density-compact .ch .pr { font-size: 11px; }
+.chlist.density-compact .ch .progress { margin-top: 3px; }
+.chlist.logos-small .logo { width: 40px; height: 30px; }
+.chlist.logos-large .logo { width: 76px; height: 54px; }
+
+/* Guide: colour-coded categories and catch-up */
+.g-p[class*="k-"] { border-left: 3px solid var(--kc); background: color-mix(in srgb, var(--kc) 14%, var(--bg-3)); }
+.g-p.now[class*="k-"] { background: color-mix(in srgb, var(--kc) 26%, var(--bg-3)); }
+.g-p.k-sports { --kc: #3ccf8e; } .g-p.k-news { --kc: #38bdf8; } .g-p.k-movie { --kc: #f472b6; }
+.g-p.k-kids { --kc: #facc15; } .g-p.k-doc { --kc: #a3e635; } .g-p.k-series { --kc: #a78bfa; }
+.g-p.catchup::after { content: "⟲"; position: absolute; right: 6px; bottom: 4px; font-size: 11px; color: var(--text-3); }
+.guide-legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--text-3); }
+.guide-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+/* Player mini guide */
+.p-miniguide { position: absolute; left: 22px; right: 22px; bottom: 100px; max-height: 46vh; overflow-y: auto; background: rgba(12,14,20,.94); border: 1px solid rgba(255,255,255,.1); border-radius: 14px; padding: 12px 16px; pointer-events: auto; z-index: 6; }
+.p-miniguide .it { display: flex; gap: 14px; padding: 9px 6px; border-radius: 8px; cursor: pointer; align-items: baseline; }
+.p-miniguide .it:hover, .p-miniguide .it:focus { background: rgba(255,255,255,.08); outline: none; }
+.p-miniguide .it .tm { width: 120px; flex: none; color: #9aa1b2; font-size: 13px; font-variant-numeric: tabular-nums; }
+.p-miniguide .it.now .tm { color: var(--accent); font-weight: 700; }
+.p-miniguide .it.past { opacity: .6; }
+
+/* Library list view */
+.lib-list { display: flex; flex-direction: column; gap: 4px; }
+.lib-row { display: flex; gap: 16px; align-items: center; padding: 8px 10px; border-radius: 10px; cursor: pointer; }
+.lib-row:hover, .lib-row:focus-visible { background: var(--bg-2); outline: none; }
+.lib-row .thumb { width: 64px; aspect-ratio: 2/3; flex: none; border-radius: 6px; overflow: hidden; background: var(--bg-3); position: relative; }
+.lib-row .thumb img { width: 100%; height: 100%; object-fit: cover; }
+.lib-row .thumb .progress { position: absolute; left: 3px; right: 3px; bottom: 3px; }
+.lib-row .tt { font-weight: 600; font-size: 15px; }
+.lib-row .sum { color: var(--text-2); font-size: 13px; margin-top: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+.player .user-off { display: none !important; }
+
+/* Clock */
+#lumen-clock { position: fixed; top: 12px; right: 18px; z-index: 50; font-size: 15px; font-weight: 700; color: var(--text); background: color-mix(in srgb, var(--bg) 55%, transparent); padding: 4px 10px; border-radius: 8px; font-variant-numeric: tabular-nums; pointer-events: none; text-shadow: 0 1px 6px rgba(0,0,0,.5); }
+.player ~ #lumen-clock, body:has(.player) #lumen-clock { display: none; }
+.p-clock { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; margin-right: 6px; }
+
+/* ---------- Remote / keyboard focus & TV mode ---------- */
+body.kbd-nav :focus-visible, body.tv-mode :focus { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+body.kbd-nav .card:focus-visible .art, body.tv-mode .card:focus .art { transform: scale(1.06); box-shadow: 0 0 0 3px var(--accent), 0 14px 30px rgba(0,0,0,.5); }
+body.kbd-nav .card:focus-visible, body.tv-mode .card:focus { outline: none; }
+body.tv-mode .g-p:focus, body.kbd-nav .g-p:focus-visible { outline-offset: -2px; z-index: 3; }
+body.tv-mode { cursor: none; }
+body.tv-mode .carousel .arrow, body.tv-mode .hero-car .nav, body.tv-mode .card .play-ov { display: none; }
+body.tv-mode .nav-item:focus { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--text); outline-offset: -3px; }
+body.tv-mode .hrow { scroll-padding: 0 60px; }
+body.tv-mode h2.sec .row-menu { opacity: .7; }
+body.tv-mode .chlist .ch:focus, body.tv-mode .cat:focus { outline-offset: -3px; }
+body.tv-mode .btn { min-height: 44px; }

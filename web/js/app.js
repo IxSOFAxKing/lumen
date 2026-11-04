@@ -1,9 +1,10 @@
 import { api } from './api.js';
 import { h, toast, prefs, esc } from './ui.js';
-import { applyAppearance, applyOrder } from './appearance.js';
+import { applyAppearance, applyOrder, withDeviceOverrides, startClock } from './appearance.js';
 import { icon } from './icons.js';
 import { isPlayerOpen } from './player.js';
 import { playLive } from './playback.js';
+import { initTv } from './tv.js';
 
 export const store = { providers: [], libraries: [], plex: null, settings: null };
 
@@ -111,8 +112,10 @@ export async function refreshStore() {
   store.allProviders = providers;
   store.plex = plex;
   store.settings = settings;
+  if (settings) settings.ui = withDeviceOverrides(settings.ui || {});
   window.lumenSettings = settings;
   applyAppearance(settings?.ui || {});
+  startClock();
   store.libraries = plex.configured && plex.online ? await api.cached('/api/plex/libraries', 300000).catch(() => []) : [];
   renderNav(parseHash());
 }
@@ -171,6 +174,10 @@ async function start() {
   let loggingIn = false;
   window.addEventListener('lumen:unauthorized', () => { if (!loggingIn) { loggingIn = true; showLogin(); } });
   render();
+  // Optionally jump straight back into the last live channel (TiviMate-style).
+  if (window.lumenSettings?.ui?.resumeLastChannel && store.providers.length) {
+    api.get('/api/iptv/history').then(list => { const ch = list[0]; if (ch) playLive(ch.provider_id, ch, list.filter(c => c.provider_id === ch.provider_id), 'Recently watched'); }).catch(() => {});
+  }
   // Warm up the other views in the background so navigation doesn't wait for module downloads.
   (window.requestIdleCallback || (f => setTimeout(f, 1500)))(() => Object.values(routes).forEach(load => load().catch(() => {})));
   setInterval(checkReminders, 30000);
@@ -178,6 +185,7 @@ async function start() {
 }
 
 (async function boot() {
+  initTv();
   const s = await api.get('/api/auth/status').catch(() => ({ required: false, authed: true }));
   if (s.required && !s.authed) return showLogin();
   start();

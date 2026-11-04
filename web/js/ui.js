@@ -100,7 +100,7 @@ export function card({ img, title, sub, progress, corner, onClick, wide, square,
     corner ? h('div', { class: 'corner' }, corner) : null,
     played ? h('div', { class: 'corner', html: icon('check'), style: { padding: '3px' } }) : null,
     progress > 0 && progress < 1 ? h('div', { class: 'progress' }, h('i', { style: { width: `${Math.round(progress * 100)}%` } })) : null);
-  return h('div', { class: `card ${wide ? 'wide' : ''} ${square ? 'square' : ''}`, tabindex: 0, onClick, onKeydown: e => { if (e.key === 'Enter') onClick?.(e); } },
+  return h('div', { class: `card ${wide ? 'wide' : ''} ${square ? 'square' : ''}`, tabindex: 0, onClick },
     art, h('div', { class: 't', title }, title || ''), sub ? h('div', { class: 's' }, sub) : null);
 }
 
@@ -133,7 +133,7 @@ export function skeletonRows(n = 2, { wide = false } = {}) {
  * Auto-rotating hero banner.
  * slides: [{ art, kicker, title, meta: [], summary, play: fn, playLabel, info: fn }]
  */
-export function heroCarousel(slides, { interval = 8000 } = {}) {
+export function heroCarousel(slides, { interval = 8000, autoplay = true } = {}) {
   if (!slides.length) return h('div');
   let idx = 0, timer = null;
   const els = slides.map((s, i) => h('div', { class: `slide ${i === 0 ? 'on' : ''}` },
@@ -155,7 +155,7 @@ export function heroCarousel(slides, { interval = 8000 } = {}) {
     els.forEach((e, j) => e.classList.toggle('on', j === idx));
     [...dots.children].forEach((d, j) => d.classList.toggle('on', j === idx));
   }
-  function start() { clearInterval(timer); if (slides.length > 1) timer = setInterval(() => { if (!document.hidden && root.isConnected) show(idx + 1); else if (!root.isConnected) clearInterval(timer); }, interval); }
+  function start() { clearInterval(timer); if (slides.length > 1 && autoplay) timer = setInterval(() => { if (!document.hidden && root.isConnected) show(idx + 1); else if (!root.isConnected) clearInterval(timer); }, interval); }
   start();
   return root;
 }
@@ -201,7 +201,7 @@ export const prefs = {
  * Reorderable list with show/hide toggles (drag the handle, or use the arrows).
  * items: [{ id, label, icon?, hidden?, locked?, note? }]; onChange(itemsInOrder) is called after every change.
  */
-export function sortableList(items, onChange, { toggles = true } = {}) {
+export function sortableList(items, onChange, { toggles = true, actions } = {}) {
   let list = items.map(x => ({ ...x }));
   const root = h('div', { class: 'sortable' });
   const emit = () => onChange(list.map(x => ({ ...x })));
@@ -240,6 +240,7 @@ export function sortableList(items, onChange, { toggles = true } = {}) {
       h('div', { class: 'grip', title: 'Drag to reorder', html: icon('grip'), onPointerdown: e => startDrag(e, i) }),
       x.icon ? h('div', { class: 'ic', html: icon(x.icon) }) : null,
       h('div', { class: 'grow' }, h('div', {}, x.label), x.note ? h('div', { class: 'dim small' }, x.note) : null),
+      actions ? actions(x, () => { render(); emit(); }) : null,
       h('button', { class: 'btn ghost sm icon', title: 'Move up', html: icon('up'), disabled: i === 0, onClick: () => move(i, i - 1) }),
       h('button', { class: 'btn ghost sm icon', title: 'Move down', html: icon('down'), disabled: i === list.length - 1, onClick: () => move(i, i + 1) }),
       toggles ? h('button', { class: 'btn ghost sm icon', title: x.hidden ? 'Show' : 'Hide', html: icon(x.hidden ? 'eyeoff' : 'eye'), disabled: !!x.locked,

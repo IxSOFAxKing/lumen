@@ -30,7 +30,16 @@ Lumen is a self-hosted web app that plays your **Plex library** and your **IPTV 
 - Show/hide and reorder Home rows, or hide any single Plex row from its ⋯ menu
 - Hide-spoilers mode, optional poster titles, featured-banner timing
 - Player: skip lengths, autoplay-next countdown, automatic intro/credit skipping, subtitle size, colour and background
-- TV Guide zoom and row height
+- TV Guide zoom, row height, hours shown, colour-coded categories
+- Live TV list: numbers, logos, progress, next programme, density, logo size; rename/renumber/reorder channels and groups; multiple favourite lists; parental PIN lock for groups
+- Player: preferred audio/subtitle languages, default quality at home vs away, which buttons appear, resume behaviour, when to mark as watched
+- Pin Plex collections, playlists, genres, Live TV groups and favourite lists to Home; grid or list view per library; choose what the featured banner shows
+- Clock, start page, export/import of all settings
+
+**TV & remote control**
+- Arrow keys / D-pad navigation everywhere, OK to select, Back to go back
+- TV mode (auto-detected on TV browsers) with large focus highlights; per-device settings so the TV can have its own layout
+- Ready for the upcoming Android TV app: see [docs/ANDROID_TV.md](docs/ANDROID_TV.md)
 
 **Player and transcoding**
 - MPEG-TS live streams play directly in the browser (mpegts.js); HLS plays with hls.js
