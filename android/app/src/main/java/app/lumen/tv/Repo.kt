@@ -68,7 +68,7 @@ object AppState {
     }
 
     /** Ordering helper identical to the web app's applyOrder: saved order first, new items after their default predecessor. */
-    fun <T> applyOrder(items: List<T>, order: List<String>, id: (T) -> String): List<T> {
+    fun <T : Any> applyOrder(items: List<T>, order: List<String>, id: (T) -> String): List<T> {
         val byId = items.associateBy(id)
         val out = order.mapNotNull { byId[it] }.toMutableList()
         val placed = out.map(id).toMutableSet()
