@@ -60,6 +60,18 @@ setInterval(() => {
   reqCount = 0; reqPaths.clear();
 }, 60000).unref();
 
+// Token bucket: never more than ~15 requests/second to Plex (bursts of 30), whatever the browser does.
+let tokens = 30, lastRefill = Date.now();
+async function rateLimit() {
+  for (;;) {
+    const now = Date.now();
+    tokens = Math.min(30, tokens + ((now - lastRefill) / 1000) * 15);
+    lastRefill = now;
+    if (tokens >= 1) { tokens--; return; }
+    await new Promise(r => setTimeout(r, 70));
+  }
+}
+
 /**
  * Request the Plex server.
  * gate: 'api' (default for JSON), 'image', or null (streams handle their own limits).
@@ -77,12 +89,15 @@ export async function plexFetch(path, { params = {}, method = 'GET', headers = {
     headers: plexHeaders({ 'X-Plex-Token': plexConf().token, ...headers }),
     signal: signals.length > 1 ? AbortSignal.any(signals) : signals[0],
   });
+  await rateLimit();
   const res = g ? await g.run(doFetch) : await doFetch();
   if (raw) return res;
   if (!res.ok) {
     const body = (await res.text().catch(() => '')).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
     const e = new Error(`Plex responded ${res.status} for ${path.split('?')[0]}${body ? ` (${body})` : ''}`);
-    e.status = res.status === 401 ? 401 : 502;
+    e.status = 502; // never relay 401: the browser would treat it as "Lumen session expired"
+    e.plexStatus = res.status;
+    if (res.status === 401 || res.status === 403) console.warn(`[plex] Plex refused ${path.split('?')[0]} with ${res.status} — the token may not have access to this endpoint`);
     throw e;
   }
   const text = await res.text();
@@ -97,15 +112,19 @@ export async function plexCached(path, opts = {}, ttl = 60000) {
   const key = path + '|' + JSON.stringify(opts.params || {}) + '|' + JSON.stringify(opts.headers || {});
   const hit = cache.get(key);
   const now = Date.now();
-  if (hit && now - hit.t < ttl) return hit.v;
-  if (hit && now - hit.t < 15 * 60000) {
+  // Recently failed requests are not retried for 30s, so nothing can hammer Plex with a failing call.
+  if (hit?.err && now - hit.t < 30000) throw hit.err;
+  if (hit && !hit.err && now - hit.t < ttl) return hit.v;
+  if (hit && !hit.err && now - hit.t < 15 * 60000) {
     if (!hit.refreshing) {
       hit.refreshing = true;
       plexFetch(path, opts).then(v => cache.set(key, { v, t: Date.now() })).catch(() => { hit.refreshing = false; });
     }
     return hit.v;
   }
-  const v = await plexFetch(path, opts);
+  let v;
+  try { v = await plexFetch(path, opts); }
+  catch (err) { cache.set(key, { err, t: Date.now() }); throw err; }
   cache.set(key, { v, t: now });
   if (cache.size > 400) cache.delete(cache.keys().next().value);
   return v;

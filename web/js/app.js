@@ -114,7 +114,7 @@ async function showLogin() {
   const err = h('div', { class: 'small', style: { color: 'var(--err)', minHeight: '20px', marginTop: '8px' } });
   const box = h('div', { class: 'login' }, h('form', { class: 'card-box', onSubmit: async (e) => {
     e.preventDefault();
-    try { await api.post('/api/auth/login', { password: input.value }); box.remove(); document.getElementById('app').classList.remove('hidden'); start(); }
+    try { await api.post('/api/auth/login', { password: input.value }); box.remove(); document.getElementById('app').classList.remove('hidden'); if (started) location.reload(); else start(); }
     catch (ex) { err.textContent = ex.message; }
   } }, h('img', { src: '/img/icon.svg', alt: '' }), h('h2', { style: { margin: '0 0 18px' } }, 'Lumen'), input, err,
     h('button', { class: 'btn primary', style: { width: '100%', marginTop: '6px' }, type: 'submit' }, 'Sign in')));
@@ -149,7 +149,9 @@ async function start() {
   if (started) return; started = true;
   await refreshStore();
   window.addEventListener('hashchange', render);
-  window.addEventListener('lumen:unauthorized', () => location.reload());
+  // Show the login screen instead of reloading (a reload loop would re-request everything).
+  let loggingIn = false;
+  window.addEventListener('lumen:unauthorized', () => { if (!loggingIn) { loggingIn = true; showLogin(); } });
   render();
   // Warm up the other views in the background so navigation doesn't wait for module downloads.
   (window.requestIdleCallback || (f => setTimeout(f, 1500)))(() => Object.values(routes).forEach(load => load().catch(() => {})));

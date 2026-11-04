@@ -83,6 +83,16 @@ function connectFlow(el) {
 // ---------------- IPTV ----------------
 async function iptvTab(el) {
   const list = h('div');
+  const iptvConf = (await api.get('/api/settings')).iptv;
+  const vodSwitch = h('label', { class: 'check', style: { margin: 0 } },
+    h('input', { type: 'checkbox', checked: iptvConf.vodEnabled !== false, onChange: async e => {
+      const on = e.target.checked;
+      if (!on && !(await confirmDialog('Hide IPTV Movies & Series?', 'Movies and series from all IPTV providers will be removed from Lumen and no longer downloaded. Live TV is not affected. You can turn this back on any time.', { okLabel: 'Hide them' }))) { e.target.checked = true; return; }
+      await api.put('/api/settings/iptv', { vodEnabled: on });
+      toast(on ? 'IPTV Movies & Series enabled — syncing providers…' : 'IPTV Movies & Series hidden', { type: 'ok' });
+      render();
+    } }), h('span', {}, h('b', {}, 'Show IPTV Movies & Series (VOD)'), h('div', { class: 'dim small' }, 'Turn off to use IPTV for live TV only. Hides them everywhere and stops downloading them.')));
+  el.append(h('div', { class: 'card-box', style: { marginBottom: '16px', padding: '14px 18px' } }, vodSwitch));
   el.append(h('div', { class: 'row', style: { marginBottom: '14px' } }, h('div', { class: 'grow muted' }, 'Add Xtream Codes logins or M3U playlists. Channels, VOD, series and EPG are synced automatically.'),
     btn('Add provider', () => providerForm(null, render), { cls: 'primary', iconName: 'plus' })), list);
   async function render() {
@@ -97,8 +107,8 @@ async function iptvTab(el) {
           h('div', { class: 'row' }, h('b', { style: { fontSize: '16px' } }, p.name), h('span', { class: 'badge' }, p.type.toUpperCase()), !p.enabled ? h('span', { class: 'badge warn' }, 'DISABLED') : null,
             a ? h('span', { class: `badge ${a.status === 'Active' ? 'ok' : 'err'}` }, (a.status || '').toUpperCase()) : null),
           h('div', { class: 'dim small', style: { marginTop: '4px' } }, [`${p.counts.live.toLocaleString()} channels`,
-            p.type !== 'xtream' ? null : p.vod_enabled ? `${p.counts.movies.toLocaleString()} movies` : 'movies off',
-            p.type !== 'xtream' ? null : p.series_enabled ? `${p.counts.series.toLocaleString()} series` : 'series off',
+            p.type !== 'xtream' || window.lumenSettings?.iptv?.vodEnabled === false ? null : p.vod_enabled ? `${p.counts.movies.toLocaleString()} movies` : 'movies off',
+            p.type !== 'xtream' || window.lumenSettings?.iptv?.vodEnabled === false ? null : p.series_enabled ? `${p.counts.series.toLocaleString()} series` : 'series off',
             `${p.counts.programmes.toLocaleString()} EPG entries${p.epgRunning ? ' (updating…)' : ''}`].filter(Boolean).join(' · ')),
           h('div', { class: 'dim small' }, [a ? `Connections ${a.active_cons ?? '?'}/${a.max_connections ?? '?'}` : null, exp ? `Expires ${exp.toLocaleDateString()}` : (a ? 'No expiry' : null), a?.is_trial ? 'Trial' : null,
             p.last_sync ? `Synced ${fmtDateTime(p.last_sync)}` : 'Never synced', p.last_epg_sync ? `EPG ${fmtDateTime(p.last_epg_sync)}` : null].filter(Boolean).join(' · '))),
@@ -122,10 +132,11 @@ function providerForm(p, done) {
   const output = h('select', { class: 'input' }, h('option', { value: 'ts' }, 'MPEG-TS (.ts) — recommended'), h('option', { value: 'm3u8' }, 'HLS (.m3u8)'));
   output.value = p?.output || 'ts';
   const enabled = h('input', { type: 'checkbox', checked: p ? p.enabled : true });
-  const vodOn = h('input', { type: 'checkbox', checked: p ? p.vod_enabled : true });
-  const seriesOn = h('input', { type: 'checkbox', checked: p ? p.series_enabled : true });
+  const vodOn = h('input', { type: 'checkbox', checked: p ? p.vod_setting : true });
+  const seriesOn = h('input', { type: 'checkbox', checked: p ? p.series_setting : true });
+  const vodGlobal = window.lumenSettings?.iptv?.vodEnabled !== false;
   const xtOnly = h('div', {}, h('div', { class: 'set-grid' }, h('label', { class: 'field' }, 'Username', user), h('label', { class: 'field' }, 'Password', pass)), h('label', { class: 'field' }, 'Live stream format', output),
-    h('div', { class: 'field' }, 'Content to load',
+    !vodGlobal ? null : h('div', { class: 'field' }, 'Content to load',
       h('label', { class: 'check', style: { margin: '4px 0 0', color: 'var(--text)' } }, vodOn, 'Movies (VOD)'),
       h('label', { class: 'check', style: { margin: 0, color: 'var(--text)' } }, seriesOn, 'TV series'),
       h('span', { class: 'dim small' }, 'Turn these off to use this provider for live TV only. Syncing is faster too.')));

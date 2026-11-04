@@ -40,5 +40,5 @@ export function logout(req, res) {
 
 export function requireAuth(req, res, next) {
   if (isAuthed(req)) return next();
-  res.status(401).json({ error: 'Unauthorized' });
+  res.status(401).json({ error: 'Unauthorized', lumenAuth: true });
 }

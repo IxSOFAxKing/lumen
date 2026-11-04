@@ -1,6 +1,6 @@
 import sax from 'sax';
 import zlib from 'node:zlib';
-import { Readable, Transform, Writable } from 'node:stream';
+import { Readable, Writable } from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
 import { pipeline } from 'node:stream/promises';
 import { db } from '../db.js';
@@ -23,27 +23,17 @@ export function parseXmltvTime(s) {
   return t;
 }
 
-/** Auto-detect gzip by magic bytes. */
-function maybeGunzip() {
-  let decided = false, gunzip = null;
-  return new Transform({
-    transform(chunk, enc, cb) {
-      if (!decided) {
-        decided = true;
-        if (chunk[0] === 0x1f && chunk[1] === 0x8b) {
-          gunzip = zlib.createGunzip();
-          gunzip.on('data', d => this.push(d));
-          gunzip.on('error', e => this.destroy(e));
-        }
-      }
-      if (gunzip) gunzip.write(chunk, cb); else cb(null, chunk);
-    },
-    flush(cb) {
-      if (!gunzip) return cb();
-      gunzip.once('end', () => cb());
-      gunzip.end();
-    },
-  });
+/** Stream stages for the body, gunzipping when it starts with the gzip magic bytes (backpressure-safe). */
+async function decompressed(webBody) {
+  const src = Readable.fromWeb(webBody);
+  const it = src[Symbol.asyncIterator]();
+  const first = await it.next();
+  const rest = Readable.from((async function* () {
+    if (!first.done) yield first.value;
+    for (;;) { const r = await it.next(); if (r.done) return; yield r.value; }
+  })(), { objectMode: false });
+  const gz = !first.done && first.value[0] === 0x1f && first.value[1] === 0x8b;
+  return gz ? [rest, zlib.createGunzip()] : [rest];
 }
 
 export async function syncEpg(providerId) {
@@ -72,8 +62,18 @@ export async function syncEpg(providerId) {
     const res = await fetch(url, { headers: { 'User-Agent': userAgent(p) }, signal: AbortSignal.timeout(600000) });
     if (!res.ok) throw new Error('EPG download failed: ' + res.status);
 
-    const ins = db.prepare('INSERT INTO programmes(provider_id, channel, start, stop, title, sub_title, descr, category, icon, episode) VALUES (?,?,?,?,?,?,?,?,?,?)');
-    const rows = []; // buffered so the DB transaction stays synchronous (no interleaving with other requests)
+    // Programmes stream into a staging table in small batches (constant memory, even for huge guides),
+    // then replace the live data in one quick transaction at the end.
+    db.exec(`CREATE TABLE IF NOT EXISTS programmes_stage AS SELECT * FROM programmes WHERE 0`);
+    db.prepare('DELETE FROM programmes_stage WHERE provider_id = ?').run(p.id);
+    const ins = db.prepare('INSERT INTO programmes_stage(provider_id, channel, start, stop, title, sub_title, descr, category, icon, episode) VALUES (?,?,?,?,?,?,?,?,?,?)');
+    let batch = [];
+    const flush = () => {
+      if (!batch.length) return;
+      db.exec('BEGIN');
+      try { for (const r of batch) ins.run(...r); db.exec('COMMIT'); } catch (e) { db.exec('ROLLBACK'); throw e; }
+      batch = [];
+    };
     let count = 0;
     const accept = new Set(wanted);
 
@@ -117,7 +117,8 @@ export async function syncEpg(providerId) {
         if (name === 'programme') {
           const pr = curProg; curProg = null;
           if (accept.has(pr.channel) && pr.stop > minStop && pr.start < maxStart) {
-            rows.push([p.id, pr.channel, pr.start, pr.stop, pr.title || '', pr.sub_title || null, pr.descr || null, pr.category || null, pr.icon || null, pr.episode || null]);
+            batch.push([p.id, pr.channel, pr.start, pr.stop, pr.title || '', pr.sub_title || null, pr.descr || null, pr.category || null, pr.icon || null, pr.episode || null]);
+            if (batch.length >= 2000) flush();
             count++;
           }
         }
@@ -131,11 +132,18 @@ export async function syncEpg(providerId) {
       final(cb) { try { parser.write(decoder.end()); parser.close(); cb(); } catch (e) { cb(e); } },
     });
 
-    await pipeline(Readable.fromWeb(res.body), maybeGunzip(), sink);
+    try {
+      await pipeline(...(await decompressed(res.body)), sink);
+      flush();
+    } catch (e) {
+      db.prepare('DELETE FROM programmes_stage WHERE provider_id = ?').run(p.id);
+      throw e;
+    }
     db.exec('BEGIN');
     try {
       db.prepare('DELETE FROM programmes WHERE provider_id = ?').run(p.id);
-      for (const r of rows) ins.run(...r);
+      db.prepare('INSERT INTO programmes SELECT * FROM programmes_stage WHERE provider_id = ?').run(p.id);
+      db.prepare('DELETE FROM programmes_stage WHERE provider_id = ?').run(p.id);
       // Apply name-based EPG mappings for channels whose epg_id didn't match exactly.
       const upd = db.prepare('UPDATE channels SET epg_id = ? WHERE provider_id = ? AND id = ?');
       for (const [xid, cid] of aliasUpdates) upd.run(xid, p.id, cid);

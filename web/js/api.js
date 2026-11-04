@@ -5,12 +5,11 @@ async function request(method, url, body) {
     body: body !== undefined ? JSON.stringify(body) : undefined,
     credentials: 'same-origin',
   });
-  if (res.status === 401 && !url.startsWith('/api/auth')) {
-    window.dispatchEvent(new CustomEvent('lumen:unauthorized'));
-  }
   const text = await res.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+  // Only Lumen's own login guard means "signed out" — never a 401 relayed from Plex or a provider.
+  if (res.status === 401 && data?.lumenAuth) window.dispatchEvent(new CustomEvent('lumen:unauthorized'));
   if (!res.ok) {
     const err = new Error((data && data.error) || `Request failed (${res.status})`);
     err.status = res.status;

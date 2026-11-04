@@ -60,7 +60,7 @@ r.post('/disconnect', (req, res) => { plex.saveServer({ url: '', token: '', serv
 
 r.get('/home', ah(async (req, res) => {
   const [hubs, cont, playlists] = await Promise.all([
-    plex.plexCached('/hubs', { params: { count: 20, includeEmptyHubs: 0, excludeFields: 'summary' } }),
+    plex.plexCached('/hubs', { params: { count: 20, includeEmptyHubs: 0, excludeFields: 'summary' } }).catch(() => null),
     plex.plexCached('/hubs/home/continueWatching', { params: { count: 20 } }).catch(() => null),
     plex.plexCached('/playlists', { params: { playlistType: 'video' } }).catch(() => null),
   ]);

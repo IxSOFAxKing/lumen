@@ -8,6 +8,20 @@ export function userAgent(provider) {
   return provider?.user_agent || getConfig('iptv').userAgent || DEFAULT_UA;
 }
 
+/** Global "IPTV Movies & Series" switch (Settings → IPTV Providers). */
+export const vodGloballyEnabled = () => getConfig('iptv').vodEnabled !== false;
+
+/** Called when the global switch changes: drop VOD data, or fetch it again. */
+export function applyVodSwitch(on) {
+  if (!on) {
+    db.prepare("DELETE FROM vod").run();
+    db.prepare("DELETE FROM categories WHERE kind IN ('vod','series')").run();
+    db.prepare('DELETE FROM vod_progress').run();
+  } else {
+    for (const p of listProviders().filter(x => x.enabled && x.type === 'xtream')) syncProvider(p.id).catch(e => console.error('[iptv] sync failed:', e.message));
+  }
+}
+
 export function getProvider(id) {
   const p = db.prepare('SELECT * FROM providers WHERE id = ?').get(Number(id));
   if (!p) { const e = new Error('Provider not found'); e.status = 404; throw e; }
@@ -87,10 +101,11 @@ export async function syncProvider(id) {
   const p = getProvider(id);
   if (p.type === 'm3u') return syncM3u(p);
   const info = await testXtream(p);
+  const vodOn = vodGloballyEnabled();
   const [liveCats, live, vodCats, vod, serCats, series] = await Promise.all([
     xtream(p, 'get_live_categories'), xtream(p, 'get_live_streams'),
-    p.vod_enabled ? xtream(p, 'get_vod_categories').catch(() => []) : [], p.vod_enabled ? xtream(p, 'get_vod_streams').catch(() => []) : [],
-    p.series_enabled ? xtream(p, 'get_series_categories').catch(() => []) : [], p.series_enabled ? xtream(p, 'get_series').catch(() => []) : [],
+    vodOn && p.vod_enabled ? xtream(p, 'get_vod_categories').catch(() => []) : [], vodOn && p.vod_enabled ? xtream(p, 'get_vod_streams').catch(() => []) : [],
+    vodOn && p.series_enabled ? xtream(p, 'get_series_categories').catch(() => []) : [], vodOn && p.series_enabled ? xtream(p, 'get_series').catch(() => []) : [],
   ]);
   const { hiddenCats, hiddenCh } = preserveHidden(p.id);
   tx(() => {

@@ -18,6 +18,7 @@ export const DEFAULTS = {
     segmentSeconds: 4,
   },
   iptv: {
+    vodEnabled: true,                   // global switch for IPTV movies & series
     epgRefreshHours: 12,
     playlistRefreshHours: 24,
     epgPastHours: 72,

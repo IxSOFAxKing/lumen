@@ -21,7 +21,8 @@ const publicProvider = p => {
     (SELECT COUNT(*) FROM programmes WHERE provider_id = ?) AS programmes`).get(p.id, p.id, p.id, p.id);
   return {
     id: p.id, name: p.name, type: p.type, url: p.url, username: p.username, hasPassword: !!p.password, epg_url: p.epg_url,
-    output: p.output, user_agent: p.user_agent, enabled: !!p.enabled, vod_enabled: p.type === 'xtream' && !!p.vod_enabled, series_enabled: p.type === 'xtream' && !!p.series_enabled, last_sync: p.last_sync, last_epg_sync: p.last_epg_sync,
+    output: p.output, user_agent: p.user_agent, enabled: !!p.enabled, vod_enabled: p.type === 'xtream' && !!p.vod_enabled && iptv.vodGloballyEnabled(), series_enabled: p.type === 'xtream' && !!p.series_enabled && iptv.vodGloballyEnabled(),
+    vod_setting: !!p.vod_enabled, series_setting: !!p.series_enabled, last_sync: p.last_sync, last_epg_sync: p.last_epg_sync,
     epgRunning: epg.isEpgRunning(p.id), counts,
     account: info?.user_info ? {
       status: info.user_info.status, exp_date: Number(info.user_info.exp_date) || null, max_connections: info.user_info.max_connections,
@@ -346,8 +347,9 @@ r.get('/search', (req, res) => {
   if (q.length < 2) return res.json({ channels: [], movies: [], series: [], programmes: [] });
   const like = `%${q}%`;
   const channels = db.prepare('SELECT provider_id, id, num, name, logo, archive FROM channels WHERE name LIKE ? AND hidden = 0 LIMIT 40').all(like);
-  const movies = db.prepare("SELECT v.* FROM vod v JOIN providers p ON p.id = v.provider_id WHERE p.enabled = 1 AND p.vod_enabled = 1 AND v.kind = 'movie' AND v.name LIKE ? LIMIT 40").all(like);
-  const series = db.prepare("SELECT v.* FROM vod v JOIN providers p ON p.id = v.provider_id WHERE p.enabled = 1 AND p.series_enabled = 1 AND v.kind = 'series' AND v.name LIKE ? LIMIT 40").all(like);
+  const vodOn = iptv.vodGloballyEnabled();
+  const movies = !vodOn ? [] : db.prepare("SELECT v.* FROM vod v JOIN providers p ON p.id = v.provider_id WHERE p.enabled = 1 AND p.vod_enabled = 1 AND v.kind = 'movie' AND v.name LIKE ? LIMIT 40").all(like);
+  const series = !vodOn ? [] : db.prepare("SELECT v.* FROM vod v JOIN providers p ON p.id = v.provider_id WHERE p.enabled = 1 AND p.series_enabled = 1 AND v.kind = 'series' AND v.name LIKE ? LIMIT 40").all(like);
   const programmes = db.prepare(`SELECT pr.*, c.id AS channel_id, c.name AS channel_name, c.logo, c.archive FROM programmes pr
     JOIN channels c ON c.provider_id = pr.provider_id AND c.epg_id = pr.channel
     WHERE pr.title LIKE ? AND pr.stop > ? GROUP BY pr.provider_id, pr.channel, pr.start ORDER BY pr.start LIMIT 40`).all(like, now() - 86400 * 3);
