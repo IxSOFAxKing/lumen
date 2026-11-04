@@ -38,6 +38,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -177,6 +183,7 @@ private fun railEntries(): List<RailEntry> {
     return AppState.applyOrder(list, AppState.uiList("navOrder")) { it.id }.filter { it.id !in hidden || it.id == "home" }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun Rail(entries: List<RailEntry>, screen: Screen, railFocus: androidx.compose.runtime.MutableState<Boolean>, requesters: Map<String, FocusRequester>, onSelect: (Screen) -> Unit) {
     val expanded = railFocus.value
@@ -186,30 +193,40 @@ private fun Rail(entries: List<RailEntry>, screen: Screen, railFocus: androidx.c
         Modifier.fillMaxHeight().width(if (expanded) 420.dp else 64.dp)
             .background(if (expanded) Brush.horizontalGradient(listOf(Color.Black.copy(alpha = 0.92f), Color.Black.copy(alpha = 0.75f), Color.Transparent)) else Brush.horizontalGradient(listOf(C.bg, C.bg.copy(alpha = 0.9f))))
     ) {
+        // Every item in menu order, so ▲ / ▼ always move through the menu.
+        val order = entries.map { it.id } + "settings"
+        val focusedIdx = remember { mutableIntStateOf(-1) }
         Column(
             Modifier.fillMaxHeight().width(width).padding(vertical = 18.dp, horizontal = 10.dp)
-                .onFocusChanged { f ->
-                    val was = railFocus.value
-                    railFocus.value = f.hasFocus
-                    // Entering the menu lands on the current section, like Netflix.
-                    if (f.hasFocus && !was && currentId != null) runCatching { requesters[currentId]?.requestFocus() }
+                // Entering the menu (◀ from the content) lands on the current section, like Netflix.
+                .focusProperties { enter = { currentId?.let { requesters[it] } ?: FocusRequester.Default } }
+                .focusGroup()
+                .onFocusChanged { f -> railFocus.value = f.hasFocus; if (!f.hasFocus) focusedIdx.intValue = -1 }
+                .onPreviewKeyEvent { ev ->
+                    if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    val code = ev.nativeKeyEvent.keyCode
+                    if (code != android.view.KeyEvent.KEYCODE_DPAD_DOWN && code != android.view.KeyEvent.KEYCODE_DPAD_UP) return@onPreviewKeyEvent false
+                    val cur = focusedIdx.intValue.takeIf { it >= 0 } ?: order.indexOf(currentId).coerceAtLeast(0)
+                    val next = (cur + if (code == android.view.KeyEvent.KEYCODE_DPAD_DOWN) 1 else -1).coerceIn(0, order.size - 1)
+                    runCatching { requesters[order[next]]?.requestFocus() }
+                    true
                 },
         ) {
             Row(Modifier.padding(start = 8.dp, bottom = 22.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(26.dp).clip(RoundedCornerShape(7.dp)).background(C.accent), contentAlignment = Alignment.Center) { T("▶", 12.sp, Color.Black, FontWeight.Bold) }
                 if (expanded) { Spacer(Modifier.width(10.dp)); T("Lumen", 18.sp, weight = FontWeight.Bold) }
             }
-            entries.forEach { e -> RailItem(e.label, e.icon, e.id == currentId, expanded, requesters[e.id]) { onSelect(e.screen) } }
+            entries.forEachIndexed { i, e -> RailItem(e.label, e.icon, e.id == currentId, expanded, requesters[e.id], { focusedIdx.intValue = i }) { onSelect(e.screen) } }
             Spacer(Modifier.weight(1f))
-            RailItem("Settings", Icons.Filled.Settings, currentId == "settings", expanded, requesters["settings"]) { onSelect(Screen.Settings) }
+            RailItem("Settings", Icons.Filled.Settings, currentId == "settings", expanded, requesters["settings"], { focusedIdx.intValue = order.size - 1 }) { onSelect(Screen.Settings) }
         }
     }
 }
 
 @Composable
-private fun RailItem(label: String, icon: ImageVector, selected: Boolean, expanded: Boolean, fr: FocusRequester?, onClick: () -> Unit) {
+private fun RailItem(label: String, icon: ImageVector, selected: Boolean, expanded: Boolean, fr: FocusRequester?, onFocus: () -> Unit, onClick: () -> Unit) {
     Focusable(
-        onClick = onClick, focusRequester = fr, shape = RoundedCornerShape(10.dp), focusedScale = 1f, outline = false,
+        onClick = onClick, focusRequester = fr, onFocus = onFocus, shape = RoundedCornerShape(10.dp), focusedScale = 1f, outline = false,
         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), background = Color.Transparent, focusedBackground = Color.White,
     ) { f ->
         Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {

@@ -237,7 +237,7 @@ val WIDE_W = 214.dp
 fun PosterCard(item: PlexItem, memKey: String, onFocus: () -> Unit = {}, onMenu: (() -> Unit)? = null, width: Dp = POSTER_W, fr: FocusRequester? = null, onClick: () -> Unit) {
     Column(Modifier.width(width)) {
         Focusable(onClick = onClick, memKey = memKey, focusRequester = fr, onFocus = onFocus, onMenu = onMenu, modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f), background = C.card) {
-            Img(Net.plexImg(item.poster, 300, 450), Modifier.fillMaxSize())
+            Img(Net.plexImg(item.poster, 240, 360), Modifier.fillMaxSize())
             if (item.poster == null) T(item.title, 13.sp, C.text2, maxLines = 3, modifier = Modifier.align(Alignment.Center).padding(8.dp))
             if (item.watched) WatchedBadge(Modifier.align(Alignment.TopEnd).padding(5.dp))
             if (item.progress > 0f) ProgressLine(item.progress, Modifier.align(Alignment.BottomStart).fillMaxWidth())

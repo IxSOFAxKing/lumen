@@ -29,6 +29,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.text.font.FontWeight
@@ -49,18 +51,18 @@ fun LibraryScreen(lib: Library) {
     }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
-    var focusTarget by remember { mutableStateOf<Hero?>(null) }
-    var hero by remember { mutableStateOf<Hero?>(null) }
-    LaunchedEffect(focusTarget) { focusTarget?.let { delay(220); hero = it } }
-    LaunchedEffect(hubs) { if (hero == null) hubs?.firstOrNull()?.items?.firstOrNull()?.let { hero = Hero.of(it) } }
+    val focusTarget = remember { mutableStateOf<Hero?>(null) }
+    val hero = remember { mutableStateOf<Hero?>(null) }
+    LaunchedEffect(Unit) { snapshotFlow { focusTarget.value }.collectLatest { t -> if (t != null) { delay(220); hero.value = t } } }
+    LaunchedEffect(hubs) { if (hero.value == null) hubs?.firstOrNull()?.items?.firstOrNull()?.let { hero.value = Hero.of(it) } }
     val firstFr = remember { FocusRequester() }
     InitialFocus(firstFr)
     val type = if (lib.type == "movie") "1" else "2"
 
     Box(Modifier.fillMaxSize()) {
-        Backdrop(hero?.backdrop)
+        HeroBackdrop(hero)
         Column(Modifier.fillMaxSize()) {
-            HeroInfo(hero, Modifier.fillMaxWidth().height(196.dp).padding(start = 32.dp, top = 30.dp, end = 360.dp))
+            HeroInfoOf(hero, Modifier.fillMaxWidth().height(196.dp).padding(start = 32.dp, top = 30.dp, end = 360.dp))
             Row(Modifier.padding(start = 32.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 T(lib.title, 18.sp, weight = FontWeight.Bold, modifier = Modifier.padding(end = 8.dp, top = 6.dp))
                 Chip("Browse A–Z", false, memKey = "chip/az", focusRequester = firstFr) { Nav.push(Screen.Grid(lib.title, GridSource.Library(lib.key, type))) }
@@ -74,7 +76,7 @@ fun LibraryScreen(lib: Library) {
                 else -> LazyColumn(state = listState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 200.dp)) {
                     itemsIndexed(hubs!!, key = { i, h -> "${h.id}-$i" }) { idx, hub ->
                         PlexRow("hub:${hub.id}", hub.title, hub.items, hub.wide, 32.dp, { scope.launch { listState.animateScrollToItem(idx) } },
-                            onItemFocus = { focusTarget = Hero.of(it) }) { Nav.open(it) }
+                            onItemFocus = { focusTarget.value = Hero.of(it) }) { Nav.open(it) }
                     }
                 }
             }

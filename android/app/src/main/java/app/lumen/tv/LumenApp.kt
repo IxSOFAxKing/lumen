@@ -15,7 +15,7 @@ class LumenApp : Application(), ImageLoaderFactory {
 
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
         .okHttpClient { Net.http }
-        .crossfade(true)
+        .crossfade(false) // cheaper on TV hardware; the backdrop has its own fade
         .allowRgb565(true)
         .respectCacheHeaders(false)
         .memoryCache { MemoryCache.Builder(this).maxSizePercent(0.2).build() }

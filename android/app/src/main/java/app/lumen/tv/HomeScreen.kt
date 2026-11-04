@@ -29,6 +29,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -56,7 +58,7 @@ data class Hero(val title: String, val kicker: String?, val meta: String?, val s
                 kicker = kicker ?: if (isEp) listOfNotNull(m.episodeLabel, m.title).joinToString(" · ") else null,
                 meta = m.metaLine(),
                 summary = m.summary ?: m.tagline,
-                backdrop = Net.plexImg(m.backdrop ?: m.thumb, 1600, 900),
+                backdrop = Net.plexImg(m.backdrop ?: m.thumb, 1280, 720),
                 item = m,
             )
         }
@@ -160,34 +162,35 @@ private fun HomeContent(d: HomeData) {
     val showBillboard = d.featured.isNotEmpty() && !AppState.uiList("homeHidden").contains("hero")
     var featIndex by remember { mutableStateOf(mem.data["featIndex"] as? Int ?: 0) }
     var billboardFocused by remember { mutableStateOf(showBillboard && !mem.restorePending) }
-    var focusTarget by remember { mutableStateOf<Hero?>(null) }
-    var hero by remember { mutableStateOf(d.featured.getOrNull(featIndex)?.let { Hero.of(it) } ?: d.rows.firstOrNull()?.let { r -> (r as? HomeRow.Plex)?.items?.firstOrNull()?.let { Hero.of(it) } }) }
+    val focusTarget = remember { mutableStateOf<Hero?>(null) }
+    val hero = remember { mutableStateOf(d.featured.getOrNull(featIndex)?.let { Hero.of(it) } ?: d.rows.firstOrNull()?.let { r -> (r as? HomeRow.Plex)?.items?.firstOrNull()?.let { Hero.of(it) } }) }
     val playFr = remember { FocusRequester() }
     val firstCardFr = remember { FocusRequester() }
     InitialFocus(if (showBillboard) playFr else firstCardFr)
 
     // Debounced: the backdrop only changes once you settle on a card.
-    LaunchedEffect(focusTarget) { focusTarget?.let { delay(220); hero = it } }
+    // Only the banner reads these, so moving between cards doesn't redraw the rows.
+    LaunchedEffect(Unit) { snapshotFlow { focusTarget.value }.collectLatest { t -> if (t != null) { delay(220); hero.value = t } } }
     // The featured banner rotates while it has focus.
     LaunchedEffect(billboardFocused, featIndex) {
         if (!billboardFocused || d.featured.size < 2 || !AppState.uiBool("heroAutoplay", true)) return@LaunchedEffect
         delay((AppState.uiNum("heroInterval", 8.0) * 1000).toLong().coerceAtLeast(4000))
         featIndex = (featIndex + 1) % d.featured.size
         mem.data["featIndex"] = featIndex
-        hero = Hero.of(d.featured[featIndex])
+        hero.value = Hero.of(d.featured[featIndex])
     }
 
     Box(Modifier.fillMaxSize()) {
-        Backdrop(hero?.backdrop)
+        HeroBackdrop(hero)
         Column(Modifier.fillMaxSize()) {
-            HeroInfo(hero, Modifier.fillMaxWidth().height(if (showBillboard) 250.dp else 215.dp).padding(start = 32.dp, top = 34.dp, end = 360.dp))
+            HeroInfoOf(hero, Modifier.fillMaxWidth().height(if (showBillboard) 250.dp else 215.dp).padding(start = 32.dp, top = 34.dp, end = 360.dp))
             if (showBillboard) {
                 val alpha by animateFloatAsState(if (billboardFocused) 1f else 0f, label = "bb")
                 Row(
                     Modifier.padding(start = 32.dp, bottom = 8.dp).alpha(alpha)
                         .onFocusChanged {
                             billboardFocused = it.hasFocus
-                            if (it.hasFocus) { focusTarget = null; d.featured.getOrNull(featIndex)?.let { f -> hero = Hero.of(f) }; scope.launch { listState.animateScrollToItem(0) } }
+                            if (it.hasFocus) { focusTarget.value = null; d.featured.getOrNull(featIndex)?.let { f -> hero.value = Hero.of(f) }; scope.launch { listState.animateScrollToItem(0) } }
                         },
                 ) {
                     val f = d.featured.getOrNull(featIndex)
@@ -211,11 +214,11 @@ private fun HomeContent(d: HomeData) {
                         is HomeRow.Plex -> PlexRow(
                             row.key, row.title, row.items, row.wide, 32.dp, onRowFocused,
                             firstFocus = if (idx == 0) firstCardFr else null,
-                            onItemFocus = { focusTarget = Hero.of(it) },
+                            onItemFocus = { focusTarget.value = Hero.of(it) },
                         ) { if (it.type == "playlist") Nav.openDetails(it) else Nav.open(it) }
                         is HomeRow.Channels -> CardRow(row.title, startPad = 32.dp, onRowFocused = onRowFocused) {
                             itemsIndexed(row.channels.distinctBy { "${it.providerId}:${it.id}" }, key = { _, c -> "${c.providerId}:${c.id}" }) { i, ch ->
-                                ChannelCard(ch, "${row.key}/${ch.providerId}:${ch.id}", onFocus = { focusTarget = Hero.of(ch) }, fr = if (idx == 0 && i == 0) firstCardFr else null) {
+                                ChannelCard(ch, "${row.key}/${ch.providerId}:${ch.id}", onFocus = { focusTarget.value = Hero.of(ch) }, fr = if (idx == 0 && i == 0) firstCardFr else null) {
                                     Nav.playLive(ch, row.channels, row.title)
                                 }
                             }
@@ -226,6 +229,12 @@ private fun HomeContent(d: HomeData) {
         }
     }
 }
+
+@Composable
+fun HeroBackdrop(h: androidx.compose.runtime.State<Hero?>, heightFraction: Float = 0.78f) = Backdrop(h.value?.backdrop, heightFraction)
+
+@Composable
+fun HeroInfoOf(h: androidx.compose.runtime.State<Hero?>, modifier: Modifier) = HeroInfo(h.value, modifier)
 
 /** Full-bleed artwork in the top-right, fading into the background like Netflix. */
 @Composable

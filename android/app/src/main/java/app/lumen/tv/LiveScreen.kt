@@ -57,7 +57,7 @@ fun LiveScreen() {
     @Suppress("UNCHECKED_CAST")
     var channels by remember { mutableStateOf(mem.data["channels"] as List<Channel>?) }
     var loadingGroup by remember { mutableStateOf<String?>(null) }
-    var focusedCh by remember { mutableStateOf<Channel?>(null) }
+    val focusedCh = remember { mutableStateOf<Channel?>(null) }
     var groupsFocused by remember { mutableStateOf(false) }
 
     LaunchedEffect(prov.id) {
@@ -123,7 +123,7 @@ fun LiveScreen() {
                 list.isEmpty() -> Message("No channels here", if (group.startsWith("__fav")) "Press MENU (or hold OK) on a channel to add it to your favourites." else null)
                 else -> LazyColumn(state = chState, contentPadding = PaddingValues(start = 4.dp, end = 8.dp, bottom = 80.dp)) {
                     itemsIndexed(list, key = { i, c -> "${c.providerId}:${c.id}:$i" }) { i, ch ->
-                        ChannelLine(ch, fr = if (i == 0) firstChFr else null, onFocus = { focusedCh = ch },
+                        ChannelLine(ch, fr = if (i == 0) firstChFr else null, onFocus = { focusedCh.value = ch },
                             onMenu = {
                                 scope.launch {
                                     runCatching { Repo.toggleFavorite(ch) }.onSuccess { added ->
@@ -140,11 +140,13 @@ fun LiveScreen() {
         }
         // ---- details ----
         Column(Modifier.width(300.dp).fillMaxHeight().padding(start = 12.dp, end = 24.dp, top = 30.dp)) {
-            val ch = focusedCh
-            if (ch != null) ChannelDetails(ch)
+            FocusedDetails(focusedCh)
         }
     }
 }
+
+@Composable
+private fun FocusedDetails(ch: androidx.compose.runtime.State<Channel?>) { ch.value?.let { ChannelDetails(it) } }
 
 @Composable
 fun ChannelLine(ch: Channel, fr: FocusRequester? = null, onFocus: () -> Unit = {}, onMenu: (() -> Unit)? = null, onClick: () -> Unit) {

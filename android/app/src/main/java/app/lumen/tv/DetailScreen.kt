@@ -82,7 +82,7 @@ fun DetailScreen(s: Screen.Detail) {
     val listState = rememberLazyListState()
 
     Box(Modifier.fillMaxSize()) {
-        Backdrop(Net.plexImg(item.art ?: item.thumb, 1600, 900), heightFraction = 1f)
+        Backdrop(Net.plexImg(item.art ?: item.thumb, 1280, 720), heightFraction = 1f)
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 56.dp, bottom = 120.dp)) {
             item(key = "info") {
                 Column(Modifier.padding(start = 48.dp, end = 340.dp)) {

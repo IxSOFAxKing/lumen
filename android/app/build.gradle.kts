@@ -36,7 +36,10 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8 makes Compose much faster on TV hardware.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = if (!ksPath.isNullOrBlank()) signingConfigs.getByName("lumen") else signingConfigs.getByName("debug")
         }
     }
@@ -79,4 +82,6 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Installs the libraries' baseline profiles so Compose is compiled ahead of time on sideloaded installs.
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
 }
