@@ -1,8 +1,23 @@
-# Lumen for Android TV — plan & integration contract
+# Lumen for Android TV
 
-This document describes how the Android TV app will be built on top of the Lumen server, and what the web app already does to support it.
+## Current architecture (native interface)
 
-## Recommended architecture
+The app is a native **Jetpack Compose** TV interface that talks straight to the Lumen server's JSON API with its device token:
+
+- **Home:** a featured banner, then rows: Continue Watching, Live TV favourites, Recently Added, Plex hubs, playlists and pinned rows. The backdrop changes to whichever card has focus. Row order and visibility come from Settings → Appearance, the same settings the web app uses.
+- **Libraries:** Plex's own rows, plus A–Z, Recently added, Unwatched and Top rated grids.
+- **Details:** for movies and shows, with Resume, Start over, seasons, episodes, cast and "More like this".
+- **Live TV:** like TiviMate, with groups, then channels with what's on now, then programme details. MENU on a channel adds it to or removes it from favourites.
+- **Guide:** a programme grid. OK watches, plays catch-up, or records an upcoming programme.
+- **Search** and **Recordings.**
+- **Settings:** interface size (per TV), playback, home rows and Live TV options. The full server settings open the web interface in `WebActivity`.
+- **Player:** ExoPlayer with a custom overlay driven entirely by the remote, so it always hides itself. It includes seek, audio/subtitle/quality panels, skip intro, up next, the live banner, zapping, a channel list, number entry and automatic fallbacks (direct → remux → transcode).
+
+The interface is laid out on a fixed 960 × 540 dp canvas, so it looks the same on every TV, and the "Interface size" setting scales it from there.
+
+The original plan, kept for reference: the bridge below is still used by `WebActivity`.
+
+## Original plan: WebView shell
 
 A small **native Kotlin shell** that:
 
