@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import * as plex from '../services/plex.js';
 import { getConfig } from '../services/settings.js';
 import { startSession, stopSession } from '../services/transcoder.js';
-import { getSetting } from '../db.js';
+import { getSetting, setSetting } from '../db.js';
 import { ah, pipeFetch, srtToVtt } from '../util.js';
 import { serveCachedImage } from '../services/imgcache.js';
 
@@ -188,15 +188,40 @@ r.post('/unwatched/:key', ah(async (req, res) => {
 
 // ---------- Images ----------
 
+// Images that made Plex fail (or crash) are not requested again for a while, so one bad
+// poster can't take the server down repeatedly. Persisted across Lumen restarts.
+const BAD_IMAGE_HOURS = 12;
+const badImages = new Map(Object.entries(getSetting('badPlexImages', {}) || {}));
+const saveBadImages = () => setSetting('badPlexImages', Object.fromEntries([...badImages].filter(([, until]) => until > Date.now())));
+
 r.get('/image', ah(async (req, res) => {
   const path = String(req.query.path || '');
   if (!path.startsWith('/')) return res.status(400).end();
   const w = Math.min(Number(req.query.w) || 400, 3840), h = Math.min(Number(req.query.h) || 600, 2160);
+  if ((badImages.get(path) || 0) > Date.now()) return res.status(404).end();
   // Plex's photo transcoder is slow; keep resized artwork on disk.
-  await serveCachedImage(`plex|${plex.plexConf().machineId}|${path}|${w}x${h}`, () => plex.plexFetch('/photo/:/transcode', {
-    raw: true, gate: 'image', params: { url: path, width: w, height: h, minSize: 1, upscale: 1, format: 'webp', quality: 80 },
-    headers: { Accept: 'image/*' },
-  }), res);
+  // Request the same way Plex's own apps do (JPEG/PNG, no format=webp): WebP encoding of some
+  // posters crashes Plex Media Server.
+  await serveCachedImage(`plex|${plex.plexConf().machineId}|${path}|${w}x${h}|v2`, async () => {
+    try {
+      const up = await plex.plexFetch('/photo/:/transcode', {
+        raw: true, gate: 'image', timeout: 30000, params: { url: path, width: w, height: h, minSize: 1, upscale: 1 },
+        headers: { Accept: 'image/jpeg,image/png,image/*' },
+      });
+      if (up.status >= 500) { const e = new Error(`Plex returned ${up.status}`); e.serverError = true; throw e; }
+      return up;
+    } catch (e) {
+      // Only blame this image if Plex died while working on it (or errored on it) — not if Plex was
+      // already down/restarting when we asked.
+      const kind = plex.failureKind(e);
+      if (e.serverError || kind === 'dropped' || kind === 'timeout') {
+        badImages.set(path, Date.now() + BAD_IMAGE_HOURS * 3600e3);
+        saveBadImages();
+        console.warn(`[plex] image ${path} failed (${e.cause?.code || e.message}); not requesting it again for ${BAD_IMAGE_HOURS}h`);
+      }
+      throw e;
+    }
+  }, res);
 }));
 
 // ---------- Playback ----------

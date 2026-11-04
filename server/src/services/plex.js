@@ -80,8 +80,27 @@ async function rateLimit() {
  * gate: 'api' (default for JSON), 'image', or null (streams handle their own limits).
  * signal: abort when the browser goes away, so abandoned requests don't pile up on Plex.
  */
+/** How a request to Plex failed at the network level (undici puts the reason in err.cause). */
+export function failureKind(err) {
+  const code = err?.cause?.code || err?.code || '';
+  if (err?.plexDown) return 'down';
+  if (/ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|ENOTFOUND|EAI_AGAIN/.test(code)) return 'down';
+  if (/ECONNRESET|UND_ERR_SOCKET|EPIPE|UND_ERR_CLOSED/.test(code)) return 'dropped'; // cut off mid-request: Plex crashed or restarted
+  if (err?.name === 'TimeoutError') return 'timeout';
+  if (err?.name === 'AbortError') return 'cancelled';
+  return 'other';
+}
+
+// Circuit breaker: when Plex stops answering (e.g. it crashed and is restarting), stop contacting it briefly.
+let downUntil = 0;
+export function plexIsDown() { return Date.now() < downUntil; }
+
 export async function plexFetch(path, { params = {}, method = 'GET', headers = {}, raw = false, timeout = 20000, signal, gate } = {}) {
   if (!isConfigured()) { const e = new Error('Plex is not configured'); e.status = 400; throw e; }
+  if (plexIsDown()) {
+    const e = new Error('Plex server is not responding (it may be restarting); retrying shortly');
+    e.status = 503; e.plexDown = true; throw e;
+  }
   const signals = [timeout ? AbortSignal.timeout(timeout) : null, signal].filter(Boolean);
   const g = gates[gate === undefined ? (raw ? null : 'api') : gate];
   reqCount++;
@@ -93,7 +112,18 @@ export async function plexFetch(path, { params = {}, method = 'GET', headers = {
     signal: signals.length > 1 ? AbortSignal.any(signals) : signals[0],
   });
   await rateLimit();
-  if (!DEBUG) { const res0 = g ? await g.run(doFetch) : await doFetch(); return handle(res0); }
+  const tripOnFailure = async (fn) => {
+    try { return await fn(); }
+    catch (e) {
+      const kind = failureKind(e);
+      if ((kind === 'down' || kind === 'dropped') && !plexIsDown()) {
+        downUntil = Date.now() + 20000;
+        console.warn(`[plex] lost connection to Plex (${e.cause?.code || e.message}); pausing requests for 20s`);
+      }
+      throw e;
+    }
+  };
+  if (!DEBUG) { const res0 = await tripOnFailure(() => g ? g.run(doFetch) : doFetch()); return handle(res0); }
   // PLEX_DEBUG=1: log every request to Plex with its timing, so a misbehaving request can be pinpointed.
   const id = ++debugSeq;
   const q = new URLSearchParams(params); q.delete('X-Plex-Token');
@@ -102,11 +132,11 @@ export async function plexFetch(path, { params = {}, method = 'GET', headers = {
   console.log(`[plex-debug] #${id} -> ${method} ${shown.slice(0, 220)} (in flight: ${debugInflight})`);
   const t0 = Date.now();
   try {
-    const res0 = g ? await g.run(doFetch) : await doFetch();
+    const res0 = await tripOnFailure(() => g ? g.run(doFetch) : doFetch());
     console.log(`[plex-debug] #${id} <- ${res0.status} in ${Date.now() - t0}ms`);
     return handle(res0);
   } catch (e) {
-    console.log(`[plex-debug] #${id} !! ${e.name === 'TimeoutError' ? 'timed out' : e.name === 'AbortError' ? 'cancelled' : e.message} after ${Date.now() - t0}ms`);
+    console.log(`[plex-debug] #${id} !! ${failureKind(e)} (${e.cause?.code || e.message}) after ${Date.now() - t0}ms`);
     throw e;
   } finally { debugInflight--; }
 
