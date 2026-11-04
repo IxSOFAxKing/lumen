@@ -66,7 +66,6 @@ services:
       - PUID=1000                  # your user id   (run `id` on the host)
       - PGID=1000                  # your group id
       - TZ=America/New_York        # change me: your time zone (used by the TV guide and recordings)
-      - APP_PASSWORD=changeme      # change me: login password (leave empty to disable login)
       - HW_ACCEL=none              # none | vaapi | qsv | nvenc (can also be changed in Settings)
     volumes:
       - ./config:/config           # database, settings and EPG cache
@@ -121,7 +120,7 @@ Open **http://SERVER-IP:8080**, then go to **Settings**:
 2. **IPTV Providers** → *Add provider* → Xtream Codes: server URL (e.g. `http://line.example.com:8080`), username and password. Channels, VOD, series and EPG sync automatically.
 3. **Transcoding** → choose your hardware acceleration.
 
-Set `APP_PASSWORD` in `docker-compose.yml` if the app is reachable by anyone other than you.
+Lumen always requires a login. On first start the web page asks you to **create a username and password**; you can change them later in Settings → System. To set them from the compose file instead, add `LUMEN_USERNAME` and `LUMEN_PASSWORD`.
 
 ## Hardware transcoding
 
@@ -141,7 +140,7 @@ By default Plex content is transcoded by **your Plex Media Server**. That handle
 | Variable | Default | Description |
 |---|---|---|
 | `PUID` / `PGID` | `0` (root) | User and group the app runs as; files in `/config` and `/recordings` are owned by them |
-| `APP_PASSWORD` | *(empty)* | Require a password to use the app |
+| `LUMEN_USERNAME` / `LUMEN_PASSWORD` | *(empty)* | Optional: fix the login here instead of creating it in the web UI on first start (`APP_PASSWORD` still works, with username `admin`) |
 | `HW_ACCEL` | `none` | Default accel: `none`, `vaapi`, `qsv`, `nvenc` (also changeable in the UI) |
 | `VAAPI_DEVICE` | `/dev/dri/renderD128` | Render node for VAAPI |
 | `TZ` | `UTC` | Time zone for the guide and recordings |
@@ -169,7 +168,7 @@ Volumes: `/config` (SQLite database, settings, EPG), `/recordings` (DVR files), 
 - **Live channel shows audio but no picture, or won't start**: the stream probably uses HEVC video or AC3 audio. Lumen switches to remux and then transcode by itself. To skip the direct attempt, set *Live TV playback* to *Always remux* or *Always transcode*.
 - **Catch-up starts at the wrong time**: adjust *Catch-up time offset* under **Settings → Playback & UI** to match your provider's time zone.
 - **Provider connection limits**: the live preview, Multi-View tiles and recordings each use one provider connection. Check *Connections x/y* on the provider card.
-- **Remote access**: put Lumen behind a reverse proxy with HTTPS (Caddy, Traefik, Nginx Proxy Manager) and set `APP_PASSWORD`.
+- **Remote access**: put Lumen behind a reverse proxy with HTTPS (Caddy, Traefik, Nginx Proxy Manager) (the login is always required).
 - **No guide data**: open **Settings → IPTV Providers → EPG** to refresh it, or add an *EPG URL override* (XMLTV `.xml` or `.xml.gz`).
 
 ## Running without Docker (development)

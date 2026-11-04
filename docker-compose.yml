@@ -9,7 +9,9 @@ services:
       - PUID=1000                    # user/group that owns ./config and ./recordings (run `id` on the host)
       - PGID=1000
       - TZ=America/New_York          # your timezone (used for the TV guide / recordings)
-      - APP_PASSWORD=                # set a password to require login (recommended if exposed)
+      # Login: created in the web UI on first start. Or set it here:
+      # - LUMEN_USERNAME=admin
+      # - LUMEN_PASSWORD=change-me
       - HW_ACCEL=none                # default accel: none | vaapi | qsv | nvenc  (can be changed in Settings)
     volumes:
       - ./config:/config             # database, settings, EPG cache

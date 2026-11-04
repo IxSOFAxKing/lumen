@@ -27,6 +27,7 @@ r.use((req, res, next) => {
 
 r.get('/users', ah(async (req, res) => {
   const c = plex.plexConf();
+  if (!plex.isConfigured()) return res.status(400).json({ error: 'Plex is not connected' });
   const users = await plex.homeUsers();
   const cur = selectedUser(req)?.uuid || users.find(u => u.admin)?.uuid || null;
   res.json({ users: users.map(u => ({ ...u, thumb: u.thumb })), current: cur, default: c.defaultUser || users.find(u => u.admin)?.uuid || null });

@@ -95,7 +95,7 @@ Why this split: Android TV's WebView is fine for UI, but `<video>` inside a WebV
 
 ## Authentication
 
-If `APP_PASSWORD` is set, Lumen uses an HttpOnly session cookie. The WebView logs in normally. ExoPlayer must send the same cookie: read it with `CookieManager.getInstance().getCookie(serverUrl)` and add it as a `Cookie` header in a `DefaultHttpDataSource.Factory().setDefaultRequestProperties(...)`.
+Lumen always requires a login (browsers get an HttpOnly session cookie; the TV app uses its device token). The WebView logs in normally. ExoPlayer must send the same cookie: read it with `CookieManager.getInstance().getCookie(serverUrl)` and add it as a `Cookie` header in a `DefaultHttpDataSource.Factory().setDefaultRequestProperties(...)`.
 
 ## Key mapping
 
