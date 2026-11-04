@@ -51,7 +51,10 @@ jobs:
           ALIAS: ${{ secrets.LUMEN_KEY_ALIAS }}
         run: |
           PW="$(printf '%s' "$PW" | tr -d '\r\n')"; ALIAS="$(printf '%s' "${ALIAS:-lumen}" | tr -d '\r\n ')"
+          echo "Decoded keystore: $(wc -c < "$LUMEN_KEYSTORE") bytes, type: $(file -b "$LUMEN_KEYSTORE")"
+          echo "Password length: ${#PW} characters"
           if ! keytool -list -keystore "$LUMEN_KEYSTORE" -storepass "$PW" > "$RUNNER_TEMP/ks.txt" 2>&1; then
+            echo "keytool says: $(head -c 300 "$RUNNER_TEMP/ks.txt")"
             echo "::error::Could not open the keystore. Either LUMEN_KEYSTORE_BASE64 is not the complete base64 of the .jks file, or LUMEN_KEYSTORE_PASSWORD is wrong."
             exit 1
           fi
