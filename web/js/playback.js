@@ -75,7 +75,7 @@ export async function playLive(providerId, channel, channels = [channel], title 
     const d = await api.post('/api/iptv/play/live', { providerId, channelId: ch.id, mode });
     const meta = {
       title: ch.name, subtitle: ch.now ? `${fmtTime(ch.now.start)} – ${fmtTime(ch.now.stop)} · ${ch.now.title}` : '',
-      live: true, channel: ch,
+      live: true, channel: ch, providerId,
       reload: async ({ mode: m }) => (await open(ch, m)),
     };
     return { desc: d, meta };

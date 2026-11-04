@@ -51,3 +51,9 @@ const P = {
 export function icon(name, cls = '') {
   return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] || ''}</svg>`;
 }
+
+/** Circular-arrow seek icon with the number of seconds inside. dir: -1 back, 1 forward. */
+export function seekIcon(dir, n) {
+  const arc = dir < 0 ? '<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5"/><path d="M4 4v4.5h4.5"/>' : '<path d="M20 12a8 8 0 1 1-2.4-5.7L20 8.5"/><path d="M20 4v4.5h-4.5"/>';
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${arc}<text x="12" y="15.5" font-size="${String(n).length > 1 ? 7 : 8}" text-anchor="middle" fill="currentColor" stroke="none" font-weight="700">${n}</text></svg>`;
+}

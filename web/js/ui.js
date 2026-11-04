@@ -196,3 +196,55 @@ export const prefs = {
   get(k, d) { try { const v = localStorage.getItem('lumen.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('lumen.' + k, JSON.stringify(v)); } catch { /* ignore */ } },
 };
+
+/**
+ * Reorderable list with show/hide toggles (drag the handle, or use the arrows).
+ * items: [{ id, label, icon?, hidden?, locked?, note? }]; onChange(itemsInOrder) is called after every change.
+ */
+export function sortableList(items, onChange, { toggles = true } = {}) {
+  let list = items.map(x => ({ ...x }));
+  const root = h('div', { class: 'sortable' });
+  const emit = () => onChange(list.map(x => ({ ...x })));
+  const move = (from, to) => {
+    if (to < 0 || to >= list.length || from === to) return;
+    const [x] = list.splice(from, 1); list.splice(to, 0, x); render(); emit();
+  };
+  function startDrag(e, from) {
+    e.preventDefault();
+    const rowEl = e.currentTarget.closest('.si');
+    rowEl.classList.add('dragging');
+    let target = null, below = false;
+    const clear = () => root.querySelectorAll('.drop-above,.drop-below').forEach(x => x.classList.remove('drop-above', 'drop-below'));
+    const mv = ev => {
+      const over = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.sortable .si');
+      clear();
+      if (!over || over === rowEl || !root.contains(over)) { target = null; return; }
+      const r = over.getBoundingClientRect();
+      below = ev.clientY > r.top + r.height / 2;
+      over.classList.add(below ? 'drop-below' : 'drop-above');
+      target = Number(over.dataset.i);
+    };
+    const up = () => {
+      document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up);
+      rowEl.classList.remove('dragging'); clear();
+      if (target === null) return;
+      let to = target + (below ? 1 : 0);
+      if (to > from) to--;
+      move(from, to);
+    };
+    document.addEventListener('pointermove', mv);
+    document.addEventListener('pointerup', up);
+  }
+  function render() {
+    root.replaceChildren(...list.map((x, i) => h('div', { class: `si ${x.hidden ? 'off' : ''}`, dataset: { i } },
+      h('div', { class: 'grip', title: 'Drag to reorder', html: icon('grip'), onPointerdown: e => startDrag(e, i) }),
+      x.icon ? h('div', { class: 'ic', html: icon(x.icon) }) : null,
+      h('div', { class: 'grow' }, h('div', {}, x.label), x.note ? h('div', { class: 'dim small' }, x.note) : null),
+      h('button', { class: 'btn ghost sm icon', title: 'Move up', html: icon('up'), disabled: i === 0, onClick: () => move(i, i - 1) }),
+      h('button', { class: 'btn ghost sm icon', title: 'Move down', html: icon('down'), disabled: i === list.length - 1, onClick: () => move(i, i + 1) }),
+      toggles ? h('button', { class: 'btn ghost sm icon', title: x.hidden ? 'Show' : 'Hide', html: icon(x.hidden ? 'eyeoff' : 'eye'), disabled: !!x.locked,
+        onClick: () => { x.hidden = !x.hidden; render(); emit(); } }) : null)));
+  }
+  render();
+  return root;
+}

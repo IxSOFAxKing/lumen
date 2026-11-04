@@ -23,6 +23,15 @@ Lumen is a self-hosted web app that plays your **Plex library** and your **IPTV 
 - Movies (VOD) and Series with resume and "next episode"
 - Hide groups or channels; XMLTV EPG (gzip supported), with optional EPG URL override and fuzzy name matching for M3U
 
+**Personalisation (Settings → Appearance)**
+- Themes: Dark, OLED Black, Light or follow the system, with any accent colour
+- Interface scale, poster size, and sidebar style (compact rail, wide, icons only)
+- Show/hide and reorder every sidebar entry, including each Plex library
+- Show/hide and reorder Home rows, or hide any single Plex row from its ⋯ menu
+- Hide-spoilers mode, optional poster titles, featured-banner timing
+- Player: skip lengths, autoplay-next countdown, automatic intro/credit skipping, subtitle size, colour and background
+- TV Guide zoom and row height
+
 **Player and transcoding**
 - MPEG-TS live streams play directly in the browser (mpegts.js); HLS plays with hls.js
 - **Automatic fallback**: direct → remux (copy video, convert audio to AAC) → full transcode
@@ -143,7 +152,7 @@ Volumes: `/config` (SQLite database, settings, EPG), `/recordings` (DVR files), 
 | 0–9 | Jump to a channel number |
 | L | Channel list overlay |
 | Enter | Show the channel info banner |
-| C | Subtitles · F fullscreen · P picture-in-picture · M mute · I stream info · N next episode |
+| C | Subtitles · F fullscreen · P picture-in-picture · M mute · R record (live) · I stream info · N next episode |
 | Esc | Close the player |
 
 ## Tips & troubleshooting

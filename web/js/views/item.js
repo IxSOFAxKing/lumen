@@ -43,7 +43,7 @@ function watchedBtn(m, onDone) {
 
 function episodeRow(ep) {
   const prog = ep.viewOffset && ep.duration ? ep.viewOffset / ep.duration : 0;
-  return h('div', { class: 'ep', onClick: () => playPlex(ep.ratingKey, { offset: (ep.viewOffset || 0) / 1000 }) },
+  return h('div', { class: `ep ${ep.viewCount > 0 || ep.viewOffset ? '' : 'unwatched'}`, onClick: () => playPlex(ep.ratingKey, { offset: (ep.viewOffset || 0) / 1000 }) },
     h('div', { class: 'thumb' }, ep.thumb ? h('img', { src: plexImg(ep.thumb, 440, 248), loading: 'lazy', alt: '' }) : null,
       prog ? h('div', { class: 'progress' }, h('i', { style: { width: `${prog * 100}%` } })) : null),
     h('div', { class: 'grow' }, h('div', { class: 'dim small' }, `Episode ${ep.index ?? ''}${ep.duration ? ' · ' + fmtRuntime(ep.duration / 1000) : ''}${ep.originallyAvailableAt ? ' · ' + ep.originallyAvailableAt : ''}`),

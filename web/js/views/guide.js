@@ -3,7 +3,6 @@ import { h, logo, nowS, fmtTime, fmtDay, fmtDateTime, empty, btn, toast, toastEr
 import { store, activeProvider, setActiveProvider, go } from '../app.js';
 import { playLive, playCatchup } from '../playback.js';
 
-const PX_PER_MIN = 6;
 const HOURS = 8;
 const PAGE = 60;
 
@@ -34,6 +33,7 @@ export function programmeModal(pid, ch, p, { onWatch, channels } = {}) {
 }
 
 export default async function guide(el, route) {
+  const PX_PER_MIN = Number(window.lumenSettings?.ui?.guideScale) || 6;
   const prov = activeProvider();
   if (!prov) { el.append(empty('No IPTV provider', 'Add one in Settings.', btn('Settings', () => go('#/settings'), { cls: 'primary' }))); return; }
   const pid = prov.id;

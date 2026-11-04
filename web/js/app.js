@@ -1,5 +1,6 @@
 import { api } from './api.js';
-import { h, toast, prefs } from './ui.js';
+import { h, toast, prefs, esc } from './ui.js';
+import { applyAppearance, applyOrder } from './appearance.js';
 import { icon } from './icons.js';
 import { isPlayerOpen } from './player.js';
 import { playLive } from './playback.js';
@@ -58,30 +59,47 @@ async function render() {
   }
 }
 
-function renderNav(route) {
-  const nav = document.getElementById('nav');
-  const item = (href, label, ic, active) => h('a', { class: `nav-item ${active ? 'active' : ''}`, href, html: `${icon(ic)}<span>${label}</span>` });
+/** Every sidebar entry that can currently be shown (before the user's order/visibility is applied). */
+export function navEntries(route = parseHash()) {
   const n = route.name;
   const libIcon = t => t === 'movie' ? 'movie' : t === 'show' ? 'series' : 'library';
   const hasIptv = store.providers.length > 0;
-  nav.replaceChildren(
-    h('div', { class: 'brand', html: '<img src="/img/icon.svg" alt=""><span>Lumen</span>' }),
-    item('#/home', 'Home', 'home', n === 'home'),
-    item('#/search', 'Search', 'search', n === 'search'),
-    hasIptv ? h('div', { class: 'nav-sec' }, 'Live TV') : null,
-    hasIptv ? item('#/live', 'Live TV', 'tv', n === 'live') : null,
-    hasIptv ? item('#/guide', 'Guide', 'guide', n === 'guide') : null,
-    hasIptv ? item('#/multiview', 'Multi-View', 'grid', n === 'multiview') : null,
-    hasIptv && activeProvider()?.vod_enabled ? item('#/vod?kind=movie', 'VOD Movies', 'movie', (n === 'vod' || n === 'vod-item') && (route.query.kind || route.parts[0]) !== 'series') : null,
-    hasIptv && activeProvider()?.series_enabled ? item('#/vod?kind=series', 'VOD Series', 'series', (n === 'vod' || n === 'vod-item') && (route.query.kind || route.parts[0]) === 'series') : null,
-    hasIptv ? item('#/recordings', 'DVR', 'rec', n === 'recordings') : null,
-    store.libraries.length ? h('div', { class: 'nav-sec' }, store.plex?.serverName || store.plex?.name || 'Plex') : null,
-    store.libraries.filter(l => l.type === 'movie' || l.type === 'show')
-      .map(l => item(`#/library/${l.key}`, l.title, libIcon(l.type), n === 'library' && route.parts[0] === String(l.key))),
-    h('div', { class: 'spacer' }),
-    item('#/settings', 'Settings', 'settings', n === 'settings'),
+  const prov = activeProvider();
+  const vodKind = route.query.kind || route.parts[0];
+  const list = [
+    { id: 'home', href: '#/home', label: 'Home', icon: 'home', active: n === 'home' },
+    { id: 'search', href: '#/search', label: 'Search', icon: 'search', active: n === 'search' },
+  ];
+  if (hasIptv) list.push(
+    { id: 'live', href: '#/live', label: 'Live TV', icon: 'tv', active: n === 'live', group: 'iptv' },
+    { id: 'guide', href: '#/guide', label: 'Guide', icon: 'guide', active: n === 'guide', group: 'iptv' },
+    { id: 'multiview', href: '#/multiview', label: 'Multi-View', icon: 'grid', active: n === 'multiview', group: 'iptv' },
+    prov?.vod_enabled ? { id: 'vodMovies', href: '#/vod?kind=movie', label: 'VOD Movies', icon: 'movie', active: (n === 'vod' || n === 'vod-item') && vodKind !== 'series', group: 'iptv' } : null,
+    prov?.series_enabled ? { id: 'vodSeries', href: '#/vod?kind=series', label: 'VOD Series', icon: 'series', active: (n === 'vod' || n === 'vod-item') && vodKind === 'series', group: 'iptv' } : null,
+    { id: 'dvr', href: '#/recordings', label: 'DVR', icon: 'rec', active: n === 'recordings', group: 'iptv' },
   );
+  for (const l of store.libraries.filter(l => l.type === 'movie' || l.type === 'show')) {
+    list.push({ id: `lib:${l.key}`, href: `#/library/${l.key}`, label: l.title, icon: libIcon(l.type), active: n === 'library' && route.parts[0] === String(l.key), group: 'plex' });
+  }
+  return list.filter(Boolean);
 }
+
+function renderNav(route) {
+  const nav = document.getElementById('nav');
+  const u = window.lumenSettings?.ui || {};
+  const hidden = new Set(u.navHidden || []);
+  const entries = applyOrder(navEntries(route), u.navOrder).filter(e => !hidden.has(e.id));
+  const item = e => h('a', { class: `nav-item ${e.active ? 'active' : ''}`, href: e.href, title: e.label, html: `${icon(e.icon)}<span>${esc(e.label)}</span>` });
+  const kids = [h('div', { class: 'brand', html: '<img src="/img/icon.svg" alt=""><span>Lumen</span>' })];
+  entries.forEach((e, i) => {
+    // thin divider whenever the source changes (general / IPTV / Plex)
+    if (i > 0 && (e.group || 'main') !== (entries[i - 1].group || 'main')) kids.push(h('div', { class: 'nav-sec' }));
+    kids.push(item(e));
+  });
+  kids.push(h('div', { class: 'spacer' }), item({ href: '#/settings', label: 'Settings', icon: 'settings', active: route.name === 'settings' }));
+  nav.replaceChildren(...kids);
+}
+export function rerenderNav() { renderNav(parseHash()); }
 
 export async function refreshStore() {
   const [providers, plex, settings] = await Promise.all([
@@ -94,7 +112,7 @@ export async function refreshStore() {
   store.plex = plex;
   store.settings = settings;
   window.lumenSettings = settings;
-  document.documentElement.dataset.theme = settings?.ui?.theme || 'dark';
+  applyAppearance(settings?.ui || {});
   store.libraries = plex.configured && plex.online ? await api.cached('/api/plex/libraries', 300000).catch(() => []) : [];
   renderNav(parseHash());
 }

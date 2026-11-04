@@ -1,17 +1,18 @@
 import { api } from '../api.js';
-import { h, btn, toast, toastErr, modal, confirmDialog, fmtDateTime, spinner, select, empty } from '../ui.js';
+import { h, btn, toast, toastErr, modal, confirmDialog, fmtDateTime, spinner, select, empty, sortableList, debounce } from '../ui.js';
 import { icon } from '../icons.js';
-import { store, refreshStore } from '../app.js';
+import { store, refreshStore, navEntries, rerenderNav } from '../app.js';
+import { homeSections, ACCENTS, applyAppearance } from '../appearance.js';
 
 export default async function settings(el, route) {
   el.className = 'page settings';
   const tab = route.query.tab || 'plex';
-  const tabs = [['plex', 'Plex'], ['iptv', 'IPTV Providers'], ['transcode', 'Transcoding'], ['playback', 'Playback & UI'], ['system', 'System']];
+  const tabs = [['plex', 'Plex'], ['iptv', 'IPTV Providers'], ['appearance', 'Appearance'], ['transcode', 'Transcoding'], ['playback', 'Playback'], ['system', 'System']];
   el.append(h('div', { class: 'page-head' }, h('h1', {}, 'Settings')),
     h('div', { class: 'tabs' }, tabs.map(([k, l]) => h('a', { class: `tab ${tab === k ? 'active' : ''}`, href: `#/settings?tab=${k}` }, l))));
   const body = h('div');
   el.append(body);
-  const fn = { plex: plexTab, iptv: iptvTab, transcode: transcodeTab, playback: playbackTab, system: systemTab }[tab] || plexTab;
+  const fn = { plex: plexTab, iptv: iptvTab, appearance: appearanceTab, transcode: transcodeTab, playback: playbackTab, system: systemTab }[tab] || plexTab;
   return fn(body);
 }
 
@@ -234,7 +235,6 @@ async function playbackTab(el) {
   el.append(h('div', { class: 'card-box' }, h('h3', { style: { marginTop: 0 } }, 'Interface'),
     h('div', { class: 'set-grid' },
       field('Start page', select([{ value: 'home', label: 'Home' }, { value: 'live', label: 'Live TV' }, { value: 'guide', label: 'TV Guide' }], ui.startPage, v => saveUi({ startPage: v }))),
-      field('Theme', select([{ value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }], ui.theme, v => saveUi({ theme: v }))),
       field('Channel info banner (seconds)', num(ui, 'zapOverlaySeconds', saveUi, 1, 20)),
       field('Live TV buffering', select([
         { value: 'smooth', label: 'Smooth (recommended) — extra buffer, no frame skipping' },
@@ -252,7 +252,7 @@ async function playbackTab(el) {
       field('Default User-Agent', h('input', { class: 'input', value: iptv.userAgent, placeholder: 'Browser default', onChange: e => saveIptv({ userAgent: e.target.value }) }))),
   ), h('div', { class: 'card-box', style: { marginTop: '18px' } }, h('h3', { style: { marginTop: 0 } }, 'Keyboard shortcuts (player)'),
     h('dl', { class: 'kv' }, ...[['Space / K', 'Play / pause'], ['← / →', 'Seek −10s / +30s'], ['↑ / ↓', 'Channel up / down (live) or volume'], ['0–9', 'Type a channel number'],
-      ['L', 'Channel list'], ['Enter', 'Show channel info banner'], ['C', 'Subtitles'], ['F', 'Fullscreen'], ['P', 'Picture-in-picture'], ['M', 'Mute'], ['I', 'Stream info'], ['N', 'Next episode'], ['Esc', 'Close player']]
+      ['L', 'Channel list'], ['Enter', 'Show channel info banner'], ['C', 'Subtitles'], ['F', 'Fullscreen'], ['P', 'Picture-in-picture'], ['M', 'Mute'], ['R', 'Record (live TV)'], ['I', 'Stream info'], ['N', 'Next episode'], ['Esc', 'Close player']]
       .flatMap(([k, v]) => [h('dt', {}, h('span', { class: 'badge' }, k)), h('dd', {}, v)]))));
 }
 
@@ -273,4 +273,132 @@ async function systemTab(el) {
   await load();
   const t = setInterval(load, 5000);
   return () => clearInterval(t);
+}
+
+// ---------------- Appearance ----------------
+async function appearanceTab(el) {
+  const all = await api.get('/api/settings');
+  window.lumenSettings = all;
+  let u = all.ui;
+  // Apply instantly (optimistic); changes are batched and saved in the background.
+  let pending = {};
+  const persist = debounce(async () => {
+    const patch = pending; pending = {};
+    try { await api.put('/api/settings/ui', patch); } catch (e) { toastErr(e); }
+  }, 300);
+  const save = (patch, { nav = false } = {}) => {
+    Object.assign(u, patch); Object.assign(pending, patch);
+    window.lumenSettings.ui = u;
+    applyAppearance(u);
+    if (nav) rerenderNav();
+    persist();
+  };
+  const card = (title, ...kids) => h('div', { class: 'card-box', style: { marginBottom: '18px' } }, h('h3', { style: { marginTop: 0 } }, title), ...kids);
+  const field = (label, control, hint) => h('div', { class: 'field', style: { marginBottom: '16px' } }, h('div', { style: { marginBottom: '6px', color: 'var(--text-2)', fontSize: '13px' } }, label), control, hint ? h('div', { class: 'dim small', style: { marginTop: '4px' } }, hint) : null);
+  const chips = (opts, key, extra = {}) => {
+    const box = h('div', { class: 'chips' });
+    const draw = () => box.replaceChildren(...opts.map(([v, l]) => h('button', { class: `chip ${String(u[key]) === String(v) ? 'active' : ''}`, onClick: () => { save({ [key]: v }, extra); draw(); } }, l)));
+    draw(); return box;
+  };
+  const check = (key, label, hint, extra = {}) => h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!u[key], onChange: e => save({ [key]: e.target.checked }, extra) }),
+    h('span', {}, label, hint ? h('div', { class: 'dim small' }, hint) : null));
+  const range = (key, min, max, step, fmt = v => v) => {
+    const val = h('span', { class: 'val' }, fmt(u[key]));
+    return h('div', { class: 'range-row' }, h('input', { type: 'range', min, max, step, value: u[key], onInput: e => { val.textContent = fmt(Number(e.target.value)); save({ [key]: Number(e.target.value) }); } }), val);
+  };
+
+  // --- Theme ---
+  const swatches = h('div', { class: 'swatches' });
+  const drawSwatches = () => swatches.replaceChildren(
+    ...ACCENTS.map(c => h('button', { class: `swatch ${u.accent?.toLowerCase() === c ? 'on' : ''}`, title: c, style: { background: c }, onClick: () => { save({ accent: c }); drawSwatches(); } })),
+    h('label', { class: 'chip', title: 'Custom colour' }, 'Custom', h('input', { type: 'color', value: u.accent || '#ff9f3d', style: { width: '26px', height: '20px', border: 0, padding: 0, background: 'none' }, onInput: e => { save({ accent: e.target.value }); } })));
+  drawSwatches();
+  el.append(card('Theme',
+    field('Mode', chips([['dark', 'Dark'], ['oled', 'OLED Black'], ['light', 'Light'], ['system', 'Match system']], 'theme')),
+    field('Accent colour', swatches)));
+
+  // --- Size & layout ---
+  el.append(card('Size & layout',
+    field('Interface scale', range('uiScale', 75, 140, 5, v => `${v}%`), 'Makes everything bigger or smaller, handy on TVs and small laptops.'),
+    field('Poster size', chips([['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']], 'cardSize')),
+    field('Sidebar style', chips([['rail', 'Compact (icons + labels)'], ['wide', 'Wide (labels beside icons)'], ['icons', 'Icons only']], 'navStyle', { nav: true })),
+    check('showCardTitles', 'Show titles under posters'),
+    check('blurSpoilers', 'Hide spoilers', 'Blurs thumbnails and descriptions of episodes you haven\'t watched (hover to read).')));
+
+  // --- Sidebar ---
+  const navItems = () => {
+    const hidden = new Set(u.navHidden || []);
+    const entries = navEntries();
+    const ordered = (u.navOrder || []).length ? [...entries].sort((a, b) => {
+      const ia = u.navOrder.indexOf(a.id), ib = u.navOrder.indexOf(b.id);
+      return (ia < 0 ? 999 + entries.indexOf(a) : ia) - (ib < 0 ? 999 + entries.indexOf(b) : ib);
+    }) : entries;
+    return ordered.map(e => ({ id: e.id, label: e.label, icon: e.icon, hidden: hidden.has(e.id), note: e.group === 'plex' ? 'Plex library' : e.group === 'iptv' ? 'IPTV' : null }));
+  };
+  const sidebarBox = h('div');
+  const drawSidebar = () => sidebarBox.replaceChildren(sortableList(navItems(), list => {
+    const visibleIds = new Set(list.map(x => x.id));
+    const keptHidden = (u.navHidden || []).filter(id => !visibleIds.has(id)); // entries not currently available keep their state
+    save({ navOrder: list.map(x => x.id), navHidden: [...keptHidden, ...list.filter(x => x.hidden).map(x => x.id)] }, { nav: true });
+  }));
+  drawSidebar();
+  el.append(card('Sidebar', h('p', { class: 'muted small', style: { marginTop: 0 } }, 'Drag to reorder, or use the arrows. Click the eye to hide an item. Settings always stays at the bottom.'), sidebarBox));
+
+  // --- Home screen ---
+  const homeBox = h('div');
+  const hubsBox = h('div');
+  const drawHubs = () => {
+    const hubs = u.hiddenHubs || [];
+    hubsBox.replaceChildren(!hubs.length ? h('div', { class: 'dim small' }, 'Tip: hover any Plex row on the Home screen and use its ⋯ menu to hide just that row.')
+      : h('div', {}, h('div', { class: 'small muted', style: { marginBottom: '6px' } }, 'Hidden Plex rows (click to show again):'),
+        h('div', { class: 'chips' }, hubs.map(hb => h('button', { class: 'chip', onClick: () => { save({ hiddenHubs: (u.hiddenHubs || []).filter(x => x.id !== hb.id) }); drawHubs(); } }, '↺ ', hb.title)))));
+  };
+  homeBox.append(sortableList(homeSections().map(s => ({ id: s.id, label: s.label, hidden: s.hidden, note: s.source === 'iptv' ? 'IPTV' : 'Plex' })),
+    list => save({ homeOrder: list.map(x => x.id), homeHidden: [...((u.homeHidden || []).includes('hero') ? ['hero'] : []), ...list.filter(x => x.hidden).map(x => x.id)] })));
+  drawHubs();
+  el.append(card('Home screen', h('p', { class: 'muted small', style: { marginTop: 0 } }, 'Choose which rows appear on Home and in what order. Rows with nothing to show are skipped automatically.'),
+    homeBox,
+    h('div', { style: { marginTop: '14px' } },
+      h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !(u.homeHidden || []).includes('hero'), onChange: e => {
+        const rest = (u.homeHidden || []).filter(x => x !== 'hero'); save({ homeHidden: e.target.checked ? rest : [...rest, 'hero'] }); } }),
+        h('span', {}, 'Show the featured banner at the top of Home', h('div', { class: 'dim small' }, 'Rotating spotlight of newly added movies and shows.'))),
+      field('Featured banner: seconds per slide', range('heroInterval', 4, 20, 1, v => `${v}s`))), hubsBox));
+
+  // --- Player ---
+  const prev = h('div', { class: 'sub-preview' }, h('span', {}, 'This is how subtitles will look.'));
+  const drawPrev = () => Object.assign(prev.firstChild.style, { fontSize: `${(u.subtitleSize || 100) * 0.2}px`, color: u.subtitleColor || '#fff', background: `rgba(0,0,0,${(u.subtitleBg ?? 60) / 100})` });
+  drawPrev();
+  const subColors = h('div', { class: 'swatches' });
+  const drawSubColors = () => subColors.replaceChildren(...['#ffffff', '#ffeb3b', '#00e5ff', '#76ff03', '#ff80ab'].map(c => h('button', { class: `swatch ${u.subtitleColor === c ? 'on' : ''}`, style: { background: c }, onClick: () => { save({ subtitleColor: c }); drawSubColors(); drawPrev(); } })));
+  drawSubColors();
+  const subRange = (key, min, max, fmt) => { const r = range(key, min, max, 5, fmt); r.querySelector('input').addEventListener('input', drawPrev); return r; };
+  el.append(card('Player',
+    h('div', { class: 'set-grid' },
+      field('Skip back', chips([[5, '5s'], [10, '10s'], [15, '15s'], [30, '30s']], 'seekBack')),
+      field('Skip forward', chips([[10, '10s'], [15, '15s'], [30, '30s'], [60, '60s']], 'seekForward'))),
+    check('autoplayNext', 'Autoplay next episode'),
+    field('Autoplay countdown', range('autoplayCountdown', 3, 30, 1, v => `${v}s`)),
+    check('autoSkipIntro', 'Automatically skip intros', 'Uses Plex intro markers. Otherwise a "Skip Intro" button is shown.'),
+    check('autoSkipCredits', 'Automatically skip credits', 'Jumps to the next episode, or to the end, when credits start.'),
+    h('h4', { style: { margin: '18px 0 10px' } }, 'Subtitles'),
+    prev,
+    h('div', { class: 'set-grid', style: { marginTop: '12px' } },
+      field('Size', subRange('subtitleSize', 50, 200, v => `${v}%`)),
+      field('Background', subRange('subtitleBg', 0, 100, v => `${v}%`))),
+    field('Colour', subColors, 'Applies to subtitles the browser renders. Subtitles burned in by Plex\'s transcoder use the size setting only.')));
+
+  // --- TV Guide ---
+  el.append(card('TV Guide',
+    h('div', { class: 'set-grid' },
+      field('Zoom (time scale)', range('guideScale', 3, 12, 1, v => `${Math.round((v / 6) * 100)}%`)),
+      field('Row height', range('guideRowHeight', 44, 96, 2, v => `${v}px`)))));
+
+  el.append(h('div', { class: 'row' }, btn('Reset appearance to defaults', async () => {
+    if (!(await confirmDialog('Reset appearance?', 'Theme, sizes, sidebar, home screen and player preferences go back to their defaults.', { okLabel: 'Reset', danger: true }))) return;
+    const defaults = { theme: 'dark', accent: '#ff9f3d', uiScale: 100, cardSize: 'medium', showCardTitles: true, blurSpoilers: false, navStyle: 'rail', navOrder: [], navHidden: [],
+      homeOrder: [], homeHidden: [], hiddenHubs: [], heroInterval: 8, autoplayNext: true, autoplayCountdown: 10, autoSkipIntro: false, autoSkipCredits: false,
+      seekBack: 10, seekForward: 30, subtitleSize: 100, subtitleColor: '#ffffff', subtitleBg: 60, guideScale: 6, guideRowHeight: 62 };
+    u = await api.put('/api/settings/ui', defaults); window.lumenSettings.ui = u; applyAppearance(u); rerenderNav();
+    el.replaceChildren(); appearanceTab(el);
+  }, { cls: 'danger', iconName: 'refresh' })));
 }

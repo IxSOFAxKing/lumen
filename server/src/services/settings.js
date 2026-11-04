@@ -26,7 +26,27 @@ export const DEFAULTS = {
     userAgent: '',
     timeshiftOffsetMinutes: 0,
   },
-  ui: { startPage: 'home', theme: 'dark', zapOverlaySeconds: 4, showPreview: true, liveBuffer: 'smooth' },
+  ui: {
+    startPage: 'home', zapOverlaySeconds: 4, showPreview: true, liveBuffer: 'smooth',
+    // Appearance
+    theme: 'dark',                // dark | light | oled | system
+    accent: '#ff9f3d',
+    uiScale: 100,                 // percent
+    cardSize: 'medium',           // small | medium | large
+    showCardTitles: true,
+    blurSpoilers: false,
+    navStyle: 'rail',             // rail | wide | icons
+    navOrder: [], navHidden: [],
+    homeOrder: [], homeHidden: [], hiddenHubs: [],
+    heroInterval: 8,
+    // Player
+    autoplayNext: true, autoplayCountdown: 10,
+    autoSkipIntro: false, autoSkipCredits: false,
+    seekBack: 10, seekForward: 30,
+    subtitleSize: 100, subtitleColor: '#ffffff', subtitleBg: 60,
+    // TV Guide
+    guideScale: 6, guideRowHeight: 62,
+  },
 };
 
 function merge(def, val) {

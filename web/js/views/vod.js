@@ -130,7 +130,7 @@ async function vodItem(el, route) {
     list.replaceChildren(...(se?.episodes || []).map(ep => {
       const e = allEps.find(x => x.id === ep.id);
       const prog = e.progress?.position > 0 && e.progress.duration ? e.progress.position / e.progress.duration : 0;
-      return h('div', { class: 'ep', onClick: () => playEp(e, e.progress?.position > 0 ? e.progress.position : 0) },
+      return h('div', { class: `ep ${e.progress ? '' : 'unwatched'}`, onClick: () => playEp(e, e.progress?.position > 0 ? e.progress.position : 0) },
         h('div', { class: 'thumb' }, e.image ? h('img', { src: e.image, loading: 'lazy', alt: '' }) : null, prog ? h('div', { class: 'progress' }, h('i', { style: { width: `${prog * 100}%` } })) : null),
         h('div', { class: 'grow' }, h('div', { class: 'dim small' }, `Episode ${e.num}${e.duration ? ' · ' + fmtRuntime(e.duration) : ''}`),
           h('h4', {}, e.title || `Episode ${e.num}`, e.progress?.position === -1 ? h('span', { class: 'badge ok', style: { marginLeft: '8px' } }, 'WATCHED') : null), h('p', {}, e.plot || '')));

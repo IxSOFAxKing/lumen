@@ -1,5 +1,5 @@
 import { h, esc, fmtDuration, fmtTime, nowS, logo, toast } from './ui.js';
-import { icon } from './icons.js';
+import { icon, seekIcon } from './icons.js';
 import { attachEngine, releaseDesc, nextMode } from './engine.js';
 import { api } from './api.js';
 
@@ -58,7 +58,7 @@ class Player {
     this.el = h('div', { class: 'player', onMousemove: () => this.poke(), onClick: (e) => { if (e.target === this.video || e.target.classList.contains('p-center')) { if (matchMedia('(pointer:coarse)').matches) this.poke(); else this.toggle(); } } });
     this.titleEl = h('div', { class: 'ttl' }); this.subEl = h('div', { class: 'sub' });
     this.top = h('div', { class: 'p-top' }, pbtn('back', 'Back (Esc)', () => this.close()), h('div', { class: 'grow' }, this.titleEl, this.subEl),
-      this.liveBadge = h('span', { class: 'badge live hidden' }, 'LIVE'));
+      this.recBtn = h('button', { class: 'p-rec hidden', title: 'Record this programme', onClick: e => { e.stopPropagation(); this.toggleRecord(); } }, h('i'), h('span', {}, 'REC')));
     // seekbar
     this.buf = h('div', { class: 'buf' }); this.fill = h('div', { class: 'fill' }); this.knob = h('div', { class: 'knob' }); this.tip = h('div', { class: 'tip' });
     this.marks = h('div');
@@ -68,8 +68,10 @@ class Player {
     this.timeEl = h('span', { class: 'time' });
     this.volBtn = pbtn('vol', 'Mute (M)', () => this.setMuted(!this.video.muted));
     this.vol = h('input', { type: 'range', class: 'p-vol', min: 0, max: 1, step: 0.05, value: this.video.volume, onInput: e => { this.video.volume = e.target.value; this.setMuted(false); localStorage.setItem('lumen.volume', e.target.value); }, onClick: e => e.stopPropagation() });
-    this.rwBtn = pbtn('rw10', 'Back 10s (←)', () => this.seek(this.pos() - 10));
-    this.ffBtn = pbtn('ff30', 'Forward 30s (→)', () => this.seek(this.pos() + 30));
+    const pu = window.lumenSettings?.ui || {};
+    this.seekBack = Number(pu.seekBack) || 10; this.seekFwd = Number(pu.seekForward) || 30;
+    this.rwBtn = h('button', { class: 'pbtn', title: `Back ${this.seekBack}s (←)`, html: seekIcon(-1, this.seekBack), onClick: e => { e.stopPropagation(); this.seek(this.pos() - this.seekBack); } });
+    this.ffBtn = h('button', { class: 'pbtn', title: `Forward ${this.seekFwd}s (→)`, html: seekIcon(1, this.seekFwd), onClick: e => { e.stopPropagation(); this.seek(this.pos() + this.seekFwd); } });
     this.chUp = pbtn('up', 'Channel up (↑ / PgUp)', () => this.zap(-1));
     this.chDown = pbtn('down', 'Channel down (↓ / PgDn)', () => this.zap(1));
     this.listBtn = pbtn('list', 'Channel list (L)', () => this.toggleSide());
@@ -105,7 +107,7 @@ class Player {
     this.engine?.destroy();
     if (this.desc && this.desc !== desc) releaseDesc(this.desc);
     this.desc = desc; this.meta = meta;
-    this.upNextDismissed = false; clearInterval(this.upNextTimer);
+    this.upNextDismissed = false; clearInterval(this.upNextTimer); this.autoSkipped = new Set();
     this.upNextEl?.remove(); this.upNextEl = null; this.skipEl?.remove(); this.skipEl = null; this.skipFor = null;
     this.closeMenu?.();
     this.clearError();
@@ -113,7 +115,8 @@ class Player {
     this.titleEl.textContent = meta.title || '';
     this.subEl.textContent = meta.subtitle || '';
     const live = !!meta.live;
-    this.liveBadge.classList.toggle('hidden', !live);
+    this.recBtn.classList.toggle('hidden', !(live && meta.channel && meta.providerId));
+    if (live) this.syncRecordState();
     this.seekbar.classList.toggle('hidden', live);
     for (const b of [this.rwBtn, this.ffBtn]) b.classList.toggle('hidden', live);
     for (const b of [this.chUp, this.chDown, this.listBtn]) b.classList.toggle('hidden', !meta.zap);
@@ -229,7 +232,17 @@ class Player {
     }
   }
   updateSkip(p, d) {
+    const pu = window.lumenSettings?.ui || {};
     const m = (this.meta.markers || []).find(x => p >= x.start && p < x.end - 1);
+    // Automatic skipping (Settings → Appearance → Player)
+    if (m && !(this.autoSkipped ||= new Set()).has(m)) {
+      if (m.type === 'intro' && pu.autoSkipIntro) { this.autoSkipped.add(m); toast('Skipped intro'); this.seek(m.end); return; }
+      if (m.type === 'credits' && pu.autoSkipCredits) {
+        this.autoSkipped.add(m);
+        if (this.meta.next && pu.autoplayNext !== false) { this.meta.next.run(); return; }
+        if (!this.meta.next) { toast('Skipped credits'); this.seek(d - 1); return; }
+      }
+    }
     const wantSkip = m && (m.type === 'intro' || m.type === 'commercial' || (m.type === 'credits' && !this.meta.next));
     if (wantSkip && this.skipFor !== m) {
       this.skipFor = m;
@@ -242,20 +255,56 @@ class Player {
     const credits = (this.meta.markers || []).find(x => x.type === 'credits');
     const nearEnd = this.meta.next && d && ((credits && p >= credits.start) || d - p < 30);
     if (nearEnd && !this.upNextEl && !this.upNextDismissed) {
-      let left = 10;
-      const cnt = h('span', {}, String(left));
+      const auto = pu.autoplayNext !== false;
+      let left = Number(pu.autoplayCountdown) || 10;
+      const cnt = h('span', {}, auto ? ` (${left})` : '');
       this.upNextEl = h('div', { class: 'p-upnext' }, h('div', { class: 'dim small' }, 'Up next'), h('div', { style: { fontWeight: 700, margin: '4px 0 10px' } }, this.meta.next.label),
-        h('div', { class: 'row' }, h('button', { class: 'btn primary sm', onClick: e => { e.stopPropagation(); this.meta.next.run(); } }, 'Play now (', cnt, ')'),
+        h('div', { class: 'row' }, h('button', { class: 'btn primary sm', onClick: e => { e.stopPropagation(); this.meta.next.run(); } }, 'Play now', cnt),
           h('button', { class: 'btn sm', onClick: e => { e.stopPropagation(); this.upNextDismissed = true; clearInterval(this.upNextTimer); this.upNextEl.remove(); this.upNextEl = null; } }, 'Cancel')));
       this.el.append(this.upNextEl);
-      this.upNextTimer = setInterval(() => { if (this.video.paused) return; left--; cnt.textContent = String(left); if (left <= 0) { clearInterval(this.upNextTimer); this.meta.next?.run(); } }, 1000);
+      if (auto) this.upNextTimer = setInterval(() => { if (this.video.paused) return; left--; cnt.textContent = ` (${left})`; if (left <= 0) { clearInterval(this.upNextTimer); this.meta.next?.run(); } }, 1000);
     } else if (!nearEnd && this.upNextEl) { clearInterval(this.upNextTimer); this.upNextEl.remove(); this.upNextEl = null; }
   }
   ended() {
     if (this.meta.live) return;
     this.report('stopped');
     if (this.desc.restartOnSeek && this.dur() - this.pos() > 15) return; // event playlist caught up; not truly ended
-    if (this.meta.next) this.meta.next.run();
+    if (this.meta.next && (window.lumenSettings?.ui?.autoplayNext !== false)) this.meta.next.run();
+  }
+
+  // ---------- Live recording (the red REC button) ----------
+  async syncRecordState() {
+    const ch = this.meta.channel, pid = this.meta.providerId;
+    this.recId = null; this.recBtn.classList.remove('on'); this.recBtn.title = 'Record this programme (R)';
+    if (!ch || !pid) return;
+    try {
+      const recs = await api.get('/api/iptv/recordings');
+      const r = recs.find(x => x.status === 'recording' && x.provider_id === Number(pid) && String(x.channel_id) === String(ch.id));
+      if (r && this.meta.channel === ch) this.setRecording(r.id, r.title);
+    } catch { /* ignore */ }
+  }
+  setRecording(id, title) {
+    this.recId = id;
+    this.recBtn.classList.toggle('on', !!id);
+    this.recBtn.title = id ? `Recording "${title}" — click to stop` : 'Record this programme (R)';
+  }
+  async toggleRecord() {
+    const ch = this.meta.channel, pid = this.meta.providerId;
+    if (!ch || !pid) return;
+    try {
+      if (this.recId) {
+        await api.post(`/api/iptv/recordings/${this.recId}/cancel`);
+        this.setRecording(null);
+        toast('Recording stopped — saved in DVR', { type: 'ok' });
+      } else {
+        const now = Math.floor(Date.now() / 1000);
+        const stop = ch.now?.stop && ch.now.stop > now + 60 ? ch.now.stop : now + 3600;
+        const title = ch.now?.title || ch.name;
+        const r = await api.post('/api/iptv/recordings', { providerId: pid, channelId: ch.id, start: now, stop, title, descr: ch.now?.descr });
+        this.setRecording(r.id, title);
+        toast(`Recording "${title}" until ${fmtTime(stop)}`, { type: 'ok' });
+      }
+    } catch (e) { toast(e.message, { type: 'err' }); }
   }
 
   // ---------- Basic controls ----------
@@ -439,8 +488,9 @@ class Player {
     else if (k === 'i') this.toggleInfo();
     else if (k === 'c') this.menu('subs');
     else if (k === 'l' && this.meta.zap) this.toggleSide();
-    else if (k === 'ArrowLeft' && !live) this.seek(this.pos() - 10);
-    else if (k === 'ArrowRight' && !live) this.seek(this.pos() + 30);
+    else if (k === 'ArrowLeft' && !live) this.seek(this.pos() - this.seekBack);
+    else if (k === 'ArrowRight' && !live) this.seek(this.pos() + this.seekFwd);
+    else if (k === 'r' && live) this.toggleRecord();
     else if ((k === 'ArrowUp' || k === 'PageUp' || k === 'ChannelUp') && this.meta.zap && !this.sideEl) this.zap(-1);
     else if ((k === 'ArrowDown' || k === 'PageDown' || k === 'ChannelDown') && this.meta.zap && !this.sideEl) this.zap(1);
     else if (k === 'ArrowUp' && !this.sideEl) { this.video.volume = Math.min(1, this.video.volume + 0.05); }
