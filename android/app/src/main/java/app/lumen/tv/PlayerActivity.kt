@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
@@ -557,12 +558,13 @@ class PlayerActivity : ComponentActivity() {
     private var thumbIdx = -1
     private var thumbJob: Job? = null
     private var noThumbs = false
+    private var singleFailed = false
 
     private fun loadThumbnails(src: Source, d: Desc) {
         if (!src.isPlex) { bif = null; bifFor = null; st.thumb = null; return }
         val part = d.raw.str("partId") ?: return
         if (bifFor == part) return
-        bifFor = part; bif = null; thumbIdx = -1; st.thumb = null
+        bifFor = part; bif = null; thumbIdx = -1; st.thumb = null; noThumbs = false; singleFailed = false
         lifecycleScope.launch {
             val b = Bif.load(this@PlayerActivity, part)
             if (bifFor == part) bif = b
@@ -573,11 +575,30 @@ class PlayerActivity : ComponentActivity() {
     private fun updateThumb() {
         val t = st.scrub
         val b = bif
-        if (t != null && b == null && noThumbs) {
-            noThumbs = false
-            Toast.makeText(this, "No preview thumbnails for this video. In Plex, turn on \"Generate video preview thumbnails\" for the library (Manage Library → Edit → Advanced).", Toast.LENGTH_LONG).show()
+        if (t == null) { if (st.thumb != null) { st.thumb = null; thumbIdx = -1 }; return }
+        if (b == null) {
+            // No BIF file: fetch single preview frames (every 10 s) instead.
+            val part = bifFor ?: return
+            if (!noThumbs || singleFailed) return
+            val i = (t / 10).toInt()
+            if (i == thumbIdx || thumbJob?.isActive == true) return
+            thumbIdx = i
+            thumbJob = lifecycleScope.launch {
+                val img = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    runCatching {
+                        Net.http.newCall(okhttp3.Request.Builder().url("${Net.server}/api/plex/thumb/$part/${i * 10000L}").build()).execute().use { r ->
+                            if (!r.isSuccessful) null else r.body?.bytes()?.let { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
+                        }
+                    }.getOrNull()
+                }
+                if (img != null) { if (st.scrub != null) st.thumb = img }
+                else if (!singleFailed) {
+                    singleFailed = true
+                    Toast.makeText(this@PlayerActivity, "No preview thumbnails for this video. In Plex, turn on \"Generate video preview thumbnails\" for the library (Manage Library → Edit → Advanced).", Toast.LENGTH_LONG).show()
+                }
+            }
+            return
         }
-        if (t == null || b == null) { if (st.thumb != null && t == null) { st.thumb = null; thumbIdx = -1 }; return }
         val i = b.indexAt(t)
         if (i == thumbIdx || thumbJob?.isActive == true) return
         thumbIdx = i

@@ -523,6 +523,16 @@ r.get('/bif/:partId', ah(async (req, res) => {
   pipeFetch(upstream, res);
 }));
 
+// A single preview frame at a position (ms) — what Plex Web uses while scrubbing.
+r.get('/thumb/:partId/:ms', ah(async (req, res) => {
+  const id = String(req.params.partId).replace(/\D/g, ''), ms = Math.max(0, Math.round(Number(req.params.ms) / 10000) * 10000);
+  if (!id) return res.status(400).end();
+  const upstream = await plex.plexFetch(`/library/parts/${id}/indexes/sd/${ms}`, { raw: true, gate: 'image', timeout: 15000, headers: { Accept: 'image/*' } });
+  if (!upstream.ok) return res.status(404).end();
+  res.setHeader('Cache-Control', 'private, max-age=86400');
+  pipeFetch(upstream, res);
+}));
+
 /** Remove an item from Continue Watching (Plex's own action). */
 r.post('/continue/remove/:key', ah(async (req, res) => {
   await plex.plexFetch('/actions/removeFromContinueWatching', { method: 'PUT', params: { ratingKey: req.params.key } }).catch(() => null);
