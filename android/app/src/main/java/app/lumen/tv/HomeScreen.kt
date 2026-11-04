@@ -1,6 +1,7 @@
 package app.lumen.tv
 
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.animateFloatAsState
