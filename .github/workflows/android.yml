@@ -36,19 +36,37 @@ jobs:
           KEYSTORE_B64: ${{ secrets.LUMEN_KEYSTORE_BASE64 }}
         run: |
           if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/lumen.jks"
+            printf '%s' "$KEYSTORE_B64" | tr -d ' \r\n' | base64 -d > "$RUNNER_TEMP/lumen.jks"
             echo "LUMEN_KEYSTORE=$RUNNER_TEMP/lumen.jks" >> "$GITHUB_ENV"
             echo "SIGNED_NOTE=Signed with your release key — installs as an update over previous versions." >> "$GITHUB_ENV"
           else
             echo "SIGNED_NOTE=⚠️ Signed with a temporary key (no signing secrets set): uninstall the previous version before installing this one." >> "$GITHUB_ENV"
           fi
 
+      # Explains signing problems in plain words (never prints the secrets).
+      - name: Check signing key
+        if: env.LUMEN_KEYSTORE != ''
+        env:
+          PW: ${{ secrets.LUMEN_KEYSTORE_PASSWORD }}
+          ALIAS: ${{ secrets.LUMEN_KEY_ALIAS }}
+        run: |
+          PW="$(printf '%s' "$PW" | tr -d '\r\n')"; ALIAS="$(printf '%s' "${ALIAS:-lumen}" | tr -d '\r\n ')"
+          if ! keytool -list -keystore "$LUMEN_KEYSTORE" -storepass "$PW" > "$RUNNER_TEMP/ks.txt" 2>&1; then
+            echo "::error::Could not open the keystore. Either LUMEN_KEYSTORE_BASE64 is not the complete base64 of the .jks file, or LUMEN_KEYSTORE_PASSWORD is wrong."
+            exit 1
+          fi
+          if ! grep -qi "^${ALIAS}," "$RUNNER_TEMP/ks.txt"; then
+            echo "::error::The keystore opened, but it has no key called '${ALIAS}'. Set LUMEN_KEY_ALIAS to the -alias you used with keytool (the guide uses: lumen)."
+            exit 1
+          fi
+          echo "Signing key OK."
+
       - name: Build APK
         working-directory: android
         env:
           LUMEN_KEYSTORE_PASSWORD: ${{ secrets.LUMEN_KEYSTORE_PASSWORD }}
           LUMEN_KEY_ALIAS: ${{ secrets.LUMEN_KEY_ALIAS }}
-          LUMEN_KEY_PASSWORD: ${{ secrets.LUMEN_KEY_PASSWORD }}
+          LUMEN_KEY_PASSWORD_OVERRIDE: ''
         run: gradle assembleRelease --stacktrace --no-daemon
 
       - name: Collect APK

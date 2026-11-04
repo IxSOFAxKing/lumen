@@ -123,14 +123,14 @@ Create a key on your computer (keep the file and passwords private, and **never 
 keytool -genkeypair -v -keystore lumen-release.jks -storetype PKCS12 -alias lumen -keyalg RSA -keysize 2048 -validity 36500
 ```
 
-Then add four repository secrets (GitHub → Settings → Secrets and variables → Actions):
+Then add three repository secrets (GitHub → Settings → Secrets and variables → Actions):
 
 | Secret | Value |
 |---|---|
 | `LUMEN_KEYSTORE_BASE64` | output of `base64 -w0 lumen-release.jks` (macOS: `base64 -i lumen-release.jks`) |
 | `LUMEN_KEYSTORE_PASSWORD` | the keystore password |
 | `LUMEN_KEY_ALIAS` | `lumen` |
-| `LUMEN_KEY_PASSWORD` | the key password (same as the keystore password if you only entered one) |
+| `LUMEN_KEY_PASSWORD` | optional, not needed (keytool's default PKCS12 keystores use the keystore password for the key) |
 
 From then on, every build is signed with your key and installs as an update.
 

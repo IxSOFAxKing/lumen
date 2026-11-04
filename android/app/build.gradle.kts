@@ -22,10 +22,13 @@ android {
     signingConfigs {
         if (!ksPath.isNullOrBlank()) {
             create("lumen") {
+                // Values are trimmed: pasted secrets often carry a stray newline/space.
+                val storePw = System.getenv("LUMEN_KEYSTORE_PASSWORD")?.trim().orEmpty()
                 storeFile = file(ksPath)
-                storePassword = System.getenv("LUMEN_KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("LUMEN_KEY_ALIAS")
-                keyPassword = System.getenv("LUMEN_KEY_PASSWORD")
+                storePassword = storePw
+                keyAlias = System.getenv("LUMEN_KEY_ALIAS")?.trim()?.takeIf { it.isNotEmpty() } ?: "lumen"
+                // PKCS12 keystores (what keytool creates by default) use the store password for the key too.
+                keyPassword = System.getenv("LUMEN_KEY_PASSWORD_OVERRIDE")?.trim()?.takeIf { it.isNotEmpty() } ?: storePw
             }
         }
     }
