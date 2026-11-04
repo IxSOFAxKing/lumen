@@ -605,7 +605,7 @@ async function devicesTab(el, route) {
       h('li', {}, 'On the TV, install ', h('b', {}, 'Downloader'), ' (by AFTVnews) from the Play Store / Amazon Appstore.'),
       h('li', {}, 'In Downloader, enter ', h('code', {}, `${host}/tv.apk`), ' and install.'),
       h('li', {}, 'Open Lumen on the TV — it finds this server automatically — and connect it with the code above.')),
-    h('p', { class: 'dim small' }, 'Updates: install the latest APK the same way; your pairing and settings are kept.')));
+    h('p', { class: 'dim small' }, 'Updates: install the latest APK the same way. Your settings live on this server, so nothing is lost; with a signing key set up (see docs/ANDROID_TV.md) updates install over the old version and keep the pairing too.')));
 
   async function draw() {
     const d = await api.get('/api/devices').catch(() => ({ devices: [], pending: [] }));
