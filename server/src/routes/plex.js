@@ -29,6 +29,17 @@ r.get('/users', ah(async (req, res) => {
   const c = plex.plexConf();
   if (!plex.isConfigured()) return res.status(400).json({ error: 'Plex is not connected' });
   const users = await plex.homeUsers();
+  // Learn every user's token up front (no PIN needed), so switching is instant.
+  try {
+    const shared = await plex.sharedTokens();
+    const homeUsers = { ...(c.homeUsers || {}) };
+    let changed = false;
+    for (const u of users) {
+      const tok = shared.get(u.id);
+      if (!u.admin && tok && homeUsers[u.uuid]?.token !== tok) { homeUsers[u.uuid] = { title: u.title, thumb: u.thumb, admin: false, token: tok }; changed = true; }
+    }
+    if (changed) { plex.saveServer({ homeUsers }); Object.assign(c, { homeUsers }); }
+  } catch (e) { console.warn(`[plex] couldn't read shared-server tokens: ${e.message}`); }
   const cur = selectedUser(req)?.uuid || users.find(u => u.admin)?.uuid || null;
   // "known": Lumen already holds this user's token, so switching needs no PIN (the owner never needs one).
   res.json({
@@ -46,6 +57,7 @@ r.post('/users/switch', ah(async (req, res) => {
   const c = plex.plexConf();
   // The PIN is only needed the first time: after that Lumen keeps the user's token. The owner uses the server token.
   let token = c.homeUsers?.[u.uuid]?.token || (u.admin ? c.token : null);
+  if (!token) token = (await plex.sharedTokens().catch(() => new Map())).get(u.id) || null;
   if (!token) {
     if (u.protected && !pin) return res.status(403).json({ error: 'This user needs a PIN', needsPin: true });
     token = await plex.switchHomeUser(u, pin);

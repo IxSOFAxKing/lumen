@@ -45,12 +45,15 @@ fun WhoIsWatching(pu: JSONObject, onExit: () -> Unit, onDone: () -> Unit) {
     BackHandler { onExit() }
 
     fun pick(u: JSONObject, pin: String? = null) {
-        if (u.optBoolean("protected") && !u.optBoolean("known") && pin == null) { pinFor = u; return }
         busy = true
         scope.launch {
             runCatching { Net.post("/api/plex/users/switch", JSONObject().put("uuid", u.optString("uuid")).apply { if (pin != null) put("pin", pin) }) }
                 .onSuccess { onDone() }
-                .onFailure { busy = false; Toast.makeText(ctx, it.message, Toast.LENGTH_LONG).show() }
+                .onFailure {
+                    busy = false
+                    if (it is Net.HttpError && it.code == 403 && pin == null) pinFor = u
+                    else Toast.makeText(ctx, it.message, Toast.LENGTH_LONG).show()
+                }
         }
     }
 
@@ -68,7 +71,7 @@ fun WhoIsWatching(pu: JSONObject, onExit: () -> Unit, onDone: () -> Unit) {
                         }
                         Spacer(Modifier.height(10.dp))
                         T(u.optString("title"), 14.sp, weight = FontWeight.SemiBold)
-                        T(if (u.optBoolean("protected") && !u.optBoolean("known")) "PIN" else if (u.optBoolean("restricted")) "Kids" else "", 11.sp, C.text3)
+                        T(if (u.optBoolean("restricted")) "Kids" else "", 11.sp, C.text3)
                     }
                 }
             }

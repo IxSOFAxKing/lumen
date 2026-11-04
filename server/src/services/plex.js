@@ -307,3 +307,19 @@ export async function switchHomeUser(user, pin) {
   if (!serverToken) throw Object.assign(new Error(`${user.title} doesn't have access to this Plex server (share it with them in Plex first).`), { status: 403 });
   return serverToken;
 }
+
+/**
+ * Server tokens of every user this server is shared with (Home and managed users included), fetched with the
+ * owner's account token — so Lumen can switch users without asking for their PIN. userID -> accessToken.
+ */
+let sharedCache = { t: 0, map: null };
+export async function sharedTokens() {
+  if (sharedCache.map && Date.now() - sharedCache.t < 10 * 60000) return sharedCache.map;
+  const machineId = plexConf().machineId;
+  const { json, text } = await plexTv(`/api/servers/${encodeURIComponent(machineId)}/shared_servers`, { token: accountToken() });
+  const list = json ? (json.MediaContainer?.SharedServer || json.SharedServer || []) : xmlElements(text, 'SharedServer');
+  const map = new Map();
+  for (const s of list) if (s.userID && s.accessToken) map.set(String(s.userID), s.accessToken);
+  sharedCache = { t: Date.now(), map };
+  return map;
+}

@@ -56,8 +56,12 @@ function homeUsersCard() {
     catch (e) { box.replaceChildren(h('h3', { style: { marginTop: 0 } }, 'Plex Home users'), h('p', { class: 'muted' }, `Not available: ${e.message}. If you use Plex Home, sign in to Plex again above (Change server → Sign in with Plex).`)); return; }
     const sw = async (u, makeDefault) => {
       let pin;
-      if (u.protected && !u.known) { pin = await pinDialog(u); if (pin === null) return; }
-      try { await api.post('/api/plex/users/switch', { uuid: u.uuid, pin, makeDefault }); toast(makeDefault ? `${u.title} is now the default user` : `Watching as ${u.title}`, { type: 'ok' }); api.clearCache(); draw(); }
+      try { await api.post('/api/plex/users/switch', { uuid: u.uuid, makeDefault }); }
+      catch (e) {
+        if (e.status !== 403) { toastErr(e); return; }
+        pin = await pinDialog(u); if (pin === null) return; // only when Plex wouldn't give Lumen the user's token
+      }
+      try { if (pin) await api.post('/api/plex/users/switch', { uuid: u.uuid, pin, makeDefault }); toast(makeDefault ? `${u.title} is now the default user` : `Watching as ${u.title}`, { type: 'ok' }); api.clearCache(); draw(); }
       catch (e) { toastErr(e); }
     };
     box.replaceChildren(h('h3', { style: { marginTop: 0 } }, 'Plex Home users'),
