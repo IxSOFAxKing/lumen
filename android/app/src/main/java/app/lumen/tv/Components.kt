@@ -359,7 +359,6 @@ val SmoothScroll: androidx.compose.animation.core.AnimationSpec<Float> = tween(3
 /** Scroll a list so [index] sits at the top, with a smooth eased animation. */
 suspend fun androidx.compose.foundation.lazy.LazyListState.smoothScrollToItem(index: Int) {
     val info = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
-    val info = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
     if (info != null) animateScrollBy((info.offset + layoutInfo.viewportStartOffset).toFloat(), SmoothScroll)
     else animateScrollToItem(index)
 }
