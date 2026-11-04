@@ -64,7 +64,7 @@ fun LibraryScreen(lib: Library) {
     Box(Modifier.fillMaxSize()) {
         HeroBackdrop(hero)
         Column(Modifier.fillMaxSize()) {
-            val heroH = if (rowsFocused) 140.dp else 196.dp
+            val heroH by androidx.compose.animation.core.animateDpAsState(if (rowsFocused) 140.dp else 196.dp, androidx.compose.animation.core.tween(380), label = "heroH")
             HeroInfoOf(hero, rowsFocused, Modifier.fillMaxWidth().height(heroH).padding(start = 32.dp, top = if (rowsFocused) 20.dp else 30.dp, end = 360.dp))
             Row(Modifier.padding(start = 32.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 T(lib.title, 18.sp, weight = FontWeight.Bold, modifier = Modifier.padding(end = 8.dp, top = 6.dp))
