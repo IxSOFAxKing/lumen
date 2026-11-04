@@ -73,11 +73,13 @@ fun LibraryScreen(lib: Library) {
             when {
                 hubs == null && error != null -> Message("Couldn't load ${lib.title}", error)
                 hubs == null -> Loading()
-                else -> LazyColumn(state = listState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 200.dp)) {
+                else -> androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides NoScroll) {
+                LazyColumn(state = listState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 200.dp)) {
                     itemsIndexed(hubs!!, key = { i, h -> "${h.id}-$i" }) { idx, hub ->
                         PlexRow("hub:${hub.id}", hub.title, hub.items, hub.wide, 32.dp, { scope.launch { listState.animateScrollToItem(idx) } },
                             onItemFocus = { focusTarget.value = Hero.of(it) }) { Nav.open(it) }
                     }
+                }
                 }
             }
         }
@@ -144,7 +146,7 @@ fun GridScreen(s: Screen.Grid) {
             items.isEmpty() && loading -> Loading()
             items.isEmpty() && error != null -> Message("Couldn't load this list", error)
             items.isEmpty() && total == 0 -> Message("Nothing here")
-            else -> LazyVerticalGrid(
+            else -> androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides EdgeScroll) { LazyVerticalGrid(
                 columns = GridCells.Fixed(if (wide) 4 else 7),
                 state = gridState,
                 contentPadding = PaddingValues(top = 6.dp, bottom = 80.dp, end = 12.dp),
@@ -165,7 +167,7 @@ fun GridScreen(s: Screen.Grid) {
                         if (src is GridSource.Playlist && (it.type == "movie" || it.isEpisode)) Nav.play(it, resume = true, queue = items.drop(i)) else Nav.open(it)
                     }
                 }
-            }
+            } }
         }
     }
 }

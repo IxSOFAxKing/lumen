@@ -1,6 +1,8 @@
 package app.lumen.tv
 
 import androidx.compose.animation.Crossfade
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -207,6 +209,8 @@ private fun HomeContent(d: HomeData) {
                     }
                 }
             }
+            // The focused row is snapped to the top of this area (onRowFocused); nothing else scrolls it.
+            androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides NoScroll) {
             LazyColumn(state = listState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 200.dp)) {
                 itemsIndexed(d.rows, key = { _, r -> r.key }) { idx, row ->
                     val onRowFocused: () -> Unit = { scope.launch { listState.animateScrollToItem(idx) } }
@@ -226,6 +230,7 @@ private fun HomeContent(d: HomeData) {
                     }
                 }
             }
+            }
         }
     }
 }
@@ -242,7 +247,10 @@ fun Backdrop(url: String?, heightFraction: Float = 0.78f) {
     Box(Modifier.fillMaxSize()) {
         Crossfade(targetState = url, animationSpec = tween(450), label = "backdrop", modifier = Modifier.align(Alignment.TopEnd).fillMaxWidth(0.80f).fillMaxHeight(heightFraction)) { u ->
             Box(Modifier.fillMaxSize()) {
-                Img(u, Modifier.fillMaxSize(), ContentScale.Crop)
+                // Slow "Ken Burns" drift on the artwork (drawn on the GPU layer only).
+                val drift = androidx.compose.animation.core.rememberInfiniteTransition(label = "drift")
+                val z by drift.animateFloat(1f, 1.07f, androidx.compose.animation.core.infiniteRepeatable(tween(16000, easing = androidx.compose.animation.core.LinearEasing), androidx.compose.animation.core.RepeatMode.Reverse), label = "z")
+                Img(u, Modifier.fillMaxSize().graphicsLayer { scaleX = z; scaleY = z; transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.7f, 0.3f) }, ContentScale.Crop)
                 Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to C.bg, 0.35f to C.bg.copy(alpha = 0.55f), 1f to Color.Transparent)))
                 Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.45f to Color.Transparent, 1f to C.bg)))
             }
@@ -251,8 +259,21 @@ fun Backdrop(url: String?, heightFraction: Float = 0.78f) {
 }
 
 @Composable
-fun HeroInfo(h: Hero?, modifier: Modifier = Modifier) {
-    Column(modifier) {
+fun HeroInfo(hero: Hero?, modifier: Modifier = Modifier) {
+    // New title slides up and fades in; the old one fades out.
+    androidx.compose.animation.AnimatedContent(
+        targetState = hero, modifier = modifier, label = "hero",
+        contentKey = { it?.title + "|" + it?.kicker },
+        transitionSpec = {
+            (androidx.compose.animation.fadeIn(tween(380, delayMillis = 60)) + androidx.compose.animation.slideInVertically(tween(380)) { it / 10 }) togetherWith
+                androidx.compose.animation.fadeOut(tween(160))
+        },
+    ) { h -> HeroBody(h) }
+}
+
+@Composable
+private fun HeroBody(h: Hero?) {
+    Column {
         if (h == null) return@Column
         if (h.logo != null) {
             Img(h.logo, Modifier.height(44.dp).width(120.dp), ContentScale.Fit)

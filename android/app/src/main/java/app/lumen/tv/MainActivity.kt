@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -164,18 +165,28 @@ fun Shell(onExit: () -> Unit) {
     Box(Modifier.fillMaxSize().background(C.bg)) {
         val showRail = screen.topLevel
         Box(Modifier.fillMaxSize().padding(start = if (showRail) 64.dp else 0.dp)) {
-            CompositionLocalProvider(LocalMemory provides Nav.mem(screen)) {
-                holder.SaveableStateProvider(screen.key) {
-                    when (screen) {
-                        Screen.Home -> HomeScreen()
-                        Screen.Search -> SearchScreen()
-                        Screen.Live -> LiveScreen()
-                        Screen.Guide -> GuideScreen()
-                        Screen.Recordings -> RecordingsScreen()
-                        Screen.Settings -> SettingsScreen()
-                        is Screen.Lib -> LibraryScreen(screen.lib)
-                        is Screen.Detail -> DetailScreen(screen)
-                        is Screen.Grid -> GridScreen(screen)
+            // Screens cross-fade with a slight zoom.
+            androidx.compose.animation.AnimatedContent(
+                targetState = screen, contentKey = { it.key }, label = "screen",
+                transitionSpec = {
+                    (androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(260, delayMillis = 40)) +
+                        androidx.compose.animation.scaleIn(androidx.compose.animation.core.tween(300), initialScale = 0.97f)) togetherWith
+                        androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(140))
+                },
+            ) { s ->
+                CompositionLocalProvider(LocalMemory provides Nav.mem(s)) {
+                    holder.SaveableStateProvider(s.key) {
+                        when (s) {
+                            Screen.Home -> HomeScreen()
+                            Screen.Search -> SearchScreen()
+                            Screen.Live -> LiveScreen()
+                            Screen.Guide -> GuideScreen()
+                            Screen.Recordings -> RecordingsScreen()
+                            Screen.Settings -> SettingsScreen()
+                            is Screen.Lib -> LibraryScreen(s.lib)
+                            is Screen.Detail -> DetailScreen(s)
+                            is Screen.Grid -> GridScreen(s)
+                        }
                     }
                 }
             }

@@ -1,5 +1,8 @@
 package app.lumen.tv
 
+import androidx.compose.ui.draw.shadow
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.spring
 import android.view.KeyEvent as AKey
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -131,7 +134,9 @@ fun Focusable(
     content: @Composable BoxScope.(focused: Boolean) -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) focusedScale else 1f, label = "focusScale")
+    // Springy zoom + soft glow on focus.
+    val scale by animateFloatAsState(if (focused) focusedScale else 1f, spring(dampingRatio = 0.62f, stiffness = 420f), label = "focusScale")
+    val glow by androidx.compose.animation.core.animateDpAsState(if (focused && outline) 18.dp else 0.dp, tween(220), label = "glow")
     val mem = LocalMemory.current
     val fr = focusRequester ?: remember { FocusRequester() }
     if (memKey != null) {
@@ -166,6 +171,7 @@ fun Focusable(
                 onClick = onClick,
             )
             .graphicsLayer { scaleX = scale; scaleY = scale }
+            .then(if (glow > 0.dp) Modifier.shadow(glow, shape, ambientColor = Color.White.copy(alpha = 0.35f), spotColor = Color.White.copy(alpha = 0.5f)) else Modifier)
             .clip(shape)
             .background(if (focused) focusedBackground else background)
             .then(if (outline && focused) Modifier.border(2.5.dp, Color.White, shape) else Modifier),
@@ -307,13 +313,17 @@ fun CardRow(
 ) {
     var hasFocus by remember { mutableStateOf(false) }
     Column(modifier.onFocusChanged { if (it.hasFocus && !hasFocus) onRowFocused(); hasFocus = it.hasFocus }) {
-        T(title, 15.sp, if (hasFocus) C.text else C.text2, FontWeight.SemiBold, modifier = Modifier.padding(start = startPad, bottom = 2.dp))
-        LazyRow(
-            state = rememberLazyListState(),
-            contentPadding = PaddingValues(start = startPad, end = 48.dp, top = 10.dp, bottom = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            content = content,
-        )
+        val titleColor by androidx.compose.animation.animateColorAsState(if (hasFocus) C.text else C.text2, tween(200), label = "rowTitle")
+        if (title.isNotEmpty()) T(title, 15.sp, titleColor, FontWeight.SemiBold, modifier = Modifier.padding(start = startPad, bottom = 2.dp))
+        // Horizontal scrolling keeps the focused card fully on screen with a margin (not TV's default pivot).
+        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides EdgeScroll) {
+            LazyRow(
+                state = rememberLazyListState(),
+                contentPadding = PaddingValues(start = startPad, end = 48.dp, top = 12.dp, bottom = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                content = content,
+            )
+        }
     }
 }
 
@@ -323,9 +333,32 @@ fun PlexRow(rowKey: String, title: String, items: List<PlexItem>, wide: Boolean,
     val unique = remember(items) { items.distinctBy { it.ratingKey } }
     CardRow(title, startPad = startPad, onRowFocused = onRowFocused) {
         itemsIndexed(unique, key = { _, it -> it.ratingKey }) { i, it ->
+          Box(Modifier.animateItem(fadeInSpec = tween(320), placementSpec = spring(stiffness = 500f), fadeOutSpec = tween(150))) {
             val fr = if (i == 0) firstFocus else null
             if (wide) WideCard(it, "$rowKey/${it.ratingKey}", onFocus = { onItemFocus(it) }, onMenu = { Nav.openDetails(it) }, fr = fr) { onOpen(it) }
             else PosterCard(it, "$rowKey/${it.ratingKey}", onFocus = { onItemFocus(it) }, onMenu = { Nav.openDetails(it) }, fr = fr) { onOpen(it) }
+          }
+        }
+    }
+}
+
+/** Lists whose rows are snapped into place by the screen itself: no automatic scrolling. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+val NoScroll = object : androidx.compose.foundation.gestures.BringIntoViewSpec {
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float = 0f
+}
+
+/** Keep the focused item fully visible with some breathing room (room for the focus zoom). */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+val EdgeScroll = object : androidx.compose.foundation.gestures.BringIntoViewSpec {
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+        val margin = containerSize * 0.08f
+        val trailing = offset + size
+        return when {
+            size > containerSize - 2 * margin -> offset - margin
+            offset < margin -> offset - margin
+            trailing > containerSize - margin -> trailing - (containerSize - margin)
+            else -> 0f
         }
     }
 }
