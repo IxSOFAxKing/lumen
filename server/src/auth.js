@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { config } from './config.js';
 import { getSetting } from './db.js';
+import { deviceForToken } from './services/devices.js';
 
 const COOKIE = 'lumen_session';
 const secret = () => config.sessionSecret || getSetting('sessionSecret');
@@ -12,8 +13,16 @@ function parseCookies(header = '') {
   return Object.fromEntries(header.split(';').map(c => c.trim().split('=')).filter(p => p[0]).map(([k, ...v]) => [k, decodeURIComponent(v.join('='))]));
 }
 
+/** Device token from the Android TV app: "Authorization: Bearer …" (player) or the lumen_device cookie (WebView). */
+export function deviceToken(req) {
+  const m = /^Bearer\s+(.+)$/i.exec(req.headers.authorization || '');
+  return m ? m[1].trim() : parseCookies(req.headers.cookie).lumen_device || null;
+}
+
 export function isAuthed(req) {
-  if (!authEnabled()) return true;
+  const dt = deviceToken(req);
+  if (dt && req.device === undefined) req.device = deviceForToken(dt, req.ip) || null;
+  if (!authEnabled() || req.device) return true;
   const tok = parseCookies(req.headers.cookie)[COOKIE];
   if (!tok) return false;
   const [exp, sig] = tok.split('.');

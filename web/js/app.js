@@ -21,6 +21,7 @@ const routes = {
   recordings: () => import('./views/recordings.js'),
   search: () => import('./views/search.js'),
   settings: () => import('./views/settings.js'),
+  pair: () => import('./views/settings.js'),
   multiview: () => import('./views/multiview.js'),
 };
 
@@ -172,7 +173,10 @@ async function start() {
   window.addEventListener('hashchange', render);
   // Show the login screen instead of reloading (a reload loop would re-request everything).
   let loggingIn = false;
-  window.addEventListener('lumen:unauthorized', () => { if (!loggingIn) { loggingIn = true; showLogin(); } });
+  window.addEventListener('lumen:unauthorized', () => {
+    if (window.LumenNative?.unpaired) { window.LumenNative.unpaired(); return; } // the TV app re-pairs instead of showing a password prompt
+    if (!loggingIn) { loggingIn = true; showLogin(); }
+  });
   render();
   // Optionally jump straight back into the last live channel (TiviMate-style).
   if (window.lumenSettings?.ui?.resumeLastChannel && store.providers.length) {
@@ -187,6 +191,6 @@ async function start() {
 (async function boot() {
   initTv();
   const s = await api.get('/api/auth/status').catch(() => ({ required: false, authed: true }));
-  if (s.required && !s.authed) return showLogin();
+  if (s.required && !s.authed) return window.LumenNative?.unpaired ? window.LumenNative.unpaired() : showLogin();
   start();
 })();

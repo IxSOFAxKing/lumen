@@ -8,13 +8,13 @@ import { tvModeSetting, setTvModeSetting, tvDetected } from '../tv.js';
 export default async function settings(el, route) {
   el.className = 'page settings';
   const tab = route.query.tab || 'plex';
-  const tabs = [['plex', 'Plex'], ['iptv', 'IPTV Providers'], ['appearance', 'Appearance'], ['transcode', 'Transcoding'], ['playback', 'Playback'], ['system', 'System']];
+  const tabs = [['plex', 'Plex'], ['iptv', 'IPTV Providers'], ['appearance', 'Appearance'], ['playback', 'Playback'], ['devices', 'Devices'], ['transcode', 'Transcoding'], ['system', 'System']];
   el.append(h('div', { class: 'page-head' }, h('h1', {}, 'Settings')),
     h('div', { class: 'tabs' }, tabs.map(([k, l]) => h('a', { class: `tab ${tab === k ? 'active' : ''}`, href: `#/settings?tab=${k}` }, l))));
   const body = h('div');
   el.append(body);
-  const fn = { plex: plexTab, iptv: iptvTab, appearance: appearanceTab, transcode: transcodeTab, playback: playbackTab, system: systemTab }[tab] || plexTab;
-  return fn(body);
+  const fn = { plex: plexTab, iptv: iptvTab, appearance: appearanceTab, transcode: transcodeTab, playback: playbackTab, devices: devicesTab, system: systemTab }[tab] || plexTab;
+  return fn(body, route);
 }
 
 // ---------------- Plex ----------------
@@ -576,3 +576,58 @@ async function parentalCard() {
   await draw();
   return box;
 }
+
+// ---------------- Devices (Android TV app pairing) ----------------
+async function devicesTab(el, route) {
+  const native = window.LumenNative;
+  if (native) {
+    el.append(h('div', { class: 'card-box', style: { marginBottom: '18px' } }, h('h3', { style: { marginTop: 0 } }, 'This Android TV app'),
+      h('dl', { class: 'kv' }, h('dt', {}, 'Server'), h('dd', {}, native.serverUrl ? native.serverUrl() : location.origin),
+        h('dt', {}, 'App version'), h('dd', {}, native.version ? native.version() : '?')),
+      h('p', { class: 'muted small' }, 'Everything you change here — settings, Plex & IPTV logins, favourites — is stored on the Lumen server and shared with every device.'),
+      native.openAppSettings ? btn('Change server / pair again', () => native.openAppSettings(), { iconName: 'settings' }) : null));
+  }
+  const code = h('input', { class: 'input', placeholder: '6-digit code', inputmode: 'numeric', maxlength: 6, value: (route?.query?.code || '').replace(/\D/g, ''),
+    style: { width: '170px', fontSize: '22px', letterSpacing: '6px', textAlign: 'center' } });
+  const approve = async (c) => {
+    try { const r = await api.post('/api/pair/approve', { code: c || code.value }); toast(`"${r.name}" is now connected`, { type: 'ok' }); code.value = ''; draw(); }
+    catch (e) { toastErr(e); }
+  };
+  code.addEventListener('keydown', e => { if (e.key === 'Enter') approve(); });
+  const pendingBox = h('div'), listBox = h('div');
+  el.append(h('div', { class: 'card-box', style: { marginBottom: '18px' } }, h('h3', { style: { marginTop: 0 } }, 'Connect a TV or app'),
+    h('p', { class: 'muted small', style: { marginTop: 0 } }, 'Open Lumen on the TV, pick this server, and enter the code it shows (or scan its QR code with your phone).'),
+    h('div', { class: 'row wrap' }, code, btn('Connect device', () => approve(), { cls: 'primary', iconName: 'check' })), pendingBox));
+  el.append(h('div', { class: 'card-box', style: { marginBottom: '18px' } }, h('h3', { style: { marginTop: 0 } }, 'Connected devices'), listBox));
+  const host = `${location.protocol}//${location.host}`;
+  el.append(h('div', { class: 'card-box' }, h('h3', { style: { marginTop: 0 } }, 'Get the Android TV app'),
+    h('ol', { class: 'muted', style: { lineHeight: 1.8, paddingLeft: '20px', margin: 0 } },
+      h('li', {}, 'On the TV, install ', h('b', {}, 'Downloader'), ' (by AFTVnews) from the Play Store / Amazon Appstore.'),
+      h('li', {}, 'In Downloader, enter ', h('code', {}, `${host}/tv.apk`), ' and install.'),
+      h('li', {}, 'Open Lumen on the TV — it finds this server automatically — and connect it with the code above.')),
+    h('p', { class: 'dim small' }, 'Updates: install the latest APK the same way; your pairing and settings are kept.')));
+
+  async function draw() {
+    const d = await api.get('/api/devices').catch(() => ({ devices: [], pending: [] }));
+    pendingBox.replaceChildren(d.pending.length ? h('div', { style: { marginTop: '14px' } }, h('div', { class: 'small muted', style: { marginBottom: '6px' } }, 'Waiting to connect:'),
+      ...d.pending.map(p => h('div', { class: 'prov', style: { marginBottom: '6px' } },
+        h('div', { class: 'grow' }, h('b', {}, p.name), h('div', { class: 'dim small' }, `${p.platform || 'device'} · code ${p.code}`)),
+        btn('Approve', () => approve(p.code), { cls: 'primary sm' })))) : '');
+    listBox.replaceChildren(!d.devices.length ? h('div', { class: 'dim' }, 'No devices paired yet.') : h('table', { class: 'tbl' },
+      h('thead', {}, h('tr', {}, ['Device', 'Type', 'Last seen', ''].map(t => h('th', {}, t)))),
+      h('tbody', {}, d.devices.map(dev => h('tr', {},
+        h('td', {}, h('b', {}, dev.name), dev.id === d.current ? h('span', { class: 'badge ok', style: { marginLeft: '8px' } }, 'THIS DEVICE') : null),
+        h('td', {}, dev.platform === 'android-tv' ? 'Android TV' : (dev.platform || '—')),
+        h('td', {}, dev.last_seen ? `${fmtDateTime(dev.last_seen)}${dev.last_ip ? ` · ${dev.last_ip}` : ''}` : '—'),
+        h('td', { style: { textAlign: 'right', whiteSpace: 'nowrap' } },
+          btn('', async () => { const n = window.prompt('Device name', dev.name); if (n?.trim()) { await api.put(`/api/devices/${dev.id}`, { name: n.trim() }); draw(); } }, { cls: 'sm icon', iconName: 'edit', title: 'Rename' }), ' ',
+          btn('Remove', async () => { if (await confirmDialog(`Remove "${dev.name}"?`, 'It will be signed out and needs to be paired again.', { okLabel: 'Remove', danger: true })) { await api.del(`/api/devices/${dev.id}`); draw(); } }, { cls: 'sm danger' })))))));
+  }
+  await draw();
+  if (code.value.length === 6) setTimeout(() => code.focus(), 50);
+  const t = setInterval(draw, 4000);
+  return () => clearInterval(t);
+}
+
+/** #/pair?code=123456 — opened from the QR code on the TV. */
+export const views = { pair: (el, route) => settings(el, { ...route, query: { tab: 'devices', code: route.query.code || '' } }) };

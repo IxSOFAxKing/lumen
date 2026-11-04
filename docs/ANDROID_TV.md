@@ -106,3 +106,34 @@ If `APP_PASSWORD` is set, Lumen uses an HttpOnly session cookie. The WebView log
 3. `MainActivity`: server-address setup, WebView (JavaScript and DOM storage enabled, `mediaPlaybackRequiresUserGesture=false`), plus the `LumenNative` interface above.
 4. `PlayerActivity` / fragment: ExoPlayer with `PlayerView` and the callbacks above.
 5. A GitHub Actions workflow to build a signed APK for sideloading (Downloader / ADB).
+
+## Installing & updating
+
+1. On the TV, install **Downloader** (AFTVnews) from the Play Store / Amazon Appstore.
+2. Enter `http://<your-lumen-server>:8080/tv.apk`. It redirects to the latest APK on GitHub Releases.
+3. Open Lumen. It scans your network for the server, then shows a pairing code and QR code. Approve it in Lumen → Settings → Devices.
+
+## Signing key (do this once, so updates install over each other)
+
+Android only installs an update over an existing app when both are signed with the **same key**. Until you add one, CI signs each build with a temporary key, so you'd have to uninstall before every update and pair again.
+
+Create a key on your computer (keep the file and passwords private, and **never commit it**):
+
+```bash
+keytool -genkeypair -v -keystore lumen-release.jks -storetype PKCS12 -alias lumen -keyalg RSA -keysize 2048 -validity 36500
+```
+
+Then add four repository secrets (GitHub → Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+|---|---|
+| `LUMEN_KEYSTORE_BASE64` | output of `base64 -w0 lumen-release.jks` (macOS: `base64 -i lumen-release.jks`) |
+| `LUMEN_KEYSTORE_PASSWORD` | the keystore password |
+| `LUMEN_KEY_ALIAS` | `lumen` |
+| `LUMEN_KEY_PASSWORD` | the key password (same as the keystore password if you only entered one) |
+
+From then on, every build is signed with your key and installs as an update.
+
+## How settings stay in sync
+
+The Lumen server is the hub. Plex and IPTV logins, settings, favourite lists, channel names and order, recordings and watch history are all stored on the server. The TV app, the web app and any future apps read and write the same data, so a change on one shows up on all of them. The only things kept per device are the optional "separate settings for this device" (Appearance) and TV mode.

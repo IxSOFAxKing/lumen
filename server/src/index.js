@@ -2,6 +2,8 @@ import express from 'express';
 import compression from 'compression';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
+import * as devices from './services/devices.js';
 import { config } from './config.js';
 import { db } from './db.js';
 import * as auth from './auth.js';
@@ -29,10 +31,24 @@ app.use(express.json({ limit: '25mb' }));
 app.get('/api/auth/status', (req, res) => res.json({ required: auth.authEnabled(), authed: auth.isAuthed(req) }));
 app.post('/api/auth/login', auth.login);
 app.post('/api/auth/logout', auth.logout);
-app.get('/api/health', (req, res) => res.json({ ok: true }));
+const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url))).version;
+// Used by the Android TV app to discover Lumen servers on the local network.
+app.get('/api/health', (req, res) => res.json({ ok: true, app: 'lumen', version: VERSION, name: process.env.LUMEN_NAME || os.hostname(), authRequired: auth.authEnabled() }));
+
+// ---------- Device pairing (no login needed to *request* pairing; a signed-in user approves it) ----------
+app.post('/api/pair/start', (req, res, next) => {
+  try { res.json(devices.startPairing(req.body || {}, { autoApprove: !auth.authEnabled(), ip: req.ip })); } catch (e) { next(e); }
+});
+app.get('/api/pair/status/:id', (req, res) => res.json(devices.pairingStatus(req.params.id)));
+// Short link for the Downloader app on Android TV: http://<server>:8080/tv.apk
+app.get(['/tv.apk', '/tv'], (req, res) => res.redirect(302, 'https://github.com/IxSOFAxKing/lumen/releases/latest/download/lumen-tv.apk'));
 app.use('/api', auth.requireAuth);
 
 // ---------- Settings & system ----------
+app.get('/api/devices', (req, res) => res.json({ devices: devices.listDevices(), pending: devices.pendingPairings(), current: req.device?.id || null }));
+app.post('/api/pair/approve', (req, res, next) => { try { res.json(devices.approvePairing(req.body?.code, req.body?.name)); } catch (e) { next(e); } });
+app.put('/api/devices/:id', (req, res) => { devices.renameDevice(req.params.id, req.body?.name || 'Device'); res.json({ ok: true }); });
+app.delete('/api/devices/:id', (req, res) => { devices.revokeDevice(req.params.id); res.json({ ok: true }); });
 app.get('/api/settings', (req, res) => res.json(allConfig()));
 app.put('/api/settings/:section', (req, res) => {
   const { section } = req.params;
