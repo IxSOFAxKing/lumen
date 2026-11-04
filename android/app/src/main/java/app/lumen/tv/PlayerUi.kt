@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -175,7 +176,7 @@ private fun VodControls(st: PlayerState, clock: Long) {
             T(dateFmt.format(java.util.Date(clock * 1000)), 15.sp, C.text, FontWeight.Medium)
         }
         // ---- bottom panel ----
-        Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(300.dp).background(Brush.verticalGradient(0f to Color.Transparent, 0.35f to Color.Black.copy(alpha = 0.75f), 1f to Color.Black.copy(alpha = 0.95f))))
+        Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(if (LocalPortrait.current) 420.dp else 300.dp).background(Brush.verticalGradient(0f to Color.Transparent, 0.35f to Color.Black.copy(alpha = 0.75f), 1f to Color.Black.copy(alpha = 0.95f))))
         Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 34.dp, end = 34.dp, bottom = 22.dp)) {
             val dur = st.dur
             val shown = st.scrub ?: st.pos
@@ -192,24 +193,40 @@ private fun VodControls(st: PlayerState, clock: Long) {
                 }
             }
             Spacer(Modifier.height(10.dp))
-            SeekBar(if (dur > 0) (shown / dur).toFloat() else 0f, if (dur > 0) (st.pos / dur).toFloat() else 0f, st.zone == 0, st.scrub != null, fmtClock(shown), st.thumb)
+            SeekBar(if (dur > 0) (shown / dur).toFloat() else 0f, if (dur > 0) (st.pos / dur).toFloat() else 0f, st.zone == 0, st.scrub != null, fmtClock(shown))
             Spacer(Modifier.height(8.dp))
             val centre = setOf("prev", "back", "play", "fwd", "next")
-            Box(Modifier.fillMaxWidth()) {
-                Column(Modifier.align(Alignment.CenterStart)) {
-                    T("${fmtClock(shown)} / ${fmtClock(dur)}", 15.sp, C.text, FontWeight.Medium)
-                    if (dur > 0) T("Ends at ${fmtTime(nowS() + (dur - shown).toLong())}", 11.sp, C.text2)
-                }
-                Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    st.buttons.forEachIndexed { i, b -> if (b.id in centre) VodBtn(st, b, i) }
-                }
-                Row(Modifier.align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    st.buttons.forEachIndexed { i, b -> if (b.id !in centre) VodBtn(st, b, i) }
-                }
-            }
+            SplitBar(
+                left = {
+                    Column {
+                        T("${fmtClock(shown)} / ${fmtClock(dur)}", 15.sp, C.text, FontWeight.Medium)
+                        if (dur > 0) T("Ends at ${fmtTime(nowS() + (dur - shown).toLong())}", 11.sp, C.text2)
+                    }
+                },
+                centre = { st.buttons.forEachIndexed { i, b -> if (b.id in centre) VodBtn(st, b, i) } },
+                right = { st.buttons.forEachIndexed { i, b -> if (b.id !in centre) VodBtn(st, b, i) } },
+            )
             val sel = st.buttons.getOrNull(st.btn)
             T(if (st.zone == 1 && sel != null) sel.label else "◀ ▶ seek   ·   ▼ buttons", 11.sp, C.text3, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 6.dp))
         }
+    }
+}
+
+/** Time on the left, transport buttons centred, extra buttons on the right — stacked in portrait. */
+@Composable
+private fun SplitBar(left: @Composable () -> Unit, centre: @Composable RowScope.() -> Unit, right: @Composable RowScope.() -> Unit) {
+    if (LocalPortrait.current) {
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            left()
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically, content = centre)
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically, content = right)
+        }
+    } else Box(Modifier.fillMaxWidth()) {
+        Box(Modifier.align(Alignment.CenterStart)) { left() }
+        Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically, content = centre)
+        Row(Modifier.align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically, content = right)
     }
 }
 
@@ -287,7 +304,7 @@ private fun LiveBanner(st: PlayerState, clock: Long) {
             Icon(Icons.Filled.Settings, "Options", tint = Color.White, modifier = Modifier.size(30.dp).clip(CircleShape).tap { playerActions?.openOptions() }.padding(4.dp))
         }
         // ---- bottom panel ----
-        Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(300.dp).background(Brush.verticalGradient(0f to Color.Transparent, 0.35f to Color.Black.copy(alpha = 0.75f), 1f to Color.Black.copy(alpha = 0.95f))))
+        Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(if (LocalPortrait.current) 420.dp else 300.dp).background(Brush.verticalGradient(0f to Color.Transparent, 0.35f to Color.Black.copy(alpha = 0.75f), 1f to Color.Black.copy(alpha = 0.95f))))
         Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 34.dp, end = 34.dp, bottom = 22.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // big channel logo
@@ -330,21 +347,23 @@ private fun LiveBanner(st: PlayerState, clock: Long) {
                 Box(Modifier.align(Alignment.CenterStart).offset(x = maxWidth * frac - 6.dp).size(12.dp).clip(CircleShape).background(Color.White))
             }
             Spacer(Modifier.height(8.dp))
-            Box(Modifier.fillMaxWidth()) {
-                if (p != null) {
-                    val el = (nowS() - p.start).coerceAtLeast(0).toDouble()
-                    T("${fmtClock(el)} / ${fmtClock((p.stop - p.start).toDouble())}", 15.sp, C.text, FontWeight.Medium, modifier = Modifier.align(Alignment.CenterStart))
-                }
+            SplitBar(
+                left = {
+                    if (p != null) {
+                        val el = (nowS() - p.start).coerceAtLeast(0).toDouble()
+                        T("${fmtClock(el)} / ${fmtClock((p.stop - p.start).toDouble())}", 15.sp, C.text, FontWeight.Medium)
+                    }
+                },
                 // centre: ⏮ ⏪ ▶ ⏩ ⏭
-                Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                centre = {
                     LiveBtn(Ico.SkipPrev, st.liveBtn == 0, index = 0)
                     LiveBtn(Ico.Rewind, st.liveBtn == 1, index = 1)
                     LiveBtn(if (st.playing) Ico.Pause else Icons.Filled.PlayArrow, st.liveBtn == 2, big = true, index = 2)
                     LiveBtn(Ico.Forward, st.liveBtn == 3, index = 3)
                     LiveBtn(Ico.SkipNext, st.liveBtn == 4, index = 4)
-                }
+                },
                 // right: restart, LIVE, record
-                Row(Modifier.align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                right = {
                     LiveBtn(Ico.Restart, st.liveBtn == 5, index = 5)
                     Box(Modifier.clip(RoundedCornerShape(5.dp)).background(if (st.liveBtn == 6) Color.White else Color.Transparent).tap { playerActions?.liveButton(6) }
                         .border(1.5.dp, if (st.liveBtn == 6) Color.White else C.text, RoundedCornerShape(5.dp)).padding(horizontal = 7.dp, vertical = 3.dp)) {
@@ -353,8 +372,8 @@ private fun LiveBanner(st: PlayerState, clock: Long) {
                     Box(Modifier.size(36.dp).clip(CircleShape).background(if (st.liveBtn == 7) Color.White else Color.Transparent).tap { playerActions?.liveButton(7) }, contentAlignment = Alignment.Center) {
                         Box(Modifier.size(16.dp).clip(CircleShape).background(if (st.liveBtn == 7) C.live else C.text))
                     }
-                }
-            }
+                },
+            )
         }
     }
 }

@@ -51,7 +51,7 @@ class SetupActivity : ComponentActivity() {
         val scroll = ScrollView(this).apply {
             isFillViewport = true
             addView(FrameLayout(this@SetupActivity).apply {
-                addView(content, FrameLayout.LayoutParams(dp(820), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+                addView(content, FrameLayout.LayoutParams(minOf(dp(820), resources.displayMetrics.widthPixels - dp(24)), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
             })
         }
         root.removeAllViews()

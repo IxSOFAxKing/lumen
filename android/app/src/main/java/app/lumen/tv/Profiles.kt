@@ -3,6 +3,8 @@ package app.lumen.tv
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -61,7 +63,7 @@ fun WhoIsWatching(pu: JSONObject, onExit: () -> Unit, onDone: () -> Unit) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             T("Who's watching?", 32.sp, weight = FontWeight.Bold)
             Spacer(Modifier.height(36.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+            Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
                 users.forEachIndexed { i, u ->
                     Column(Modifier.width(110.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Focusable(onClick = { if (!busy) pick(u) }, focusRequester = frs[i], shape = CircleShape, focusedScale = 1.12f, modifier = Modifier.size(96.dp), background = C.card) {

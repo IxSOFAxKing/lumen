@@ -94,7 +94,7 @@ fun DetailScreen(s: Screen.Detail) {
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 40.dp, bottom = 120.dp)) {
             item(key = "info") {
               // Back on the Play / Mark watched buttons: return to the top so the artwork and title are visible.
-              Row(Modifier.padding(start = 48.dp, end = 120.dp).onFocusChanged { if (it.hasFocus) scope.launch { listState.smoothScrollToItem(0) } }) {
+              Row(Modifier.padding(start = if (LocalPortrait.current) 20.dp else 48.dp, end = if (LocalPortrait.current) 16.dp else 120.dp).onFocusChanged { if (it.hasFocus) scope.launch { listState.smoothScrollToItem(0) } }) {
                 // Cover art
                 val cover = if (item.type == "episode") item.grandparentThumb ?: item.thumb else item.thumb
                 if (cover != null) {
@@ -103,7 +103,7 @@ fun DetailScreen(s: Screen.Detail) {
                     }
                     Spacer(Modifier.width(28.dp))
                 }
-                Column(Modifier.weight(1f).padding(end = 120.dp)) {
+                Column(Modifier.weight(1f).padding(end = if (LocalPortrait.current) 0.dp else 120.dp)) {
                     T(item.title, if (item.title.length > 26) 30.sp else 38.sp, weight = FontWeight.Bold, maxLines = 2, lineHeight = 40.sp)
                     Spacer(Modifier.height(8.dp))
                     T(item.metaLine(), 13.sp, C.text2)

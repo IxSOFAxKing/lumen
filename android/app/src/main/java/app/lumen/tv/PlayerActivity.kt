@@ -253,7 +253,6 @@ class PlayerActivity : ComponentActivity() {
                 if (d.url.isBlank()) throw IllegalStateException("The server didn't return a stream")
                 desc = d
                 st.method = d.method
-                loadThumbnails(src, d)
                 st.buttons = buildButtons(src)
                 play(d)
             } catch (e: Exception) {
@@ -387,7 +386,6 @@ class PlayerActivity : ComponentActivity() {
         }
         if (st.scrub != null && now > scrubCommitAt) commitScrub()
         if (st.sleepAt > 0 && now >= st.sleepAt) { finish(); return }
-        updateThumb()
         updateBadges()
         if (st.message != null && now > hideAt + 2000) st.message = null
         if (st.digits.isNotEmpty() && now - digitsAt > 1500) commitDigits()

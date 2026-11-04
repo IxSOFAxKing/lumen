@@ -61,7 +61,8 @@ import kotlinx.coroutines.launch
 
 private const val HALF_HOUR = 1800L
 private const val SPAN = 5400L          // 1.5 hours visible across the grid
-private val CH_W = 168.dp
+private val CH_W_LAND = 168.dp
+private val CH_W_PORT = 104.dp
 private val ROW_H = 48.dp
 
 private fun floor30(t: Long) = t - (t % HALF_HOUR)
@@ -69,6 +70,7 @@ private fun floor30(t: Long) = t - (t % HALF_HOUR)
 /** TV Guide: a programme grid you move around with the remote. OK watches (or catch-up), MENU records. */
 @Composable
 fun GuideScreen() {
+    val CH_W = if (LocalPortrait.current) CH_W_PORT else CH_W_LAND
     val prov = AppState.provider
     if (prov == null) { Message("No IPTV provider", "Add one in Settings → Server settings."); return }
     val ctx = LocalContext.current
@@ -281,6 +283,7 @@ fun GuideScreen() {
 
 @Composable
 private fun GuideRow(c: Channel, focused: Boolean, selectedRow: Boolean, selTime: Long, winStart: Long, dpPerSec: Float, onTap: (Long) -> Unit = {}) {
+    val CH_W = if (LocalPortrait.current) CH_W_PORT else CH_W_LAND
     val winEnd = winStart + SPAN
     val n = nowS()
     Row(Modifier.fillMaxWidth().height(ROW_H).padding(vertical = 1.5.dp)) {

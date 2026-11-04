@@ -82,7 +82,8 @@ fun LiveScreen() {
 
     Row(Modifier.fillMaxSize().padding(top = 20.dp)) {
         // ---- groups ----
-        Column(Modifier.width(if (groupsFocused) 200.dp else 150.dp).fillMaxHeight().onFocusChanged { groupsFocused = it.hasFocus }) {
+        val portrait = LocalPortrait.current
+        Column(Modifier.width(if (portrait) 112.dp else if (groupsFocused) 200.dp else 150.dp).fillMaxHeight().onFocusChanged { groupsFocused = it.hasFocus }) {
             T("Live TV", 20.sp, weight = FontWeight.Bold, modifier = Modifier.padding(start = 20.dp, bottom = 10.dp))
             if (AppState.providers.size > 1) {
                 Box(Modifier.padding(start = 12.dp, bottom = 8.dp)) {
@@ -114,6 +115,9 @@ fun LiveScreen() {
         }
         // ---- channels ----
         Column(Modifier.weight(1f).fillMaxHeight()) {
+            if (portrait) Preview.channel?.let { pc ->
+                Box(Modifier.padding(start = 8.dp, end = 12.dp, bottom = 10.dp).fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(10.dp))) { LivePreview(pc, Modifier.fillMaxSize()) }
+            }
             Row(Modifier.padding(start = 12.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 T(groupName, 16.sp, weight = FontWeight.SemiBold)
                 Spacer(Modifier.width(10.dp))
@@ -133,7 +137,7 @@ fun LiveScreen() {
             }
         }
         // ---- details ----
-        Column(Modifier.width(300.dp).fillMaxHeight().padding(start = 12.dp, end = 24.dp, top = 30.dp)) {
+        if (!portrait) Column(Modifier.width(300.dp).fillMaxHeight().padding(start = 12.dp, end = 24.dp, top = 30.dp)) {
             Preview.channel?.let { pc ->
                 Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(10.dp))) {
                     LivePreview(pc, Modifier.fillMaxSize())

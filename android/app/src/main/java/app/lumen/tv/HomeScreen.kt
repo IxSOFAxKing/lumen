@@ -197,7 +197,7 @@ private fun HomeContent(d: HomeData) {
     Box(Modifier.fillMaxSize()) {
         HeroBackdrop(hero)
         Column(Modifier.fillMaxSize()) {
-            HeroInfoOf(hero, compact, Modifier.fillMaxWidth().height(heroH).padding(start = 32.dp, top = if (compact) 22.dp else 34.dp, end = 360.dp))
+            HeroInfoOf(hero, compact, Modifier.fillMaxWidth().height(heroH).padding(start = 32.dp, top = if (compact) 22.dp else 34.dp, end = if (LocalPortrait.current) 20.dp else 360.dp))
             if (showBillboard) {
                 val alpha by animateFloatAsState(if (billboardFocused) 1f else 0f, label = "bb")
                 Row(

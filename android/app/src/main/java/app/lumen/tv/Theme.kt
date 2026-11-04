@@ -52,20 +52,25 @@ object C {
     val accent: Color get() = Themes.accentOverride ?: Themes.current.accent ?: Color(AppState.accent)
 }
 
+/** True on a phone held upright: screens switch to a single-column layout. */
+val LocalPortrait = androidx.compose.runtime.staticCompositionLocalOf { false }
+
 /**
  * Lays the interface out on a 960 × 540 dp canvas whatever the TV's resolution or density, so it looks the
  * same on every TV, then applies the "Interface size" setting.
  */
 @Composable
 fun LumenTheme(scalePercent: Int, content: @Composable () -> Unit) {
-    val ctx = LocalContext.current
-    val dm = ctx.resources.displayMetrics
-    // Fit the 960 × 540 canvas inside the screen: TVs are exactly 16:9; phones are wider, so the height decides there.
-    val widthPx = maxOf(dm.widthPixels, dm.heightPixels).toFloat()
-    val heightPx = minOf(dm.widthPixels, dm.heightPixels).toFloat()
-    val base = minOf(widthPx / 960f, heightPx / 540f)
+    val cfg = androidx.compose.ui.platform.LocalConfiguration.current
+    val px = cfg.densityDpi / 160f
+    val widthPx = cfg.screenWidthDp * px
+    val heightPx = cfg.screenHeightDp * px
+    val portrait = heightPx > widthPx
+    // Landscape (TVs, phones on their side): fit a 960 × 540 canvas inside the screen.
+    // Portrait (phones): a 420 dp wide layout.
+    val base = if (portrait) widthPx / 420f else minOf(widthPx / 960f, heightPx / 540f)
     val density = Density(base * (scalePercent.coerceIn(70, 150) / 100f), 1f)
-    CompositionLocalProvider(LocalDensity provides density) {
+    CompositionLocalProvider(LocalDensity provides density, LocalPortrait provides portrait) {
         MaterialTheme(
             colorScheme = darkColorScheme(
                 primary = C.accent, background = C.bg, surface = C.bg2, onSurface = C.text, onBackground = C.text,

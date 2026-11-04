@@ -65,7 +65,7 @@ fun LibraryScreen(lib: Library) {
         HeroBackdrop(hero)
         Column(Modifier.fillMaxSize()) {
             val heroH by androidx.compose.animation.core.animateDpAsState(if (rowsFocused) 140.dp else 196.dp, androidx.compose.animation.core.tween(380), label = "heroH")
-            HeroInfoOf(hero, rowsFocused, Modifier.fillMaxWidth().height(heroH).padding(start = 32.dp, top = if (rowsFocused) 20.dp else 30.dp, end = 360.dp))
+            HeroInfoOf(hero, rowsFocused, Modifier.fillMaxWidth().height(heroH).padding(start = 32.dp, top = if (rowsFocused) 20.dp else 30.dp, end = if (LocalPortrait.current) 20.dp else 360.dp))
             Row(Modifier.padding(start = 32.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 T(lib.title, 18.sp, weight = FontWeight.Bold, modifier = Modifier.padding(end = 8.dp, top = 6.dp))
                 Chip("Browse A–Z", false, memKey = "chip/az", focusRequester = firstFr) { Nav.push(Screen.Grid(lib.title, GridSource.Library(lib.key, type))) }
@@ -150,7 +150,7 @@ fun GridScreen(s: Screen.Grid) {
             items.isEmpty() && error != null -> Message("Couldn't load this list", error)
             items.isEmpty() && total == 0 -> Message("Nothing here")
             else -> androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides EdgeScroll) { LazyVerticalGrid(
-                columns = GridCells.Fixed(if (wide) 4 else 7),
+                columns = if (LocalPortrait.current) GridCells.Fixed(if (wide) 1 else 3) else GridCells.Fixed(if (wide) 4 else 7),
                 state = gridState,
                 contentPadding = PaddingValues(top = 6.dp, bottom = 80.dp, end = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),

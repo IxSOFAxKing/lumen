@@ -98,7 +98,7 @@ fun SettingsScreen() {
     val hidden = AppState.uiList("homeHidden").toSet()
 
     Box(Modifier.fillMaxSize()) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 40.dp, end = 260.dp, top = 30.dp, bottom = 100.dp)) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = if (LocalPortrait.current) 16.dp else 40.dp, end = if (LocalPortrait.current) 16.dp else 260.dp, top = 30.dp, bottom = 100.dp)) {
         item { T("Settings", 26.sp, weight = FontWeight.Bold); T("Changes sync to your Lumen server and every app, except the ones marked “this TV”.", 12.sp, C.text3, maxLines = 2) }
 
         item { Section("This TV") }
