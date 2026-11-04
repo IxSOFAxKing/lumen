@@ -222,42 +222,94 @@ private fun SeekBar(fraction: Float, played: Float, focused: Boolean, scrubbing:
 @Composable
 private fun LiveBanner(st: PlayerState, clock: Long) {
     val ch = st.channel
+    val p = ch?.onAir
+    val dateFmt = remember { java.text.SimpleDateFormat("EEE, MMM d, h:mm a", java.util.Locale.getDefault()) }
     Box(Modifier.fillMaxSize()) {
-        Row(Modifier.align(Alignment.TopEnd).padding(28.dp).clip(RoundedCornerShape(8.dp)).background(Color.Black.copy(alpha = 0.55f)).padding(horizontal = 12.dp, vertical = 6.dp)) {
-            T(fmtTime(clock), 16.sp, weight = FontWeight.SemiBold)
+        // ---- top: provider • group   |   date and time ----
+        Box(Modifier.fillMaxWidth().height(110.dp).background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.7f), Color.Transparent))))
+        Row(Modifier.fillMaxWidth().padding(start = 34.dp, end = 34.dp, top = 22.dp), verticalAlignment = Alignment.CenterVertically) {
+            T(listOf(st.providerName, st.group).filter { it.isNotBlank() }.joinToString("  •  "), 15.sp, C.text, FontWeight.Medium)
+            Grow()
+            T(dateFmt.format(java.util.Date(clock * 1000)), 15.sp, C.text, FontWeight.Medium)
         }
-        Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(210.dp).background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.92f)))))
-        Row(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 40.dp, end = 40.dp, bottom = 28.dp), verticalAlignment = Alignment.Bottom) {
-            Box(Modifier.size(132.dp, 76.dp).clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
-                if (ch?.logo != null) Img(Net.url(ch.logo), Modifier.fillMaxSize().padding(10.dp), ContentScale.Fit) else T(ch?.name ?: "", 14.sp, maxLines = 2)
-            }
-            Spacer(Modifier.width(20.dp))
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.clip(RoundedCornerShape(3.dp)).background(C.live).padding(horizontal = 6.dp, vertical = 1.dp)) { T("LIVE", 10.sp, Color.White, FontWeight.Bold) }
-                    Spacer(Modifier.width(10.dp))
-                    T(listOfNotNull(ch?.num?.toString(), ch?.name ?: st.title).joinToString("  "), 15.sp, C.text, FontWeight.SemiBold)
-                    if (st.group.isNotBlank()) { Spacer(Modifier.width(10.dp)); T("·  ${st.group}", 13.sp, C.text3) }
+        // ---- bottom panel ----
+        Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(300.dp).background(Brush.verticalGradient(0f to Color.Transparent, 0.35f to Color.Black.copy(alpha = 0.75f), 1f to Color.Black.copy(alpha = 0.95f))))
+        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 34.dp, end = 34.dp, bottom = 22.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // big channel logo
+                Box(Modifier.size(118.dp, 82.dp), contentAlignment = Alignment.Center) {
+                    if (ch?.logo != null) Img(Net.url(ch.logo), Modifier.fillMaxSize(), ContentScale.Fit)
+                    else T(ch?.name ?: st.title, 15.sp, weight = FontWeight.Bold, maxLines = 2)
                 }
-                Spacer(Modifier.height(6.dp))
-                val p = ch?.onAir
-                T(p?.title ?: "No programme information", 22.sp, weight = FontWeight.Bold)
-                if (p != null) {
-                    Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.width(18.dp))
+                Column(Modifier.weight(1f)) {
+                    T(p?.title ?: (ch?.name ?: st.title), 22.sp, weight = FontWeight.Bold)
+                    Spacer(Modifier.height(4.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        T(fmtTime(p.start), 12.sp, C.text2)
-                        Spacer(Modifier.width(10.dp))
-                        ProgressLine(p.progress, Modifier.weight(1f), color = C.live)
-                        Spacer(Modifier.width(10.dp))
-                        T(fmtTime(p.stop), 12.sp, C.text2)
+                        if (p != null) {
+                            T("${fmtTime(p.start)} – ${fmtTime(p.stop)}", 13.sp, C.text)
+                            Spacer(Modifier.width(10.dp))
+                            ProgressLine(p.progress, Modifier.width(56.dp), color = Color.White, track = Color.White.copy(alpha = 0.25f))
+                            Spacer(Modifier.width(10.dp))
+                            T("${((p.stop - nowS()).coerceAtLeast(0) / 60)} min", 13.sp, C.text)
+                            Spacer(Modifier.width(18.dp))
+                        }
+                        T(listOfNotNull(ch?.num?.toString(), ch?.name).joinToString("  "), 13.sp, C.text, FontWeight.SemiBold)
+                        st.badges.forEach { b ->
+                            Spacer(Modifier.width(8.dp))
+                            Box(Modifier.clip(RoundedCornerShape(4.dp)).background(Color.White.copy(alpha = 0.85f)).padding(horizontal = 5.dp, vertical = 1.dp)) { T(b, 10.sp, Color.Black, FontWeight.Bold) }
+                        }
                     }
-                    p.descr?.let { Spacer(Modifier.height(4.dp)); T(it, 12.sp, C.text2, maxLines = 2, lineHeight = 16.sp) }
+                    ch?.next?.takeIf { it != p }?.let { n ->
+                        Spacer(Modifier.height(4.dp))
+                        Row { T("${fmtTime(n.start)} – ${fmtTime(n.stop)}", 13.sp, C.text2); Spacer(Modifier.width(14.dp)); T(n.title, 13.sp, C.text2) }
+                    }
                 }
-                ch?.next?.takeIf { it != p }?.let { n -> Spacer(Modifier.height(4.dp)); T("Next  ${fmtTime(n.start)}   ${n.title}", 12.sp, C.text3) }
-                Spacer(Modifier.height(8.dp))
-                T("▲▼ channel   ·   OK channel list   ·   ▶ programme guide   ·   MENU options   ·   0–9 number", 11.sp, C.text3)
+            }
+            Spacer(Modifier.height(10.dp))
+            // programme progress bar (full width)
+            val frac = p?.progress ?: 0f
+            BoxWithConstraints(Modifier.fillMaxWidth().height(12.dp)) {
+                Box(Modifier.align(Alignment.CenterStart).fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.3f))) {
+                    Box(Modifier.fillMaxHeight().fillMaxWidth(frac).background(C.accent))
+                }
+                Box(Modifier.align(Alignment.CenterStart).offset(x = maxWidth * frac - 6.dp).size(12.dp).clip(CircleShape).background(Color.White))
+            }
+            Spacer(Modifier.height(8.dp))
+            Box(Modifier.fillMaxWidth()) {
+                if (p != null) {
+                    val el = (nowS() - p.start).coerceAtLeast(0).toDouble()
+                    T("${fmtClock(el)} / ${fmtClock((p.stop - p.start).toDouble())}", 15.sp, C.text, FontWeight.Medium, modifier = Modifier.align(Alignment.CenterStart))
+                }
+                // centre: ⏮ ⏪ ▶ ⏩ ⏭
+                Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    LiveBtn(Ico.SkipPrev, st.liveBtn == 0)
+                    LiveBtn(Ico.Rewind, st.liveBtn == 1)
+                    LiveBtn(if (st.playing) Ico.Pause else Icons.Filled.PlayArrow, st.liveBtn == 2, big = true)
+                    LiveBtn(Ico.Forward, st.liveBtn == 3)
+                    LiveBtn(Ico.SkipNext, st.liveBtn == 4)
+                }
+                // right: restart, LIVE, record
+                Row(Modifier.align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    LiveBtn(Ico.Restart, st.liveBtn == 5)
+                    Box(Modifier.clip(RoundedCornerShape(5.dp)).background(if (st.liveBtn == 6) Color.White else Color.Transparent)
+                        .border(1.5.dp, if (st.liveBtn == 6) Color.White else C.text, RoundedCornerShape(5.dp)).padding(horizontal = 7.dp, vertical = 3.dp)) {
+                        T("LIVE", 12.sp, if (st.liveBtn == 6) Color.Black else C.text, FontWeight.Bold)
+                    }
+                    Box(Modifier.size(36.dp).clip(CircleShape).background(if (st.liveBtn == 7) Color.White else Color.Transparent), contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(16.dp).clip(CircleShape).background(if (st.liveBtn == 7) C.live else C.text))
+                    }
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun LiveBtn(icon: ImageVector, selected: Boolean, big: Boolean = false) {
+    val size = if (big) 46.dp else 36.dp
+    Box(Modifier.size(size).clip(CircleShape).background(if (selected) Color.White else Color.Transparent), contentAlignment = Alignment.Center) {
+        Icon(icon, null, tint = if (selected) Color.Black else Color.White, modifier = Modifier.size(if (big) 26.dp else 22.dp))
     }
 }
 

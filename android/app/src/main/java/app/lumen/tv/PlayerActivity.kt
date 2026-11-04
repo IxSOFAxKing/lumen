@@ -80,6 +80,10 @@ class PlayerState {
     var sleepAt by mutableStateOf(0L)
     var thumb by mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null)
     var subOffsetMs by mutableIntStateOf(0)
+    /** TiviMate-style live bar: selected button (0 prev ch, 1 rewind, 2 play, 3 forward, 4 next ch, 5 restart, 6 live, 7 record). */
+    var liveBtn by mutableIntStateOf(2)
+    var badges by mutableStateOf<List<String>>(emptyList())
+    var providerName by mutableStateOf("")
 }
 
 /**
@@ -200,7 +204,8 @@ class PlayerActivity : ComponentActivity() {
         st.error = null
         st.live = src.isLive
         st.title = src.title; st.subtitle = src.subtitle
-        st.channel = (src as? LiveSource)?.channel
+        st.channel = (src as? LiveSource)?.channel ?: st.channel.takeIf { src is CatchupSource }
+        (src as? LiveSource)?.channel?.let { c -> st.providerName = AppState.providers.firstOrNull { it.id == c.providerId }?.name ?: "" }
         if (!keepState) { st.scrub = null; st.panel = null }
         st.buffering = true
         poke()
@@ -348,6 +353,7 @@ class PlayerActivity : ComponentActivity() {
         if (st.scrub != null && now > scrubCommitAt) commitScrub()
         if (st.sleepAt > 0 && now >= st.sleepAt) { finish(); return }
         updateThumb()
+        if (st.live) updateBadges()
         if (st.message != null && now > hideAt + 2000) st.message = null
         if (st.digits.isNotEmpty() && now - digitsAt > 1500) commitDigits()
         if (src == null) return
@@ -800,6 +806,43 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
+    private fun liveAction(i: Int) {
+        val ch = st.channel
+        val p = ch?.onAir
+        val src = source
+        when (i) {
+            0 -> zap(-1)
+            4 -> zap(1)
+            2 -> togglePause()
+            1, 3 -> {
+                val back = i == 1
+                if (exo.isCurrentMediaItemSeekable) {
+                    val target = (exo.currentPosition + if (back) -10_000 else 10_000).coerceAtLeast(0)
+                    exo.seekTo(target)
+                } else if (back && ch != null && p != null && ch.archive) {
+                    // No time-shift buffer: rewind into catch-up, 30 s behind live.
+                    start(CatchupSource(ch.providerId, ch.id, p.start, p.stop, p.title, ch.name), (nowS() - p.start - 30).toDouble().coerceAtLeast(0.0))
+                } else Toast.makeText(this, if (back) "Rewind needs catch-up on this channel" else "Already live", Toast.LENGTH_SHORT).show()
+            }
+            5 -> if (ch != null && p != null && ch.archive) start(CatchupSource(ch.providerId, ch.id, p.start, p.stop, p.title, ch.name), 0.0)
+                 else Toast.makeText(this, "This channel has no catch-up", Toast.LENGTH_SHORT).show()
+            6 -> { if (src is LiveSource) { exo.seekToDefaultPosition(); exo.play() } else ch?.let { start(LiveSource(it), 0.0) } }
+            7 -> if (ch != null && p != null) lifecycleScope.launch {
+                runCatching { Repo.record(ch, p) }.onSuccess { Toast.makeText(this@PlayerActivity, it, Toast.LENGTH_SHORT).show() }.onFailure { Toast.makeText(this@PlayerActivity, it.message, Toast.LENGTH_LONG).show() }
+            }
+        }
+    }
+
+    /** FHD / 60 FPS / STEREO badges from the stream that is actually playing. */
+    private fun updateBadges() {
+        val v = exo.videoFormat; val a = exo.audioFormat
+        val l = mutableListOf<String>()
+        v?.height?.takeIf { it > 0 }?.let { h -> l += when { h >= 2000 -> "4K"; h >= 1000 -> "FHD"; h >= 700 -> "HD"; else -> "SD" } }
+        v?.frameRate?.takeIf { it > 1 }?.let { l += "${Math.round(it)} FPS" }
+        a?.channelCount?.takeIf { it > 0 }?.let { c -> l += when (c) { 1 -> "MONO"; 2 -> "STEREO"; 6 -> "5.1"; 8 -> "7.1"; else -> "${c}CH" } }
+        if (l != st.badges) st.badges = l
+    }
+
     private fun commitDigits() {
         val n = st.digits.toIntOrNull()
         st.digits = ""
@@ -880,13 +923,16 @@ class PlayerActivity : ComponentActivity() {
             back -> if (st.controls) st.controls = false else finish()
             code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_CHANNEL_UP || code == KeyEvent.KEYCODE_PAGE_UP -> zap(-1)
             code == KeyEvent.KEYCODE_DPAD_DOWN || code == KeyEvent.KEYCODE_CHANNEL_DOWN || code == KeyEvent.KEYCODE_PAGE_DOWN -> zap(1)
-            isOk(code) || code == KeyEvent.KEYCODE_DPAD_LEFT -> {
-                if (repeat > 0) return true
-                if (Playback.zapList.size > 1) { st.chList = true; st.controls = false } else poke()
-            }
+            // Bar showing: ◀ ▶ move between its buttons, OK presses the selected one (like TiviMate).
+            st.controls && code == KeyEvent.KEYCODE_DPAD_LEFT -> { st.liveBtn = (st.liveBtn - 1).coerceAtLeast(0); poke() }
+            st.controls && code == KeyEvent.KEYCODE_DPAD_RIGHT -> { st.liveBtn = (st.liveBtn + 1).coerceAtMost(7); poke() }
+            st.controls && isOk(code) -> { if (repeat == 0) liveAction(st.liveBtn); poke() }
+            // Bar hidden: OK shows it, ◀ opens the channel list, ▶ the programme guide.
+            isOk(code) -> { if (repeat == 0) { st.liveBtn = 2; poke() } }
+            code == KeyEvent.KEYCODE_DPAD_LEFT -> { if (repeat == 0 && Playback.zapList.size > 1) { st.chList = true; st.controls = false } }
             code == KeyEvent.KEYCODE_LAST_CHANNEL -> prevChannel?.let { pc -> Playback.zapList.indexOfFirst { it.id == pc.id }.takeIf { it >= 0 }?.let { zapTo(it) } }
             code == KeyEvent.KEYCODE_MENU || code == KeyEvent.KEYCODE_SETTINGS -> source?.let { st.panel = liveOptions(it); st.controls = true; poke() }
-            code == KeyEvent.KEYCODE_DPAD_RIGHT || code == KeyEvent.KEYCODE_GUIDE -> lifecycleScope.launch { programmesPanel()?.let { st.panel = it; poke() } }
+            code == KeyEvent.KEYCODE_DPAD_RIGHT || code == KeyEvent.KEYCODE_GUIDE || code == KeyEvent.KEYCODE_TV_INPUT -> lifecycleScope.launch { programmesPanel()?.let { st.panel = it; poke() } }
             code == KeyEvent.KEYCODE_INFO -> if (st.controls) st.controls = false else poke()
             else -> return false
         }
