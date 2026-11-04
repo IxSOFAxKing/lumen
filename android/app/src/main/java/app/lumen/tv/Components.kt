@@ -320,8 +320,9 @@ fun CardRow(
 /** Shorthand for a row of Plex items. */
 @Composable
 fun PlexRow(rowKey: String, title: String, items: List<PlexItem>, wide: Boolean, startPad: Dp, onRowFocused: () -> Unit = {}, firstFocus: FocusRequester? = null, onItemFocus: (PlexItem) -> Unit = {}, onOpen: (PlexItem) -> Unit) {
+    val unique = remember(items) { items.distinctBy { it.ratingKey } }
     CardRow(title, startPad = startPad, onRowFocused = onRowFocused) {
-        itemsIndexed(items, key = { i, it -> "${it.ratingKey}-$i" }) { i, it ->
+        itemsIndexed(unique, key = { _, it -> it.ratingKey }) { i, it ->
             val fr = if (i == 0) firstFocus else null
             if (wide) WideCard(it, "$rowKey/${it.ratingKey}", onFocus = { onItemFocus(it) }, onMenu = { Nav.openDetails(it) }, fr = fr) { onOpen(it) }
             else PosterCard(it, "$rowKey/${it.ratingKey}", onFocus = { onItemFocus(it) }, onMenu = { Nav.openDetails(it) }, fr = fr) { onOpen(it) }

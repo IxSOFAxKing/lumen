@@ -214,7 +214,7 @@ private fun HomeContent(d: HomeData) {
                             onItemFocus = { focusTarget = Hero.of(it) },
                         ) { if (it.type == "playlist") Nav.openDetails(it) else Nav.open(it) }
                         is HomeRow.Channels -> CardRow(row.title, startPad = 32.dp, onRowFocused = onRowFocused) {
-                            itemsIndexed(row.channels, key = { i, c -> "${c.providerId}:${c.id}:$i" }) { i, ch ->
+                            itemsIndexed(row.channels.distinctBy { "${it.providerId}:${it.id}" }, key = { _, c -> "${c.providerId}:${c.id}" }) { i, ch ->
                                 ChannelCard(ch, "${row.key}/${ch.providerId}:${ch.id}", onFocus = { focusTarget = Hero.of(ch) }, fr = if (idx == 0 && i == 0) firstCardFr else null) {
                                     Nav.playLive(ch, row.channels, row.title)
                                 }

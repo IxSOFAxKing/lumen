@@ -85,6 +85,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         Net.clearCache() // watch progress may have changed in the player
+        // Rows reload with fresh progress; put focus back on the card you were on.
+        if (AppState.loaded) Nav.mem(Nav.current).restorePending = true
         AppState.resumeTick++
     }
 }

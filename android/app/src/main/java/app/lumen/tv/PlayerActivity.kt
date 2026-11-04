@@ -332,6 +332,24 @@ class PlayerActivity : ComponentActivity() {
         // Live stream stuck buffering: reconnect.
         if (src.isLive && bufferingSince > 0 && now - bufferingSince > 15_000 && desc != null) { bufferingSince = 0; st.message = "Reconnecting…"; start(src, 0.0, keepState = true) }
         if (!src.isLive) markersAndUpNext(src, now)
+        if (src is LiveSource && now - lastEpg > 60_000) refreshEpg(src)
+    }
+
+    private var lastEpg = 0L
+    /** Keep the banner's now/next current during long viewing. */
+    private fun refreshEpg(src: LiveSource) {
+        lastEpg = System.currentTimeMillis()
+        val ch = st.channel ?: return
+        val p = ch.onAir
+        if (p != null && ch.next != null) return
+        lifecycleScope.launch {
+            val n = nowS()
+            val list = runCatching { Net.arr("/api/iptv/epg/${ch.providerId}/${android.net.Uri.encode(ch.id)}?from=${n - 60}&to=${n + 6 * 3600}") }.getOrNull()?.objects()?.mapNotNull { Programme.from(it) } ?: return@launch
+            val cur = list.firstOrNull { it.isNow }
+            val next = list.firstOrNull { it.start >= (cur?.stop ?: n) }
+            if (st.channel?.id == ch.id) st.channel = ch.copy(now = cur, next = next)
+            if (src === source) st.subtitle = cur?.let { "${fmtTime(it.start)} – ${fmtTime(it.stop)} · ${it.title}" } ?: ""
+        }
     }
 
     private fun markersAndUpNext(src: Source, now: Long) {
