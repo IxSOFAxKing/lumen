@@ -129,6 +129,7 @@ By default Plex content is transcoded by **your Plex Media Server**. That handle
 | `TZ` | `UTC` | Time zone for the guide and recordings |
 | `PORT` | `8080` | HTTP port inside the container |
 | `SESSION_SECRET` | auto | Override the cookie signing secret |
+| `PLEX_DEBUG` | *(off)* | Set to `1` to log every request Lumen sends to Plex, with timing (for troubleshooting) |
 
 Volumes: `/config` (SQLite database, settings, EPG), `/recordings` (DVR files), `/transcode` (scratch space; a RAM `tmpfs` by default).
 

@@ -52,6 +52,9 @@ const gates = { api: new Gate(6), image: new Gate(3) };
 
 // Request accounting: logs a warning if Lumen ever sends Plex an unusual number of requests.
 let reqCount = 0; const reqPaths = new Map();
+const DEBUG = /^(1|true|yes)$/i.test(process.env.PLEX_DEBUG || '');
+let debugSeq = 0, debugInflight = 0;
+if (DEBUG) console.log('[plex-debug] logging every request sent to Plex');
 setInterval(() => {
   if (reqCount > 240) {
     const top = [...reqPaths.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([p, n]) => `${n}× ${p}`).join(', ');
@@ -90,7 +93,24 @@ export async function plexFetch(path, { params = {}, method = 'GET', headers = {
     signal: signals.length > 1 ? AbortSignal.any(signals) : signals[0],
   });
   await rateLimit();
-  const res = g ? await g.run(doFetch) : await doFetch();
+  if (!DEBUG) { const res0 = g ? await g.run(doFetch) : await doFetch(); return handle(res0); }
+  // PLEX_DEBUG=1: log every request to Plex with its timing, so a misbehaving request can be pinpointed.
+  const id = ++debugSeq;
+  const q = new URLSearchParams(params); q.delete('X-Plex-Token');
+  const shown = path + (Object.keys(params).length ? (path.includes('?') ? '&' : '?') + q : '');
+  debugInflight++;
+  console.log(`[plex-debug] #${id} -> ${method} ${shown.slice(0, 220)} (in flight: ${debugInflight})`);
+  const t0 = Date.now();
+  try {
+    const res0 = g ? await g.run(doFetch) : await doFetch();
+    console.log(`[plex-debug] #${id} <- ${res0.status} in ${Date.now() - t0}ms`);
+    return handle(res0);
+  } catch (e) {
+    console.log(`[plex-debug] #${id} !! ${e.name === 'TimeoutError' ? 'timed out' : e.name === 'AbortError' ? 'cancelled' : e.message} after ${Date.now() - t0}ms`);
+    throw e;
+  } finally { debugInflight--; }
+
+  async function handle(res) {
   if (raw) return res;
   if (!res.ok) {
     const body = (await res.text().catch(() => '')).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
@@ -103,6 +123,7 @@ export async function plexFetch(path, { params = {}, method = 'GET', headers = {
   const text = await res.text();
   if (!text) return {};
   try { return JSON.parse(text); } catch { return { raw: text }; }
+  }
 }
 
 // ---------- response cache (stale-while-revalidate) ----------
