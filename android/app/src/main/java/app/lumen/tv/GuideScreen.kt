@@ -23,7 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -74,7 +74,10 @@ fun GuideScreen() {
     var group by remember { mutableStateOf(Net.prefs.liveGroup ?: "__all") }
     val channels = remember { mutableStateListOf<Channel>() }
     var total by remember { mutableIntStateOf(-1) }
-    var loading by remember { mutableStateOf(false) }
+    var gen by remember { mutableIntStateOf(0) }
+    var busyGen by remember { mutableIntStateOf(-1) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var retry by remember { mutableIntStateOf(0) }
     val loadFrom = remember { floor30(nowS()) - 3 * 3600 }
     val loadTo = remember { nowS() + 14 * 3600 }
     var winStart by remember { mutableLongStateOf(floor30(nowS())) }
@@ -84,23 +87,31 @@ fun GuideScreen() {
     var gridFocused by remember { mutableStateOf(false) }
     var okDown by remember { mutableStateOf(false) }
     val gridFr = remember { FocusRequester() }
-    val listState = rememberLazyListState()
+    val listState = remember(group, prov.id) { LazyListState() }
 
     LaunchedEffect(Unit) { while (true) { delay(30_000); clock = nowS() } }
     LaunchedEffect(prov.id) { runCatching { Repo.groups(prov.id) }.onSuccess { g -> groups = g; if (g.none { it.id == group }) group = "__all" } }
 
+    // Each group change starts a new "generation"; stale loads can't block or overwrite the current one.
     suspend fun loadMore() {
-        if (loading || (total >= 0 && channels.size >= total)) return
-        loading = true
+        val my = gen
+        if (busyGen == my || (total >= 0 && channels.size >= total)) return
+        busyGen = my
         val g = group
-        runCatching { Repo.guide(prov.id, g, loadFrom, loadTo, channels.size, 80) }
-            .onSuccess { (list, t) -> if (g == group) { channels.addAll(list); total = t } }
-            .onFailure { if (total < 0) total = channels.size }
-        loading = false
+        try {
+            val (list, t) = Repo.guide(prov.id, g, loadFrom, loadTo, channels.size, 80)
+            if (my == gen) { channels.addAll(list); total = t; loadError = null }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (my == gen && total < 0) { total = channels.size; loadError = e.message ?: "Couldn't load the guide" }
+        } finally {
+            if (busyGen == my) busyGen = -1
+        }
     }
-    LaunchedEffect(group, prov.id) {
-        channels.clear(); total = -1; selRow = 0
-        listState.scrollToItem(0)
+    LaunchedEffect(group, prov.id, retry) {
+        gen++
+        channels.clear(); total = -1; selRow = 0; loadError = null
         loadMore()
     }
     InitialFocus(gridFr)
@@ -172,6 +183,7 @@ fun GuideScreen() {
                 .onFocusChanged { gridFocused = it.isFocused }
                 .onKeyEvent { ev ->
                     val code = ev.nativeKeyEvent.keyCode
+                    if (channels.isEmpty()) return@onKeyEvent false
                     val isOk = code == AKey.KEYCODE_DPAD_CENTER || code == AKey.KEYCODE_ENTER || code == AKey.KEYCODE_MENU
                     if (ev.type == KeyEventType.KeyUp) {
                         if (isOk && okDown) { okDown = false; activate(code == AKey.KEYCODE_MENU); return@onKeyEvent true }
@@ -218,7 +230,14 @@ fun GuideScreen() {
                 }
                 Box(Modifier.fillMaxSize()) {
                     if (channels.isEmpty()) {
-                        if (total == 0) Message("No channels in this group") else Loading()
+                        when {
+                            loadError != null -> Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                                Message("Couldn't load the guide", loadError)
+                                PillButton("Try again", primary = true) { retry++ }
+                            }
+                            total == 0 -> Message("No channels in this group")
+                            else -> Loading()
+                        }
                     } else LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 40.dp)) {
                         itemsIndexed(channels, key = { i, c -> "${c.id}:$i" }) { i, c ->
                             GuideRow(c, i == selRow && gridFocused, i == selRow, selTime, winStart, dpPerSec)

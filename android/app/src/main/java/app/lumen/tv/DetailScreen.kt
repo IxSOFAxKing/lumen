@@ -1,6 +1,9 @@
 package app.lumen.tv
 
 import android.widget.Toast
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -85,7 +88,16 @@ fun DetailScreen(s: Screen.Detail) {
         Backdrop(Net.plexImg(item.art ?: item.thumb, 1280, 720), heightFraction = 1f)
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 56.dp, bottom = 120.dp)) {
             item(key = "info") {
-                Column(Modifier.padding(start = 48.dp, end = 340.dp)) {
+              Row(Modifier.padding(start = 48.dp, end = 120.dp)) {
+                // Cover art
+                val cover = if (item.type == "episode") item.grandparentThumb ?: item.thumb else item.thumb
+                if (cover != null) {
+                    Box(Modifier.width(168.dp).height(252.dp).clip(RoundedCornerShape(10.dp)).background(C.card)) {
+                        Img(Net.plexImg(cover, 336, 504), Modifier.fillMaxSize())
+                    }
+                    Spacer(Modifier.width(28.dp))
+                }
+                Column(Modifier.weight(1f).padding(end = 120.dp)) {
                     T(item.title, if (item.title.length > 26) 30.sp else 38.sp, weight = FontWeight.Bold, maxLines = 2, lineHeight = 40.sp)
                     Spacer(Modifier.height(8.dp))
                     T(item.metaLine(), 13.sp, C.text2)
@@ -124,6 +136,7 @@ fun DetailScreen(s: Screen.Detail) {
                         }
                     }
                 }
+              }
             }
             if (isShow && d.seasons.isNotEmpty()) {
                 item(key = "seasons") {
