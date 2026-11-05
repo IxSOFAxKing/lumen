@@ -128,8 +128,8 @@ fun PortraitDetail(
                         Icon(Icons.Filled.PlayArrow, "Play", tint = Color.Black, modifier = Modifier.size(26.dp))
                         if (playLabel != null) { Spacer(Modifier.width(8.dp)); T(playLabel, 16.sp, Color.Black, FontWeight.Bold) }
                     }
-                    if (onRestart != null) RoundAction(Ico.Restart, "Play from the beginning", onRestart)
-                    RoundAction(Icons.Filled.Check, if (item.watched) "Mark unwatched" else "Mark watched", onToggleWatched, on = item.watched)
+                    if (onRestart != null) RoundAction(Ico.Restart, "Play from the beginning", onClick = onRestart)
+                    RoundAction(Icons.Filled.Check, if (item.watched) "Mark unwatched" else "Mark watched", on = item.watched, onClick = onToggleWatched)
                     RoundAction(Icons.Filled.MoreVert, "More") { Menus.item(item) }
                 }
             }
@@ -196,7 +196,7 @@ private fun CenterChips(chips: List<@Composable () -> Unit>) {
 }
 
 @Composable
-private fun RoundAction(icon: ImageVector, label: String, onClick: () -> Unit, on: Boolean = false) {
+private fun RoundAction(icon: ImageVector, label: String, on: Boolean = false, onClick: () -> Unit) {
     Icon(icon, label, tint = if (on) C.accent else Color.White, modifier = Modifier.size(50.dp).clip(CircleShape).background(Pill).tap(onClick).padding(13.dp))
 }
 
