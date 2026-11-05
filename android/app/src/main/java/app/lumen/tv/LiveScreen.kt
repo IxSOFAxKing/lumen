@@ -35,6 +35,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -78,13 +80,27 @@ fun LiveScreen() {
     // Leaving Live TV for another section closes the preview.
     androidx.compose.runtime.DisposableEffect(Unit) { onDispose { Preview.channel = null } }
     val firstChFr = remember { FocusRequester() }
-    InitialFocus(firstChFr)
+    // Focus targets for the group list: opening Live TV starts on the first group; coming back from the
+    // channels (◀) lands on the group you're in.
+    val firstGroupFr = remember { FocusRequester() }
+    val groupFrs = remember { HashMap<String, FocusRequester>() }
+    val attachedGroups = remember { HashSet<String>() }
+    fun groupFr(id: String, index: Int) = if (index == 0) firstGroupFr else groupFrs.getOrPut(id) { FocusRequester() }
+    InitialFocus(if (LocalPortrait.current) firstChFr else firstGroupFr)
     val chState = rememberLazyListState()
 
     Row(Modifier.fillMaxSize().padding(top = 20.dp)) {
         // ---- groups ----
         val portrait = LocalPortrait.current
-        if (!portrait) Column(Modifier.width(if (groupsFocused) 200.dp else 150.dp).fillMaxHeight().onFocusChanged { groupsFocused = it.hasFocus }) {
+        if (!portrait) Column(Modifier.width(if (groupsFocused) 200.dp else 150.dp).fillMaxHeight()
+            .focusProperties {
+                enter = {
+                    val idx = groups?.indexOfFirst { it.id == group } ?: -1
+                    if (idx >= 0 && group in attachedGroups) groupFr(group, idx) else FocusRequester.Default
+                }
+            }
+            .focusGroup()
+            .onFocusChanged { groupsFocused = it.hasFocus }) {
             T("Live TV", 20.sp, weight = FontWeight.Bold, modifier = Modifier.padding(start = 20.dp, bottom = 10.dp))
             if (AppState.providers.size > 1) {
                 Box(Modifier.padding(start = 12.dp, bottom = 8.dp)) {
@@ -98,10 +114,11 @@ fun LiveScreen() {
             }
             val gl = groups
             if (gl == null) Loading() else LazyColumn(contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 60.dp)) {
-                itemsIndexed(gl, key = { _, g -> g.id }) { _, g ->
+                itemsIndexed(gl, key = { _, g -> g.id }) { gi, g ->
+                    androidx.compose.runtime.DisposableEffect(g.id) { attachedGroups += g.id; onDispose { attachedGroups -= g.id } }
                     Focusable(
                         onClick = { group = g.id; scope.launch { delay(50); runCatching { firstChFr.requestFocus() } } },
-                        onFocus = { group = g.id },
+                        onFocus = { group = g.id }, focusRequester = groupFr(g.id, gi),
                         memKey = "group/${g.id}", shape = RoundedCornerShape(8.dp), focusedScale = 1f, outline = false,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
                         background = if (g.id == group) Color.White.copy(alpha = 0.10f) else Color.Transparent, focusedBackground = Color.White,

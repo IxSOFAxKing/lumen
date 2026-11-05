@@ -103,7 +103,7 @@ fun SettingsScreen() {
     val hidden = AppState.uiList("homeHidden").toSet()
 
     Box(Modifier.fillMaxSize()) {
-    androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides CalmScroll) {
+    androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides PlainScroll) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = if (LocalPortrait.current) 16.dp else 40.dp, end = if (LocalPortrait.current) 16.dp else 260.dp, top = 30.dp, bottom = 100.dp)) {
         item { T("Settings", 26.sp, weight = FontWeight.Bold); T("Changes sync to your Lumen server and every app, except the ones marked “this TV”.", 12.sp, C.text3, maxLines = 2) }
 
@@ -320,13 +320,14 @@ private fun Section(title: String) {
 @Composable
 private fun SettingRow(label: String, value: String, fr: FocusRequester? = null, hint: String? = null, onClick: () -> Unit) {
     Focusable(
-        onClick = onClick, focusRequester = fr, memKey = "set/$label", shape = RoundedCornerShape(8.dp), focusedScale = 1.01f, outline = false,
+        onClick = onClick, focusRequester = fr, memKey = "set/$label", shape = RoundedCornerShape(8.dp), focusedScale = 1f, outline = false,
         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), background = Color.White.copy(alpha = 0.05f), focusedBackground = Color.White,
     ) { f ->
         Row(Modifier.padding(horizontal = 16.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 T(label, 14.sp, if (f) Color.Black else C.text, FontWeight.Medium)
-                if (hint != null && f) T(hint, 11.sp, Color.DarkGray)
+                // Always shown, so rows keep the same height while you move through the list.
+                if (hint != null) T(hint, 11.sp, if (f) Color.DarkGray else C.text3)
             }
             Spacer(Modifier.width(12.dp))
             T(value, 13.sp, if (f) Color.Black else C.text2, FontWeight.SemiBold)

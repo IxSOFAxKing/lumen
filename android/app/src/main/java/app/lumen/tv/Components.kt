@@ -385,6 +385,18 @@ val CalmScroll = object : androidx.compose.foundation.gestures.BringIntoViewSpec
     }
 }
 
+/** Standard list scrolling: only as far as needed to show the focused row, with the platform's default animation. */
+val PlainScroll = object : androidx.compose.foundation.gestures.BringIntoViewSpec {
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+        val trailing = offset + size
+        return when {
+            offset >= 0 && trailing <= containerSize -> 0f
+            offset < 0 || size > containerSize -> offset
+            else -> trailing - containerSize
+        }
+    }
+}
+
 val NoScroll = object : androidx.compose.foundation.gestures.BringIntoViewSpec {
     override val scrollAnimationSpec: androidx.compose.animation.core.AnimationSpec<Float> get() = SmoothScroll
     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float = 0f
