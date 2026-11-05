@@ -191,7 +191,15 @@ fun SettingsScreen() {
         item {
             SettingRow("Change server or pair again", "") { ctx.startActivity(Intent(ctx, SetupActivity::class.java)) }
         }
-        item { SettingRow("App version", BuildConfig.VERSION_NAME, hint = "Updates: install http://<server>:8080/tv.apk with Downloader") {} }
+        item {
+            SettingRow("Check for updates", "Version ${BuildConfig.VERSION_NAME}", hint = "Downloads and installs the newest Lumen app") {
+                android.widget.Toast.makeText(ctx, "Checking for updates…", android.widget.Toast.LENGTH_SHORT).show()
+                scope.launch {
+                    val r = Updater.check()
+                    if (r != null) Updater.offer(r) else android.widget.Toast.makeText(ctx, "You have the latest version (${BuildConfig.VERSION_NAME})", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
     picker?.let { p -> ChoiceDialog(p, onDismiss = { picker = null }) { o -> picker = null; p.onPick(o) } }
     pinFor?.let { (u, makeDefault) -> PinDialog(u.optString("title"), onDismiss = { pinFor = null }) { pin -> pinFor = null; switchUser(u, makeDefault, pin) } }

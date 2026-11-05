@@ -129,6 +129,8 @@ fun Shell(onExit: () -> Unit) {
             }
         }
     }
+    // Look for a newer app version when the app opens (offered in a small dialog).
+    LaunchedEffect(AppState.loaded) { if (AppState.loaded) Updater.autoCheck() }
     LaunchedEffect(AppState.profileCheckTick) { if (AppState.profileCheckTick > 0) AppState.checkProfile() }
     if (!AppState.loaded || AppState.checkingProfile) { Box(Modifier.fillMaxSize().background(C.bg)) { Loading(Modifier.align(Alignment.Center)) }; return }
     AppState.askProfile?.let { pu -> WhoIsWatching(pu, onExit) { AppState.askProfile = null; Net.clearCache(); Nav.memory.clear(); AppState.resumeTick++ }; return }
