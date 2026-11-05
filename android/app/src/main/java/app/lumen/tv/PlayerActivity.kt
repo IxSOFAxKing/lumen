@@ -1121,7 +1121,10 @@ class PlayerActivity : ComponentActivity() {
             isOk(code) -> {
                 if (repeat > 0) return true
                 when {
-                    !st.controls -> togglePause()
+                    // Hidden: OK only brings up the controls, with Play / Pause selected (no pause yet).
+                    !st.controls -> {
+                        st.zone = 1; st.btn = btns.indexOfFirst { it.id == "play" }.coerceAtLeast(0); poke()
+                    }
                     st.zone == 0 -> if (st.scrub != null) commitScrub() else togglePause()
                     else -> btns.getOrNull(st.btn)?.let { activate(it.id) }
                 }
