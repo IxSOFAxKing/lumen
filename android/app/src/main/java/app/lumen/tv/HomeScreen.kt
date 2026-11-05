@@ -159,7 +159,7 @@ fun HomeScreen() {
             if (!AppState.plexConfigured && AppState.providers.isEmpty()) "Connect Plex and add an IPTV provider in Settings → Server settings." else if (AppState.plexConfigured && !AppState.plexOnline) "Your Plex server is unreachable: ${AppState.plexError ?: ""}" else "Nothing to show yet.",
             Modifier.padding(top = 120.dp),
         )
-        else -> HomeContent(d)
+        else -> if (LocalPortrait.current) PortraitHome(d) else HomeContent(d)
     }
 }
 
@@ -178,9 +178,10 @@ private fun HomeContent(d: HomeData) {
     InitialFocus(if (showBillboard) playFr else firstCardFr)
     // Once you move down into the rows the banner shrinks, giving the rows more room (like Netflix).
     var rowIdx by remember { mutableIntStateOf(0) }
+    var bbBtn by remember { mutableIntStateOf(0) }
     val compact = !billboardFocused
     val heroH by androidx.compose.animation.core.animateDpAsState(if (compact) 178.dp else if (showBillboard) 236.dp else 215.dp, tween(380), label = "heroH")
-    val bbH by androidx.compose.animation.core.animateDpAsState(if (compact) 0.dp else 46.dp, tween(320), label = "bbH")
+    val bbH by androidx.compose.animation.core.animateDpAsState(if (compact) 0.dp else 36.dp, tween(320), label = "bbH")
 
     // Debounced: the backdrop only changes once you settle on a card.
     // Only the banner reads these, so moving between cards doesn't redraw the rows.
@@ -202,17 +203,33 @@ private fun HomeContent(d: HomeData) {
                 val alpha by animateFloatAsState(if (billboardFocused) 1f else 0f, label = "bb")
                 Row(
                     Modifier.padding(start = 32.dp).height(bbH).clipToBounds().alpha(alpha)
+                        // Remote: ▶ past "More info" / ◀ before "Play" steps through the featured titles.
+                        .onPreviewKeyEvent { ev ->
+                            if (ev.type != KeyEventType.KeyDown || d.featured.size < 2) return@onPreviewKeyEvent false
+                            val code = ev.nativeKeyEvent.keyCode
+                            val step = when {
+                                code == android.view.KeyEvent.KEYCODE_DPAD_RIGHT && bbBtn == 1 -> 1
+                                code == android.view.KeyEvent.KEYCODE_DPAD_LEFT && bbBtn == 0 && featIndex > 0 -> -1
+                                else -> 0
+                            }
+                            if (step == 0) false else {
+                                featIndex = (featIndex + step + d.featured.size) % d.featured.size
+                                mem.data["featIndex"] = featIndex
+                                hero.value = Hero.of(d.featured[featIndex])
+                                true
+                            }
+                        }
                         .onFocusChanged {
                             billboardFocused = it.hasFocus
                             if (it.hasFocus) { focusTarget.value = null; d.featured.getOrNull(featIndex)?.let { f -> hero.value = Hero.of(f) }; scope.launch { listState.smoothScrollToItem(0) } }
                         },
                 ) {
                     val f = d.featured.getOrNull(featIndex)
-                    PillButton(if (f?.isShowLike == true) "Watch" else if ((f?.viewOffsetMs ?: 0) > 0) "Resume" else "Play", Icons.Filled.PlayArrow, primary = true, focusRequester = playFr, memKey = "billboard/play") {
+                    PillButton(if (f?.isShowLike == true) "Watch" else if ((f?.viewOffsetMs ?: 0) > 0) "Resume" else "Play", Icons.Filled.PlayArrow, primary = true, focusRequester = playFr, memKey = "billboard/play", small = true, onFocus = { bbBtn = 0 }) {
                         f?.let { if (it.isShowLike) Nav.openDetails(it) else Nav.play(it, resume = true) }
                     }
                     Spacer(Modifier.width(10.dp))
-                    PillButton("More info", Icons.Filled.Info, memKey = "billboard/info") { f?.let { Nav.openDetails(it) } }
+                    PillButton("More info", Icons.Filled.Info, memKey = "billboard/info", small = true, onFocus = { bbBtn = 1 }) { f?.let { Nav.openDetails(it) } }
                     if (d.featured.size > 1) {
                         Spacer(Modifier.width(16.dp))
                         Row(Modifier.align(Alignment.CenterVertically)) {

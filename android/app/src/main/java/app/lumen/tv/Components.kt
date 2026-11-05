@@ -111,8 +111,9 @@ fun T(
     maxLines: Int = 1,
     modifier: Modifier = Modifier,
     lineHeight: TextUnit = TextUnit.Unspecified,
+    align: androidx.compose.ui.text.style.TextAlign? = null,
 ) {
-    Text(text, modifier = modifier, fontSize = size, color = color, fontWeight = weight, maxLines = maxLines, overflow = TextOverflow.Ellipsis, lineHeight = lineHeight)
+    Text(text, modifier = modifier, fontSize = size, color = color, fontWeight = weight, maxLines = maxLines, overflow = TextOverflow.Ellipsis, lineHeight = lineHeight, textAlign = align)
 }
 
 /**
@@ -198,6 +199,7 @@ fun PillButton(
     focusRequester: FocusRequester? = null,
     memKey: String? = null,
     onFocus: (() -> Unit)? = null,
+    small: Boolean = false,
     onClick: () -> Unit,
 ) {
     Focusable(
@@ -205,12 +207,12 @@ fun PillButton(
         focusRequester = focusRequester, memKey = memKey, onFocus = onFocus,
         background = if (primary) Color.White.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.12f), focusedBackground = Color.White,
     ) { f ->
-        Row(Modifier.padding(horizontal = 18.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(horizontal = if (small) 12.dp else 18.dp, vertical = if (small) 5.dp else 9.dp), verticalAlignment = Alignment.CenterVertically) {
             if (icon != null) {
-                Icon(icon, null, tint = if (f) Color.Black else C.text, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
+                Icon(icon, null, tint = if (f) Color.Black else C.text, modifier = Modifier.size(if (small) 14.dp else 18.dp))
+                Spacer(Modifier.width(if (small) 6.dp else 8.dp))
             }
-            T(label, 14.sp, if (f) Color.Black else C.text, FontWeight.SemiBold)
+            T(label, if (small) 12.sp else 14.sp, if (f) Color.Black else C.text, FontWeight.SemiBold)
         }
     }
 }

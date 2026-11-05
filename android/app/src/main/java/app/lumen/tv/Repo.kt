@@ -28,11 +28,11 @@ object AppState {
     var profileCheckTick by mutableIntStateOf(0)
 
     /** "Who's watching?": show the Plex Home user picker (or switch to the default user if asking is turned off). */
-    suspend fun checkProfile() {
+    suspend fun checkProfile(force: Boolean = false) {
         if (!plexOnline) return
         val pu = runCatching { Net.obj("/api/plex/users") }.getOrNull() ?: return
         if (pu.optJSONArray("users").objects().size < 2) return
-        if (Net.prefs.askProfile) askProfile = pu
+        if (force || Net.prefs.askProfile) askProfile = pu
         else if (pu.optBoolean("defaultSet")) runCatching { Net.post("/api/plex/users/reset") }
     }
     var loadError by mutableStateOf<String?>(null)
