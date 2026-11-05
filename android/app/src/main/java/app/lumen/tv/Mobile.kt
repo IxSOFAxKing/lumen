@@ -9,6 +9,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -108,11 +111,9 @@ fun MobileTopBar(title: String, modifier: Modifier = Modifier) {
 @Composable
 fun topSafe(): androidx.compose.ui.unit.Dp {
     val d = androidx.compose.ui.platform.LocalDensity.current
-    val px = maxOf(
-        androidx.compose.foundation.layout.WindowInsets.statusBarsIgnoringVisibility.getTop(d),
-        androidx.compose.foundation.layout.WindowInsets.displayCutout.getTop(d),
-    )
-    return maxOf(with(d) { px.toDp() }, 32.dp)
+    val px: Int = maxOf(WindowInsets.statusBarsIgnoringVisibility.getTop(d), WindowInsets.displayCutout.getTop(d))
+    val inset: androidx.compose.ui.unit.Dp = with(d) { px.toDp() }
+    return if (inset > 32.dp) inset else 32.dp
 }
 
 /** Search + Settings shortcuts for phone screens that draw their own header. */
