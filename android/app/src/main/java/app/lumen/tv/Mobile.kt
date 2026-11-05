@@ -93,8 +93,8 @@ fun BottomNav(current: Screen, modifier: Modifier = Modifier) {
 @Composable
 fun MobileTopBar(title: String, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
-    Row(modifier.fillMaxWidth().padding(start = 18.dp, end = 8.dp, top = topSafe() + 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        T(title, 24.sp, weight = FontWeight.Bold)
+    Row(modifier.fillMaxWidth().padding(start = 18.dp, end = 8.dp, top = topSafe() + 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        T(title, 26.sp, weight = FontWeight.Bold, shadow = true)
         Spacer(Modifier.weight(1f))
         TopIcon(Icons.Filled.Search, "Search") { Nav.root(Screen.Search) }
         TopIcon(Icons.Filled.Refresh, "Refresh") { Net.clearCache(); AppState.resumeTick++ }
@@ -105,7 +105,7 @@ fun MobileTopBar(title: String, modifier: Modifier = Modifier) {
 
 /**
  * Space taken by the status bar / camera cut-out at the top of a phone. Uses the bar's height even while it is
- * hidden or showing a call chip, and never less than 32dp, so headers can't end up underneath it.
+ * hidden or showing a call chip, and never less than 24dp, so headers can't end up underneath it.
  */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -113,7 +113,7 @@ fun topSafe(): androidx.compose.ui.unit.Dp {
     val d = androidx.compose.ui.platform.LocalDensity.current
     val px: Int = maxOf(WindowInsets.statusBarsIgnoringVisibility.getTop(d), WindowInsets.displayCutout.getTop(d))
     val inset: androidx.compose.ui.unit.Dp = with(d) { px.toDp() }
-    return if (inset > 32.dp) inset else 32.dp
+    return if (inset > 24.dp) inset else 24.dp
 }
 
 /** Search + Settings shortcuts for phone screens that draw their own header. */
@@ -142,12 +142,12 @@ fun PortraitHome(d: HomeData, title: String = "Home", extra: (@Composable () -> 
         pager.animateScrollToPage((pager.currentPage + 1) % feat.size)
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
-        // Title + actions get their own row below the status bar (not drawn over the banner).
-        item(key = "top") { MobileTopBar(title, Modifier.padding(bottom = 10.dp)) }
+        // The banner runs up under the status bar; the title + actions sit over it, just below the status bar.
         item(key = "hero") {
-            if (showHero) Box(Modifier.fillMaxWidth().height(500.dp)) {
+            if (showHero) Box(Modifier.fillMaxWidth().height(560.dp)) {
                 HorizontalPager(pager, Modifier.fillMaxSize()) { i -> HeroPage(feat[i]) }
-            }
+                MobileTopBar(title)
+            } else MobileTopBar(title, Modifier.padding(bottom = 10.dp))
         }
         if (showHero && feat.size > 1) item(key = "dots") {
             Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 4.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
@@ -179,7 +179,7 @@ fun PortraitHome(d: HomeData, title: String = "Home", extra: (@Composable () -> 
 private fun HeroPage(m: PlexItem) {
     Box(Modifier.fillMaxSize().tapped { Nav.openDetails(m) }) {
         Img(Net.plexImg(m.art ?: m.grandparentArt ?: m.thumb, 1280, 720), Modifier.fillMaxSize(), ContentScale.Crop)
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Color.Black.copy(alpha = 0.55f), 0.22f to Color.Transparent, 0.55f to Color.Transparent, 1f to C.bg)))
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Color.Black.copy(alpha = 0.6f), 0.25f to Color.Black.copy(alpha = 0.15f), 0.4f to Color.Transparent, 0.55f to Color.Transparent, 1f to C.bg)))
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 22.dp, vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             val name = if (m.isEpisode) m.grandparentTitle ?: m.title else m.title
             TitleLogo(m.clearLogoPath()?.let { Net.plexImg(it, 800, 320) }, name, 84.dp, Alignment.Center) {
