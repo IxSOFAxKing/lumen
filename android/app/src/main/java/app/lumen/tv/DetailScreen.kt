@@ -82,6 +82,34 @@ fun DetailScreen(s: Screen.Detail) {
         val k = seasonKey ?: return@LaunchedEffect
         runCatching { Repo.children(k) }.onSuccess { episodes = it; mem.data["eps"] = it; mem.data["season"] = k }
     }
+    if (LocalPortrait.current) {
+        // Phone: its own roomier layout.
+        val target = d.onDeck
+        PortraitDetail(
+            item = item, seasons = d.seasons, onDeck = target, related = d.related,
+            seasonKey = seasonKey, onSeason = { seasonKey = it }, episodes = episodes,
+            onPlay = {
+                if (isShow) {
+                    if (target != null) Nav.play(target, resume = true)
+                    else scope.launch { runCatching { Repo.leaves(item.ratingKey) }.getOrNull()?.firstOrNull()?.let { Nav.play(it, resume = false) } }
+                } else Nav.play(item, resume = true)
+            },
+            onRestart = if (!isShow && item.viewOffsetMs > 0) ({ Nav.play(item, resume = false) }) else null,
+            playLabel = when {
+                isShow -> target?.let { t -> if (t.parentIndex != null && t.index != null) "S${t.parentIndex}E${t.index}" else null } ?: "S1E1"
+                item.viewOffsetMs > 0 -> "${((item.durationMs - item.viewOffsetMs) / 60000).coerceAtLeast(1)} min left"
+                else -> null
+            },
+            onToggleWatched = {
+                scope.launch {
+                    runCatching { Repo.setWatched(item.ratingKey, !item.watched) }
+                        .onSuccess { Net.clearCache(); reload++ }
+                        .onFailure { Toast.makeText(ctx, it.message, Toast.LENGTH_SHORT).show() }
+                }
+            },
+        )
+        return
+    }
     val playFr = remember { FocusRequester() }
     InitialFocus(playFr)
     val listState = rememberLazyListState()
