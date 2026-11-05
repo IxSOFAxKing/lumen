@@ -36,6 +36,17 @@ object Preview {
     var channel by mutableStateOf<Channel?>(null)
     /** True while the full-screen player is open (providers often allow only one connection). */
     var pausedForPlayer by mutableStateOf(false)
+    /** The full-screen player's running stream, handed over on Back so the preview continues without reloading. */
+    var handoff: Triple<Channel, ExoPlayer, Desc>? = null
+
+    fun take(ch: Channel): Pair<ExoPlayer, Desc>? {
+        val h = handoff ?: return null
+        handoff = null
+        if (h.first.id != ch.id || h.first.providerId != ch.providerId) {
+            h.second.release(); AppScope.launch { Playback.release(h.third) }; return null
+        }
+        return h.second to h.third
+    }
 }
 
 @OptIn(UnstableApi::class)
@@ -80,8 +91,10 @@ fun LivePreview(ch: Channel, modifier: Modifier = Modifier) {
     }
     if (!started || Preview.pausedForPlayer) { Box(modifier.background(Color.Black)); return }
 
-    val exo = remember(ch.providerId, ch.id) { buildExo(ctx) }
-    var desc by remember(exo) { mutableStateOf<Desc?>(null) }
+    // Take over the full-screen player's stream if there is one (no reconnect), otherwise start our own.
+    val taken = remember(ch.providerId, ch.id) { Preview.take(ch) }
+    val exo = remember(ch.providerId, ch.id) { taken?.first ?: buildExo(ctx) }
+    var desc by remember(exo) { mutableStateOf(taken?.second) }
     DisposableEffect(exo) {
         onDispose {
             exo.release()
@@ -89,6 +102,7 @@ fun LivePreview(ch: Channel, modifier: Modifier = Modifier) {
         }
     }
     LaunchedEffect(exo) {
+        if (desc != null) { exo.playWhenReady = true; return@LaunchedEffect } // already playing (handed over)
         delay(800) // let the full-screen player hang up first
         val d = runCatching { LiveSource(ch).open(0.0) }.getOrNull() ?: return@LaunchedEffect
         desc = d

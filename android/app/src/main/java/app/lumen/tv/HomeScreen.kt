@@ -185,7 +185,7 @@ private fun HomeContent(d: HomeData) {
     var rowIdx by remember { mutableIntStateOf(0) }
     var bbBtn by remember { mutableIntStateOf(0) }
     val compact = !billboardFocused
-    val heroH by androidx.compose.animation.core.animateDpAsState(if (compact) 178.dp else if (showBillboard) 236.dp else 215.dp, tween(380), label = "heroH")
+    val heroH by androidx.compose.animation.core.animateDpAsState(if (compact) 196.dp else if (showBillboard) 236.dp else 222.dp, tween(380), label = "heroH")
     val bbH by androidx.compose.animation.core.animateDpAsState(if (compact) 0.dp else 36.dp, tween(320), label = "bbH")
 
     // Debounced: the backdrop only changes once you settle on a card.
@@ -299,7 +299,7 @@ fun Backdrop(url: String?, heightFraction: Float = 0.78f, bleedLeft: androidx.co
         Crossfade(targetState = url, animationSpec = tween(450), label = "backdrop", modifier = Modifier.align(Alignment.TopEnd).fillMaxWidth(0.80f).fillMaxHeight(heightFraction)) { u ->
             Box(Modifier.fillMaxSize()) {
                 Img(u, Modifier.fillMaxSize(), ContentScale.Crop)
-                Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to C.bg, 0.35f to C.bg.copy(alpha = 0.55f), 1f to Color.Transparent)))
+                Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to C.bg, 0.3f to C.bg.copy(alpha = 0.8f), 0.6f to C.bg.copy(alpha = 0.35f), 1f to Color.Transparent)))
                 Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.45f to Color.Transparent, 1f to C.bg)))
             }
         }
@@ -325,16 +325,16 @@ private fun HeroBody(h: Hero?, compact: Boolean) {
         if (h == null) return@Column
         androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
             if (h.logo != null) { Img(h.logo, Modifier.height(22.dp).width(48.dp), ContentScale.Fit); Spacer(Modifier.width(8.dp)) }
-            h.kicker?.let { T(it.uppercase(), 11.sp, if (it.startsWith("LIVE")) C.live else C.accent, FontWeight.Bold) }
+            h.kicker?.let { T(it.uppercase(), 11.sp, if (it.startsWith("LIVE")) C.live else C.accent, FontWeight.Bold, shadow = true) }
         }
         Spacer(Modifier.height(4.dp))
-        TitleLogo(h.titleLogo, h.title, if (compact) 46.dp else 72.dp) {
-            T(h.title, if (compact) 24.sp else if (h.title.length > 28) 26.sp else 32.sp, weight = FontWeight.Bold, maxLines = if (compact) 1 else 2, lineHeight = 34.sp)
+        TitleLogo(h.titleLogo, h.title, if (compact) 40.dp else 64.dp) {
+            T(h.title, if (compact) 24.sp else if (h.title.length > 28) 26.sp else 32.sp, weight = FontWeight.Bold, maxLines = if (compact) 1 else 2, lineHeight = 34.sp, shadow = true)
         }
         Spacer(Modifier.height(6.dp))
-        h.meta?.takeIf { it.isNotBlank() }?.let { T(it, 13.sp, C.text2) }
-        Spacer(Modifier.height(8.dp))
-        h.summary?.let { T(it, 13.sp, C.text2, maxLines = 3, lineHeight = 18.sp) }
+        h.meta?.takeIf { it.isNotBlank() }?.let { T(it, 13.sp, C.text, FontWeight.SemiBold, shadow = true) }
+        Spacer(Modifier.height(6.dp))
+        h.summary?.let { T(it, 14.sp, C.text.copy(alpha = 0.92f), maxLines = 3, lineHeight = 19.sp, shadow = true) }
     }
 }
 

@@ -99,7 +99,8 @@ fun PlayerOverlay(st: PlayerState, view: PlayerView) {
         }
 
         AnimatedVisibility(st.controls && st.error == null, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize()) {
-            if (st.live) LiveBanner(st, clock) else VodControls(st, clock)
+            // Live: changing channel shows just the channel info; OK opens the full overlay.
+            if (st.live) { if (st.liveOverlay) LiveBanner(st, clock) else LiveInfo(st) } else VodControls(st, clock)
         }
 
         // Skip intro / credits
@@ -376,6 +377,37 @@ private fun LiveBanner(st: PlayerState, clock: Long) {
                     }
                 },
             )
+        }
+    }
+}
+
+/** Channel info shown while changing channels: logo, channel, programme, times and description. */
+@Composable
+private fun LiveInfo(st: PlayerState) {
+    val ch = st.channel
+    val p = ch?.onAir
+    Box(Modifier.fillMaxSize()) {
+        Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(200.dp).background(Brush.verticalGradient(0f to Color.Transparent, 0.4f to Color.Black.copy(alpha = 0.75f), 1f to Color.Black.copy(alpha = 0.92f))))
+        Row(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 34.dp, end = 34.dp, bottom = 28.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(110.dp, 76.dp), contentAlignment = Alignment.Center) {
+                if (ch?.logo != null) Img(Net.url(ch.logo), Modifier.fillMaxSize(), ContentScale.Fit) else T(ch?.name ?: st.title, 15.sp, weight = FontWeight.Bold, maxLines = 2)
+            }
+            Spacer(Modifier.width(18.dp))
+            Column(Modifier.weight(1f)) {
+                T(listOfNotNull(ch?.num?.toString(), ch?.name ?: st.title).joinToString("  "), 14.sp, C.text, FontWeight.SemiBold, shadow = true)
+                T(p?.title ?: "No programme information", 22.sp, weight = FontWeight.Bold, shadow = true)
+                if (p != null) {
+                    Spacer(Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        T("${fmtTime(p.start)} – ${fmtTime(p.stop)}", 13.sp, C.text, shadow = true)
+                        Spacer(Modifier.width(10.dp))
+                        ProgressLine(p.progress, Modifier.width(80.dp), color = Color.White, track = Color.White.copy(alpha = 0.25f))
+                        Spacer(Modifier.width(10.dp))
+                        T("${((p.stop - nowS()).coerceAtLeast(0) / 60)} min left", 13.sp, C.text, shadow = true)
+                    }
+                    p.descr?.let { Spacer(Modifier.height(4.dp)); T(it, 13.sp, C.text.copy(alpha = 0.9f), maxLines = 2, lineHeight = 18.sp, shadow = true) }
+                }
+            }
         }
     }
 }

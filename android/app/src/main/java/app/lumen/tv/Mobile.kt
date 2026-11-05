@@ -161,7 +161,7 @@ private fun HeroPage(m: PlexItem) {
                 T(name, 30.sp, weight = FontWeight.Bold, maxLines = 2, lineHeight = 34.sp, modifier = Modifier.fillMaxWidth(), align = TextAlign.Center)
             }
             Spacer(Modifier.height(8.dp))
-            T(listOfNotNull(typeLabel(m), m.contentRating, m.year?.toString()).joinToString(" • "), 14.sp, C.text, FontWeight.SemiBold)
+            T(listOfNotNull(typeLabel(m), m.contentRating, m.year?.toString()).joinToString(" • "), 14.sp, C.text, FontWeight.SemiBold, shadow = true)
             Spacer(Modifier.height(14.dp))
             // Play pill: shows how much is left when you've started it
             Row(
@@ -187,7 +187,7 @@ private fun HeroPage(m: PlexItem) {
             val summary = m.summary
             if (!summary.isNullOrBlank()) {
                 val prefix = if (m.isEpisode) "S${m.parentIndex}, E${m.index}: " else ""
-                T(prefix + summary, 13.sp, C.text2, maxLines = 2, lineHeight = 18.sp, modifier = Modifier.fillMaxWidth(), align = TextAlign.Center)
+                T(prefix + summary, 14.sp, C.text, maxLines = 3, lineHeight = 19.sp, modifier = Modifier.fillMaxWidth(), align = TextAlign.Center, shadow = true)
             }
         }
     }

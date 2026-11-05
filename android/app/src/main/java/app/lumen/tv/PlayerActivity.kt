@@ -132,12 +132,12 @@ class PlayerActivity : ComponentActivity() {
             .setConnectTimeoutMs(15_000)
             .setReadTimeoutMs(90_000) // Plex/Lumen transcoders can take a while for the first segment
             .setDefaultRequestProperties(mapOf("Authorization" to "Bearer ${Net.token}", "Cookie" to "lumen_device=${Net.token}"))
-        val renderers = DefaultRenderersFactory(this)
+        val renderers = DefaultRenderersFactory(applicationContext)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
             .setEnableDecoderFallback(true)
         // Bigger buffers than the default smooth out IPTV streams.
         val load = DefaultLoadControl.Builder().setBufferDurationsMs(20_000, 60_000, 1_500, 3_000).build()
-        exo = ExoPlayer.Builder(this, renderers)
+        exo = ExoPlayer.Builder(applicationContext, renderers)
             .setMediaSourceFactory(DefaultMediaSourceFactory(http))
             .setLoadControl(load)
             .build()
@@ -1031,11 +1031,28 @@ class PlayerActivity : ComponentActivity() {
         if (isFinishing) close() else if (!isChangingConfigurations) { report("paused"); exo.pause() }
     }
 
+    /** Leaving live TV for the Live TV / Guide screen: hand the running stream to the preview window (no reload). */
+    private var handedOff = false
+    override fun finish() {
+        val src = source; val d = desc
+        if (!handedOff && src is LiveSource && d != null && st.error == null && (Nav.current == Screen.Live || Nav.current == Screen.Guide)) {
+            handedOff = true
+            exo.removeListener(listener)
+            view.player = null
+            Preview.handoff?.let { (_, p, old) -> p.release(); AppScope.launch { Playback.release(old) } }
+            Preview.handoff = Triple(src.channel, exo, d)
+            Preview.channel = src.channel
+        }
+        super.finish()
+        // The picture shrinks away towards the preview window.
+        @Suppress("DEPRECATION") overridePendingTransition(0, if (handedOff) R.anim.lumen_shrink else 0)
+    }
+
     override fun onDestroy() {
         close()
         if (PlayerBus.player?.get() === this) PlayerBus.player = null
         playerActions = null
-        exo.release()
+        if (!handedOff) exo.release()
         super.onDestroy()
     }
 
@@ -1046,12 +1063,12 @@ class PlayerActivity : ComponentActivity() {
         val d = desc
         if (src != null && d != null) {
             if (!src.isLive) { val p = absPos(); val du = duration(); AppScope.launch { src.progress(p, du, "stopped") } }
-            AppScope.launch { Playback.release(d) }
+            if (!handedOff) AppScope.launch { Playback.release(d) }
         }
         // Back on the Live TV screen, keep watching this channel in the preview window.
         if (src is LiveSource && (Nav.current == Screen.Live || Nav.current == Screen.Guide)) Preview.channel = src.channel
         if (src is WebSource) PlayerBus.closed(if (src.isLive) 0.0 else absPos() - (d?.startOffset ?: 0.0))
         Net.clearCache()
-        exo.stop()
+        if (!handedOff) exo.stop()
     }
 }

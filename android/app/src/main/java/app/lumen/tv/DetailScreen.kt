@@ -109,7 +109,7 @@ fun DetailScreen(s: Screen.Detail) {
                     T(item.metaLine(), 13.sp, C.text2)
                     item.tagline?.let { Spacer(Modifier.height(6.dp)); T(it, 13.sp, C.text, FontWeight.Medium) }
                     Spacer(Modifier.height(10.dp))
-                    item.summary?.let { T(it, 13.sp, C.text2, maxLines = 4, lineHeight = 18.sp) }
+                    item.summary?.let { T(it, 14.sp, C.text.copy(alpha = 0.92f), maxLines = 4, lineHeight = 19.sp, shadow = true) }
                     val people = listOfNotNull(
                         item.raw.optJSONArray("Director").objects().take(2).mapNotNull { it.str("tag") }.takeIf { it.isNotEmpty() }?.let { "Director: ${it.joinToString(", ")}" },
                         item.raw.optJSONArray("Role").objects().take(4).mapNotNull { it.str("tag") }.takeIf { it.isNotEmpty() }?.let { "Starring: ${it.joinToString(", ")}" },
@@ -201,7 +201,7 @@ private fun EpisodeCard(ep: PlexItem, onMenu: () -> Unit, onClick: () -> Unit) {
         Spacer(Modifier.height(6.dp))
         T("${ep.index ?: ""}. ${ep.title}", 13.sp, weight = FontWeight.Medium)
         T(listOfNotNull(ep.durationMs.takeIf { it > 0 }?.let { fmtRuntime(it / 1000) }, ep.raw.str("originallyAvailableAt")).joinToString(" · "), 11.sp, C.text3)
-        ep.summary?.let { T(it, 11.sp, C.text2, maxLines = 3, lineHeight = 15.sp) }
+        ep.summary?.let { T(it, 12.sp, C.text.copy(alpha = 0.85f), maxLines = 3, lineHeight = 16.sp) }
     }
 }
 

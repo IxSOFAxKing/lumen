@@ -112,9 +112,14 @@ fun T(
     modifier: Modifier = Modifier,
     lineHeight: TextUnit = TextUnit.Unspecified,
     align: androidx.compose.ui.text.style.TextAlign? = null,
+    shadow: Boolean = false,
 ) {
-    Text(text, modifier = modifier, fontSize = size, color = color, fontWeight = weight, maxLines = maxLines, overflow = TextOverflow.Ellipsis, lineHeight = lineHeight, textAlign = align)
+    Text(text, modifier = modifier, fontSize = size, color = color, fontWeight = weight, maxLines = maxLines, overflow = TextOverflow.Ellipsis, lineHeight = lineHeight, textAlign = align,
+        style = if (shadow) androidx.compose.ui.text.TextStyle(shadow = TEXT_SHADOW) else androidx.compose.ui.text.TextStyle.Default)
 }
+
+/** Keeps light text readable over bright artwork. */
+val TEXT_SHADOW = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.9f), androidx.compose.ui.geometry.Offset(0f, 2f), 8f)
 
 /**
  * The basic remote-friendly element: focusable, OK to activate, grows and gets a white outline when focused.
