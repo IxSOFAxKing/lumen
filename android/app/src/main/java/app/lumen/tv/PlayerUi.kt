@@ -6,6 +6,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -74,6 +76,9 @@ interface PlayerActions {
     fun openChannels()
     fun openGuide()
     fun openOptions()
+    fun brightness(delta: Float)
+    fun volume(delta: Float)
+    fun pinch(zoomIn: Boolean)
 }
 var playerActions: PlayerActions? = null
 
@@ -85,8 +90,20 @@ fun PlayerOverlay(st: PlayerState, view: PlayerView) {
     LaunchedEffect(Unit) { while (true) { clock = nowS(); delay(15_000) } }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(factory = { view }, modifier = Modifier.fillMaxSize())
-        // Tap anywhere: show / hide the controls.
-        Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onTap = { playerActions?.tap() }) })
+        // Tap anywhere: show / hide the controls. Phones: swipe the left / right side for brightness / volume, pinch to zoom.
+        Box(Modifier.fillMaxSize()
+            .pointerInput(Unit) { detectTapGestures(onTap = { playerActions?.tap() }) }
+            .pointerInput(Unit) {
+                var left = true
+                detectVerticalDragGestures(onDragStart = { o -> left = o.x < size.width / 2 }) { _, dy ->
+                    val d = -dy / size.height
+                    if (left) playerActions?.brightness(d) else playerActions?.volume(d)
+                }
+            }
+            .pointerInput(Unit) {
+                detectTransformGestures { _, _, zoom, _ -> if (zoom > 1.15f) playerActions?.pinch(true) else if (zoom < 0.87f) playerActions?.pinch(false) }
+            })
+        if (st.inPip) return@Box
 
         if (st.buffering && st.error == null) {
             CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp, modifier = Modifier.align(Alignment.Center).size(44.dp))
@@ -194,7 +211,13 @@ private fun VodControls(st: PlayerState, clock: Long) {
                 }
             }
             Spacer(Modifier.height(10.dp))
-            SeekBar(if (dur > 0) (shown / dur).toFloat() else 0f, if (dur > 0) (st.pos / dur).toFloat() else 0f, st.zone == 0, st.scrub != null, fmtClock(shown))
+            Box {
+                SeekBar(if (dur > 0) (shown / dur).toFloat() else 0f, if (dur > 0) (st.pos / dur).toFloat() else 0f, st.zone == 0, st.scrub != null, fmtClock(shown))
+                // Chapter marks (Settings → Seek & timing)
+                if (st.chapters.isNotEmpty()) BoxWithConstraints(Modifier.matchParentSize()) {
+                    st.chapters.forEach { f -> Box(Modifier.align(Alignment.CenterStart).offset(x = maxWidth * f.coerceIn(0f, 1f)).size(2.dp, 8.dp).background(Color.Black.copy(alpha = 0.7f))) }
+                }
+            }
             Spacer(Modifier.height(8.dp))
             val centre = setOf("prev", "back", "play", "fwd", "next")
             SplitBar(

@@ -371,6 +371,20 @@ suspend fun androidx.compose.foundation.lazy.LazyListState.smoothScrollToItem(in
     else animateScrollToItem(index)
 }
 
+/** Vertical lists (Settings, channel lists): scroll smoothly, only when the focus gets near the top or bottom. */
+val CalmScroll = object : androidx.compose.foundation.gestures.BringIntoViewSpec {
+    override val scrollAnimationSpec: androidx.compose.animation.core.AnimationSpec<Float> get() = SmoothScroll
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+        val margin = (containerSize * 0.18f).coerceAtMost(containerSize / 2 - size / 2).coerceAtLeast(0f)
+        val trailing = offset + size
+        return when {
+            offset < margin -> offset - margin
+            trailing > containerSize - margin -> trailing - (containerSize - margin)
+            else -> 0f
+        }
+    }
+}
+
 val NoScroll = object : androidx.compose.foundation.gestures.BringIntoViewSpec {
     override val scrollAnimationSpec: androidx.compose.animation.core.AnimationSpec<Float> get() = SmoothScroll
     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float = 0f

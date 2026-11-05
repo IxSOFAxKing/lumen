@@ -127,7 +127,22 @@ class PlexSource(override val ratingKey: String, private val queue: List<String>
     override val title get() = meta?.let { if (it.isEpisode) it.grandparentTitle ?: it.title else it.title } ?: last.optString("title")
     override val subtitle get() = meta?.let { m -> if (m.isEpisode) listOfNotNull(m.episodeLabel, m.title).joinToString(" · ") else listOfNotNull(m.year?.toString(), m.contentRating).joinToString(" · ") } ?: ""
     override val duration get() = last.num("duration") ?: ((meta?.durationMs ?: 0) / 1000.0)
-    override val markers get() = last.optJSONArray("markers").objects().map { Marker(it.optString("type"), it.optDouble("startTimeOffset") / 1000, it.optDouble("endTimeOffset") / 1000) }
+    override val markers: List<Marker> get() {
+        val plex = last.optJSONArray("markers").objects().map { Marker(it.optString("type"), it.optDouble("startTimeOffset") / 1000, it.optDouble("endTimeOffset") / 1000) }
+        // Fallback: find intros / credits from chapter titles (always, or when Plex has no markers).
+        val force = AppState.uiBool("forceFallbackMarkers", false)
+        if (!force && plex.any { it.type == "intro" || it.type == "credits" }) return plex
+        val intro = Regex(AppState.uiStr("introPattern", "(?i)\\b(intro|opening|op)\\b"))
+        val credits = Regex(AppState.uiStr("creditsPattern", "(?i)\\b(credits|ending|outro|ed)\\b"))
+        val fromChapters = chapters.mapNotNull { c ->
+            when {
+                runCatching { intro.containsMatchIn(c.type) }.getOrDefault(false) -> Marker("intro", c.start, c.end)
+                runCatching { credits.containsMatchIn(c.type) }.getOrDefault(false) -> Marker("credits", c.start, c.end)
+                else -> null
+            }
+        }
+        return if (force) fromChapters.ifEmpty { plex } else plex + fromChapters
+    }
     override val audio get() = last.optJSONArray("audio").objects().map { StreamOpt(it.optInt("id"), it.optString("label"), it.optBoolean("selected")) }
     override val subtitles get() = last.optJSONArray("subtitles").objects().map { StreamOpt(it.optInt("id"), it.optString("label"), it.optBoolean("selected")) }
     override val hasNext get() = nextItem != null

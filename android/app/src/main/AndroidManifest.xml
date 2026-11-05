@@ -51,6 +51,8 @@
 
         <activity
             android:name=".PlayerActivity"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode"
             android:exported="false"
             android:screenOrientation="fullUser"

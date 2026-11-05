@@ -86,7 +86,12 @@ fun SettingsScreen() {
                 }
         }
     }
-    fun label(key: String, opts: List<Opt>, def: Any): String {
+    @Composable
+    fun tog(title: String, key: String, def: Boolean, hint: String? = null) {
+        val on = AppState.uiBool(key, def)
+        SettingRow(title, if (on) "On" else "Off", hint = hint) { save(key, !on) }
+    }
+        fun label(key: String, opts: List<Opt>, def: Any): String {
         val cur = AppState.ui.opt(key)?.toString() ?: def.toString()
         return opts.firstOrNull { it.value.toString() == cur }?.label ?: cur
     }
@@ -98,6 +103,7 @@ fun SettingsScreen() {
     val hidden = AppState.uiList("homeHidden").toSet()
 
     Box(Modifier.fillMaxSize()) {
+    androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides CalmScroll) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = if (LocalPortrait.current) 16.dp else 40.dp, end = if (LocalPortrait.current) 16.dp else 260.dp, top = 30.dp, bottom = 100.dp)) {
         item { T("Settings", 26.sp, weight = FontWeight.Bold); T("Changes sync to your Lumen server and every app, except the ones marked “this TV”.", 12.sp, C.text3, maxLines = 2) }
 
@@ -161,9 +167,43 @@ fun SettingsScreen() {
         item { SettingRow("Audio language", label("audioLang", LANGS, "")) { cycle("audioLang", LANGS, "", "Audio language") } }
         item { SettingRow("Subtitles", label("subtitleMode", SUB_MODES, "plex")) { cycle("subtitleMode", SUB_MODES, "plex", "Subtitles") } }
         item { SettingRow("Subtitle language", label("subtitleLang", LANGS, "")) { cycle("subtitleLang", LANGS, "", "Subtitle language") } }
-        item { Toggle("Autoplay next episode", AppState.uiBool("autoplayNext", true)) { save("autoplayNext", !AppState.uiBool("autoplayNext", true)) } }
-        item { Toggle("Skip intros automatically", AppState.uiBool("autoSkipIntro", false)) { save("autoSkipIntro", !AppState.uiBool("autoSkipIntro", false)) } }
-        item { Toggle("Skip credits automatically", AppState.uiBool("autoSkipCredits", false)) { save("autoSkipCredits", !AppState.uiBool("autoSkipCredits", false)) } }
+
+        item { Section("Player") }
+        item { tog("Hardware decoding", "hwDecoding", true, "Use the TV's video decoder when available") }
+        item { tog("Auto picture-in-picture", "autoPip", true, "Keep playing in a small window when you leave the app (phones)") }
+        item { tog("Match content frame rate", "matchFrameRate", false, "Switch the display refresh rate to the video's (e.g. 24 fps films)") }
+        item { tog("Disable Dolby Vision", "disableDolbyVision", false, "Play the HDR10 / HDR layer instead of Dolby Vision") }
+
+        item { Section("Audio") }
+        item { SettingRow("Audio channels", label("audioOutput", AUDIO_OUT, "auto")) { cycle("audioOutput", AUDIO_OUT, "auto", "Audio channels") } }
+        item { SettingRow("Maximum volume", label("maxVolume", MAX_VOL, 100)) { cycle("maxVolume", MAX_VOL, 100, "Maximum volume") } }
+
+        item { Section("Subtitles") }
+        item { SettingRow("Subtitle size", label("subtitleSize", SUB_SIZE, 100)) { cycle("subtitleSize", SUB_SIZE, 100, "Subtitle size") } }
+        item { SettingRow("Subtitle colour", label("subtitleColor", SUB_COLOR, "#ffffff")) { cycle("subtitleColor", SUB_COLOR, "#ffffff", "Subtitle colour") } }
+        item { SettingRow("Subtitle background", label("subtitleBg", SUB_BG, 60)) { cycle("subtitleBg", SUB_BG, 60, "Subtitle background") } }
+
+        item { Section("Seek & timing") }
+        item { SettingRow("Small skip (◀)", label("seekBack", SKIPS, 10)) { cycle("seekBack", SKIPS, 10, "Small skip duration") } }
+        item { SettingRow("Large skip (▶)", label("seekForward", SKIPS, 30)) { cycle("seekForward", SKIPS, 30, "Large skip duration") } }
+        item { SettingRow("Rewind on resume", label("rewindOnResume", REWIND, 0)) { cycle("rewindOnResume", REWIND, 0, "Rewind on resume") } }
+        item { SettingRow("Default sleep timer", label("defaultSleep", SLEEP, 0)) { cycle("defaultSleep", SLEEP, 0, "Default sleep timer") } }
+        item { tog("Chapter marks on the seek bar", "chapterMarks", true, "Show where chapters start") }
+
+        item { Section("Auto-play & skip") }
+        item { Toggle("Auto-play next episode", AppState.uiBool("autoplayNext", true)) { save("autoplayNext", !AppState.uiBool("autoplayNext", true)) } }
+        item { SettingRow("Play next countdown", label("autoplayCountdown", COUNTDOWN, 10)) { cycle("autoplayCountdown", COUNTDOWN, 10, "Play next countdown") } }
+        item { SettingRow("Skip intro", label("skipIntroMode", SKIP_MODES, if (AppState.uiBool("autoSkipIntro", false)) "auto" else "button")) { cycle("skipIntroMode", SKIP_MODES, if (AppState.uiBool("autoSkipIntro", false)) "auto" else "button", "Skip intro") } }
+        item { SettingRow("Skip credits", label("skipCreditsMode", SKIP_MODES, if (AppState.uiBool("autoSkipCredits", false)) "auto" else "button")) { cycle("skipCreditsMode", SKIP_MODES, if (AppState.uiBool("autoSkipCredits", false)) "auto" else "button", "Skip credits") } }
+        item { SettingRow("Auto skip delay", label("autoSkipDelay", SKIP_DELAY, 0)) { cycle("autoSkipDelay", SKIP_DELAY, 0, "Auto skip delay") } }
+        item { tog("Use chapter names for intro/credits", "forceFallbackMarkers", false, "Find intros and credits from chapter titles even when Plex has markers") }
+
+        if (!AppState.isTv) {
+            item { Section("Gestures (phone)") }
+            item { tog("Brightness swipe", "brightnessSwipe", true, "Swipe up or down on the left side of the video") }
+            item { tog("Volume swipe", "volumeSwipe", true, "Swipe up or down on the right side of the video") }
+            item { tog("Pinch to zoom", "pinchZoom", true, "Pinch the video to fill / fit the screen") }
+        }
 
         item { Section("Home screen") }
         item { SettingRow("Start on", label("startPage", START_PAGES, "home")) { cycle("startPage", START_PAGES, "home", "Start on") } }
@@ -200,6 +240,7 @@ fun SettingsScreen() {
                 }
             }
         }
+    }
     }
     picker?.let { p -> ChoiceDialog(p, onDismiss = { picker = null }) { o -> picker = null; p.onPick(o) } }
     pinFor?.let { (u, makeDefault) -> PinDialog(u.optString("title"), onDismiss = { pinFor = null }) { pin -> pinFor = null; switchUser(u, makeDefault, pin) } }
@@ -296,3 +337,15 @@ private fun SettingRow(label: String, value: String, fr: FocusRequester? = null,
 
 @Composable
 private fun Toggle(label: String, on: Boolean, onClick: () -> Unit) = SettingRow(label, if (on) "On" else "Off", onClick = onClick)
+
+private val AUDIO_OUT = listOf(Opt("auto", "Auto (surround / passthrough)"), Opt("stereo", "Stereo (mix down)"))
+private val MAX_VOL = listOf(Opt(100, "100%"), Opt(125, "125%"), Opt(150, "150%"), Opt(200, "200%"))
+private val SUB_SIZE = listOf(Opt(75, "Small"), Opt(100, "Normal"), Opt(125, "Large"), Opt(150, "Extra large"))
+private val SUB_COLOR = listOf(Opt("#ffffff", "White"), Opt("#ffff00", "Yellow"), Opt("#00ffff", "Cyan"), Opt("#00ff00", "Green"))
+private val SUB_BG = listOf(Opt(0, "None"), Opt(30, "Light"), Opt(60, "Medium"), Opt(90, "Dark"))
+private val SKIPS = listOf(Opt(5, "5 seconds"), Opt(10, "10 seconds"), Opt(15, "15 seconds"), Opt(30, "30 seconds"), Opt(60, "60 seconds"))
+private val REWIND = listOf(Opt(0, "Off"), Opt(5, "5 seconds"), Opt(10, "10 seconds"), Opt(15, "15 seconds"), Opt(30, "30 seconds"))
+private val SLEEP = listOf(Opt(0, "Off"), Opt(15, "15 minutes"), Opt(30, "30 minutes"), Opt(60, "60 minutes"), Opt(90, "90 minutes"), Opt(120, "2 hours"))
+private val COUNTDOWN = listOf(Opt(3, "3 seconds"), Opt(5, "5 seconds"), Opt(10, "10 seconds"), Opt(15, "15 seconds"), Opt(30, "30 seconds"))
+private val SKIP_MODES = listOf(Opt("off", "Off"), Opt("button", "Show button"), Opt("auto", "Skip automatically"))
+private val SKIP_DELAY = listOf(Opt(0, "Immediately"), Opt(3, "After 3 seconds"), Opt(5, "After 5 seconds"), Opt(10, "After 10 seconds"))

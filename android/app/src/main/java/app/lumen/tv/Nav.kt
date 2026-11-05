@@ -77,7 +77,8 @@ object Nav {
 
     // ---------------- playback ----------------
     fun play(item: PlexItem, resume: Boolean, queue: List<PlexItem>? = null) {
-        val req = JSONObject().put("kind", "plex").put("ratingKey", item.ratingKey).put("offset", if (resume) item.resumeSec else 0.0)
+        val back = AppState.uiNum("rewindOnResume", 0.0)
+        val req = JSONObject().put("kind", "plex").put("ratingKey", item.ratingKey).put("offset", if (resume) (item.resumeSec - back).coerceAtLeast(0.0) else 0.0)
         if (queue != null) req.put("queue", JSONArray(queue.map { it.ratingKey }))
         startPlayer(req)
     }

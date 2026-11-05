@@ -84,6 +84,8 @@ class PlayerState {
     var liveBtn by mutableIntStateOf(2)
     /** Live overlay opened with OK (not just the banner after a channel change); 0 = buttons, 1 = seek bar. */
     var liveOverlay by mutableStateOf(false)
+    var inPip by mutableStateOf(false)
+    var chapters by mutableStateOf<List<Float>>(emptyList())
     var liveZone by mutableIntStateOf(0)
     var badges by mutableStateOf<List<String>>(emptyList())
     var providerName by mutableStateOf("")
@@ -132,9 +134,24 @@ class PlayerActivity : ComponentActivity() {
             .setConnectTimeoutMs(15_000)
             .setReadTimeoutMs(90_000) // Plex/Lumen transcoders can take a while for the first segment
             .setDefaultRequestProperties(mapOf("Authorization" to "Bearer ${Net.token}", "Cookie" to "lumen_device=${Net.token}"))
-        val renderers = DefaultRenderersFactory(applicationContext)
+        // Settings → Player / Audio: hardware decoding, Dolby Vision, stereo downmix.
+        val hw = AppState.uiBool("hwDecoding", true)
+        val noDv = AppState.uiBool("disableDolbyVision", false)
+        val stereo = AppState.uiStr("audioOutput", "auto") == "stereo"
+        val renderers = object : DefaultRenderersFactory(applicationContext) {
+            override fun buildAudioSink(context: android.content.Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): androidx.media3.exoplayer.audio.AudioSink? =
+                if (!stereo) super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams)
+                // No passthrough: decode everything and let Android mix it down for TV speakers / headphones.
+                else androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
+                    .setAudioCapabilities(androidx.media3.exoplayer.audio.AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES).build()
+        }
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
             .setEnableDecoderFallback(true)
+            .setMediaCodecSelector { mime, secure, tunneling ->
+                val m = if (noDv && mime == MimeTypes.VIDEO_DOLBY_VISION) MimeTypes.VIDEO_H265 else mime
+                val list = runCatching { androidx.media3.exoplayer.mediacodec.MediaCodecUtil.getDecoderInfos(m, secure, tunneling) }.getOrDefault(emptyList())
+                if (!hw) list.filter { !it.hardwareAccelerated }.ifEmpty { list } else list
+            }
         // Bigger buffers than the default smooth out IPTV streams.
         val load = DefaultLoadControl.Builder().setBufferDurationsMs(20_000, 60_000, 1_500, 3_000).build()
         exo = ExoPlayer.Builder(applicationContext, renderers)
@@ -142,6 +159,10 @@ class PlayerActivity : ComponentActivity() {
             .setLoadControl(load)
             .build()
         exo.addListener(listener)
+        if (stereo) exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().setMaxAudioChannelCount(2).build()
+        applyVolumeBoost(exo.audioSessionId)
+        // Settings → Seek & timing → Default sleep timer
+        AppState.uiNum("defaultSleep", 0.0).toLong().takeIf { it > 0 }?.let { st.sleepAt = System.currentTimeMillis() + it * 60_000 }
 
         view = PlayerView(this).apply {
             player = exo
@@ -183,6 +204,9 @@ class PlayerActivity : ComponentActivity() {
             override fun upNext() { playNext() }
             override fun openChannels() { if (Playback.zapList.size > 1) { st.chList = true; st.controls = false } }
             override fun openGuide() { lifecycleScope.launch { programmesPanel()?.let { st.panel = it; poke() } } }
+            override fun brightness(delta: Float) = gestureBrightness(delta)
+            override fun volume(delta: Float) = gestureVolume(delta)
+            override fun pinch(zoomIn: Boolean) = gesturePinch(zoomIn)
             override fun openOptions() { source?.let { st.panel = if (it.isLive) liveOptions(it) else vodSettings(it); poke() } }
         }
 
@@ -256,6 +280,7 @@ class PlayerActivity : ComponentActivity() {
                 if (d.url.isBlank()) throw IllegalStateException("The server didn't return a stream")
                 desc = d
                 st.method = d.method
+                st.chapters = if (AppState.uiBool("chapterMarks", true) && src.duration > 0) src.chapters.drop(1).map { (it.start / src.duration).toFloat() } else emptyList()
                 st.buttons = buildButtons(src)
                 play(d)
             } catch (e: Exception) {
@@ -311,6 +336,8 @@ class PlayerActivity : ComponentActivity() {
             if (state == Player.STATE_READY) fallbacks = fallbacks.coerceAtMost(1)
             if (state == Player.STATE_ENDED) onEnded()
         }
+        override fun onAudioSessionIdChanged(audioSessionId: Int) { applyVolumeBoost(audioSessionId) }
+        override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) { matchFrameRate() }
         override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
             // After a subtitle-sync reload, switch to the shifted subtitles.
             if (!pickSynced) return
@@ -419,14 +446,90 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
+    private var markerSince: Pair<String, Long>? = null
+
+    // ---------- volume boost (Settings → Audio → Maximum volume) ----------
+    private var loudness: android.media.audiofx.LoudnessEnhancer? = null
+    private fun applyVolumeBoost(session: Int) {
+        val pct = AppState.uiNum("maxVolume", 100.0)
+        runCatching { loudness?.release() }; loudness = null
+        if (pct <= 100 || session == C.AUDIO_SESSION_ID_UNSET) return
+        loudness = runCatching {
+            android.media.audiofx.LoudnessEnhancer(session).apply { setTargetGain((2000 * kotlin.math.log10(pct / 100.0)).toInt()); enabled = true }
+        }.getOrNull()
+    }
+
+    // ---------- match content frame rate (Settings → Player) ----------
+    private var matchedFor = 0f
+    private fun matchFrameRate() {
+        if (!AppState.uiBool("matchFrameRate", false) || android.os.Build.VERSION.SDK_INT < 23) return
+        val fps = exo.videoFormat?.frameRate ?: return
+        if (fps <= 1f || fps == matchedFor) return
+        matchedFor = fps
+        val display = window.decorView.display ?: return
+        val cur = display.mode
+        val best = display.supportedModes.filter { it.physicalWidth == cur.physicalWidth && it.physicalHeight == cur.physicalHeight }
+            .firstOrNull { m -> (1..4).any { n -> kotlin.math.abs(m.refreshRate - fps * n) < 0.06f * n } } ?: return
+        if (best.modeId != cur.modeId) window.attributes = window.attributes.also { it.preferredDisplayModeId = best.modeId }
+    }
+
+    // ---------- picture-in-picture (Settings → Player → Auto picture-in-picture) ----------
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (!AppState.uiBool("autoPip", true) || android.os.Build.VERSION.SDK_INT < 26 || !exo.isPlaying) return
+        if (!packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)) return
+        runCatching { enterPictureInPictureMode(android.app.PictureInPictureParams.Builder().setAspectRatio(android.util.Rational(16, 9)).build()) }
+    }
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: android.content.res.Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        st.inPip = isInPictureInPictureMode
+        if (isInPictureInPictureMode) { st.controls = false; st.panel = null; st.chList = false }
+    }
+
+    // ---------- phone gestures ----------
+    fun gestureBrightness(delta: Float) {
+        if (!AppState.uiBool("brightnessSwipe", true)) return
+        val lp = window.attributes
+        val cur = if (lp.screenBrightness < 0) 0.5f else lp.screenBrightness
+        lp.screenBrightness = (cur + delta).coerceIn(0.02f, 1f)
+        window.attributes = lp
+        st.message = "Brightness ${(lp.screenBrightness * 100).toInt()}%"; hideAt = System.currentTimeMillis()
+    }
+    private var volAcc = 0f
+    fun gestureVolume(delta: Float) {
+        if (!AppState.uiBool("volumeSwipe", true)) return
+        val am = getSystemService(AUDIO_SERVICE) as android.media.AudioManager
+        val max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+        volAcc += delta * max
+        val steps = volAcc.toInt()
+        if (steps != 0) {
+            volAcc -= steps
+            val v = (am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) + steps).coerceIn(0, max)
+            am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, v, 0)
+            st.message = "Volume ${v * 100 / max}%"; hideAt = System.currentTimeMillis()
+        }
+    }
+    fun gesturePinch(zoomIn: Boolean) {
+        if (!AppState.uiBool("pinchZoom", true)) return
+        aspect = if (zoomIn) 2 else 0
+        view.resizeMode = if (zoomIn) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
+    }
+
     private fun markersAndUpNext(src: Source, now: Long) {
         val pos = st.pos
         val m = src.markers.firstOrNull { (it.type == "intro" || it.type == "credits") && pos >= it.start && pos < it.end - 1 }
         st.skip = m
         if (m != null) {
             val id = "${m.type}:${m.start}"
-            val auto = if (m.type == "intro") AppState.uiBool("autoSkipIntro", false) else AppState.uiBool("autoSkipCredits", false)
-            if (auto && id !in skippedMarkers) { skippedMarkers += id; skip(m) }
+            val mode = if (m.type == "intro") AppState.uiStr("skipIntroMode", if (AppState.uiBool("autoSkipIntro", false)) "auto" else "button")
+                       else AppState.uiStr("skipCreditsMode", if (AppState.uiBool("autoSkipCredits", false)) "auto" else "button")
+            if (mode == "off") st.skip = null
+            if (mode == "auto" && id !in skippedMarkers) {
+                // Auto skip after the configured delay (the button shows meanwhile).
+                val delayS = AppState.uiNum("autoSkipDelay", 0.0)
+                if (markerSince == null || markerSince?.first != id) markerSince = id to now
+                if (now - (markerSince?.second ?: now) >= delayS * 1000) { skippedMarkers += id; skip(m) }
+            }
         }
         // "Up next" card: when the credits start (or 30 s before the end)
         val dur = st.dur
@@ -1049,6 +1152,7 @@ class PlayerActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        runCatching { loudness?.release() }
         close()
         if (PlayerBus.player?.get() === this) PlayerBus.player = null
         playerActions = null
