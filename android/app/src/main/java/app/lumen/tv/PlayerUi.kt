@@ -321,11 +321,11 @@ private fun LiveBanner(st: PlayerState, clock: Long) {
             T(dateFmt.format(java.util.Date(clock * 1000)), 15.sp, C.text, FontWeight.Medium)
             // Touch shortcuts (phones): channel list, programme guide, options.
             Spacer(Modifier.width(14.dp))
-            Icon(Ico.Channels, "Channels", tint = Color.White, modifier = Modifier.size(30.dp).clip(CircleShape).tap { playerActions?.openChannels() }.padding(4.dp))
+            Icon(Ico.Channels, "Channels", tint = if (st.liveOverlay && st.liveZone == 2 && st.liveTop == 0) Color.Black else Color.White, modifier = Modifier.size(30.dp).clip(CircleShape).background(if (st.liveOverlay && st.liveZone == 2 && st.liveTop == 0) Color.White else Color.Transparent).tap { playerActions?.openChannels() }.padding(4.dp))
             Spacer(Modifier.width(6.dp))
-            Icon(Ico.Guide, "Guide", tint = Color.White, modifier = Modifier.size(30.dp).clip(CircleShape).tap { playerActions?.openGuide() }.padding(4.dp))
+            Icon(Ico.Guide, "Guide", tint = if (st.liveOverlay && st.liveZone == 2 && st.liveTop == 1) Color.Black else Color.White, modifier = Modifier.size(30.dp).clip(CircleShape).background(if (st.liveOverlay && st.liveZone == 2 && st.liveTop == 1) Color.White else Color.Transparent).tap { playerActions?.openGuide() }.padding(4.dp))
             Spacer(Modifier.width(6.dp))
-            Icon(Icons.Filled.Settings, "Options", tint = Color.White, modifier = Modifier.size(30.dp).clip(CircleShape).tap { playerActions?.openOptions() }.padding(4.dp))
+            Icon(Icons.Filled.Settings, "Options", tint = if (st.liveOverlay && st.liveZone == 2 && st.liveTop == 2) Color.Black else Color.White, modifier = Modifier.size(30.dp).clip(CircleShape).background(if (st.liveOverlay && st.liveZone == 2 && st.liveTop == 2) Color.White else Color.Transparent).tap { playerActions?.openOptions() }.padding(4.dp))
         }
         // ---- bottom panel ----
         Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(if (LocalPortrait.current) 420.dp else 300.dp).background(Brush.verticalGradient(0f to Color.Transparent, 0.35f to Color.Black.copy(alpha = 0.75f), 1f to Color.Black.copy(alpha = 0.95f))))

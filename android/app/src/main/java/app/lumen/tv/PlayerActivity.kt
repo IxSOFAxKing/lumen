@@ -87,6 +87,7 @@ class PlayerState {
     var inPip by mutableStateOf(false)
     var chapters by mutableStateOf<List<Float>>(emptyList())
     var liveZone by mutableIntStateOf(0)
+    var liveTop by mutableIntStateOf(2)
     var badges by mutableStateOf<List<String>>(emptyList())
     var providerName by mutableStateOf("")
     var poster by mutableStateOf<String?>(null)
@@ -1074,8 +1075,19 @@ class PlayerActivity : ComponentActivity() {
         when {
             back -> if (st.controls) st.controls = false else finish()
             // Overlay open (OK): ▲ ▼ move between the seek bar and the buttons instead of changing channel.
-            ov && code == KeyEvent.KEYCODE_DPAD_UP -> { st.liveZone = 1; poke() }
-            ov && code == KeyEvent.KEYCODE_DPAD_DOWN -> { st.liveZone = 0; poke() }
+            // Zones: 0 buttons → ▲ 1 seek bar → ▲ 2 top icons (channel list, guide, options).
+            ov && code == KeyEvent.KEYCODE_DPAD_UP -> { st.liveZone = (st.liveZone + 1).coerceAtMost(2); poke() }
+            ov && code == KeyEvent.KEYCODE_DPAD_DOWN -> { st.liveZone = (st.liveZone - 1).coerceAtLeast(0); poke() }
+            ov && st.liveZone == 2 && code == KeyEvent.KEYCODE_DPAD_LEFT -> { st.liveTop = (st.liveTop - 1).coerceAtLeast(0); poke() }
+            ov && st.liveZone == 2 && code == KeyEvent.KEYCODE_DPAD_RIGHT -> { st.liveTop = (st.liveTop + 1).coerceAtMost(2); poke() }
+            ov && st.liveZone == 2 && isOk(code) -> {
+                if (repeat == 0) when (st.liveTop) {
+                    0 -> playerActions?.openChannels()
+                    1 -> playerActions?.openGuide()
+                    else -> playerActions?.openOptions()
+                }
+                poke()
+            }
             code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_CHANNEL_UP || code == KeyEvent.KEYCODE_PAGE_UP -> zap(-1)
             code == KeyEvent.KEYCODE_DPAD_DOWN || code == KeyEvent.KEYCODE_CHANNEL_DOWN || code == KeyEvent.KEYCODE_PAGE_DOWN -> zap(1)
             // Seek bar selected: ◀ ▶ rewind / forward, OK play / pause.
