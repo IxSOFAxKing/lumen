@@ -67,6 +67,14 @@ async function osUser(req) {
   return (users?.results || []).find(x => [x.plexUsername, x.displayName, x.username].some(n => n && n.toLowerCase() === name))?.id || null;
 }
 
+// Managed Plex users (child / teen profiles) can't use Discover or make requests.
+const isKid = req => !!selectedUser(req)?.restricted;
+r.use((req, res, next) => {
+  if (!isKid(req)) return next();
+  if (req.method === 'GET' && req.path === '/config') return res.json({ url: '', configured: false, blocked: true });
+  res.status(403).json({ error: 'Discover isn\'t available for this profile.' });
+});
+
 // ---------- configuration (saved from the web Settings, shared by every app) ----------
 r.get('/config', (req, res) => { const c = conf(); res.json({ url: c.url || '', configured: !!(c.url && c.apiKey), hasKey: !!c.apiKey }); });
 r.put('/config', ah(async (req, res) => {

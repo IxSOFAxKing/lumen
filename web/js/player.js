@@ -4,6 +4,7 @@ import { attachEngine, releaseDesc, nextMode } from './engine.js';
 import { channelRowContent } from './chrow.js';
 import { clockText } from './appearance.js';
 import { api } from './api.js';
+import { store } from './app.js';
 
 let current = null;
 
@@ -71,7 +72,7 @@ class Player {
     this.buf = h('div', { class: 'buf' }); this.fill = h('div', { class: 'fill' }); this.knob = h('div', { class: 'knob' }); this.tip = h('div', { class: 'tip' });
     this.marks = h('div');
     this.track = h('div', { class: 'track' }, this.buf, this.marks, this.fill, this.knob);
-    this.seekbar = h('div', { class: 'p-seek', onClick: e => { e.stopPropagation(); this.seek(this.posFromEvent(e)); }, onMousemove: e => this.hoverSeek(e) }, this.track, this.tip);
+    this.seekbar = h('div', { class: 'p-seek', onClick: e => { e.stopPropagation(); if (!this.meta?.live) this.seek(this.posFromEvent(e)); }, onMousemove: e => { if (!this.meta?.live) this.hoverSeek(e); } }, this.track, this.tip);
     this.playBtn = pbtn('pause', 'Play/Pause (Space)', () => this.toggle(), 'big');
     this.timeEl = h('span', { class: 'time' });
     this.volBtn = pbtn('vol', 'Mute (M)', () => this.setMuted(!this.video.muted));
@@ -92,6 +93,15 @@ class Player {
     this.infoBtn = pbtn('info', 'Stream info (I)', () => this.toggleInfo());
     this.pipBtn = pbtn('pip', 'Picture-in-picture (P)', () => this.pip());
     this.fsBtn = pbtn('fs', 'Fullscreen (F)', () => this.fullscreen());
+    // Live TV (TiviMate layout): provider • group / clock on top, programme info, programme bar, transport centred.
+    this.tmTopL = h('div', { class: 'tm-ctx' }); this.tmClock = h('div', { class: 'tm-clock' });
+    this.tmTop = h('div', { class: 'tm-top' }, pbtn('back', 'Back (Esc)', () => this.close()), this.tmTopL, h('div', { class: 'spacer' }), this.tmClock);
+    this.tmInfo = h('div', { class: 'tm-info' });
+    this.tmTime = h('div', { class: 'tm-time' });
+    this.restartBtn = pbtn('history', 'Watch from the start (catch-up)', () => this.watchFromStart());
+    this.goLiveBtn = h('button', { class: 'tm-live', title: 'Back to live', onClick: e => { e.stopPropagation(); this.goLive(); } }, 'LIVE');
+    this.tmRecBtn = h('button', { class: 'tm-rec', title: 'Record this programme (R)', onClick: e => { e.stopPropagation(); this.toggleRecord(); } }, h('i'));
+    this.liveCtrls = h('div', { class: 'p-ctrls tm-ctrls' });
     const ctrls = h('div', { class: 'p-ctrls' }, this.playBtn, this.rwBtn, this.ffBtn, this.chUp, this.chDown, this.prevChBtn, this.nextBtn, this.volBtn, this.vol, this.timeEl,
       h('div', { class: 'spacer' }), this.guideBtn, this.listBtn, this.audioBtn, this.ccBtn, this.qBtn, this.infoBtn, this.pipBtn, this.fsBtn);
     // Settings → Appearance → Player → Controls: buttons the user chose to hide
@@ -99,8 +109,9 @@ class Player {
     const map = { rw: [this.rwBtn], ff: [this.ffBtn], volume: [this.volBtn, this.vol], prevCh: [this.prevChBtn], guide: [this.guideBtn], list: [this.listBtn],
       audio: [this.audioBtn], subs: [this.ccBtn], quality: [this.qBtn], info: [this.infoBtn], pip: [this.pipBtn], fullscreen: [this.fsBtn] };
     for (const [k, els] of Object.entries(map)) if (pb[k] === false) els.forEach(e => e.classList.add('user-off'));
-    this.bottom = h('div', { class: 'p-bottom' }, this.seekbar, ctrls);
-    this.ui = h('div', { class: 'ui' }, this.top, this.bottom);
+    this.ctrls = ctrls;
+    this.bottom = h('div', { class: 'p-bottom' }, this.tmInfo, this.seekbar, ctrls, this.liveCtrls);
+    this.ui = h('div', { class: 'ui' }, this.tmTop, this.top, this.bottom);
     this.center = h('div', { class: 'p-center' });
     this.overlay = h('div');
     this.el.append(this.video, this.center, this.ui, this.overlay);
@@ -133,7 +144,7 @@ class Player {
     const live = !!meta.live;
     this.recBtn.classList.toggle('hidden', !(live && meta.channel && meta.providerId));
     if (live) this.syncRecordState();
-    this.seekbar.classList.toggle('hidden', live);
+    this.arrange(live);
     for (const b of [this.rwBtn, this.ffBtn]) b.classList.toggle('hidden', live);
     for (const b of [this.chUp, this.chDown, this.listBtn, this.prevChBtn, this.guideBtn]) b.classList.toggle('hidden', !meta.zap);
     this.miniGuideEl?.remove(); this.miniGuideEl = null;
@@ -226,6 +237,7 @@ class Player {
     if (this.meta.live) {
       const ch = this.meta.channel;
       this.timeEl.textContent = ch?.now ? `${fmtTime(ch.now.start)} – ${fmtTime(ch.now.stop)}  ·  ${ch.now.title}` : new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      this.renderLive();
     } else {
       const d = this.dur(), p = this.pos();
       this.timeEl.textContent = `${fmtDuration(p)} / ${fmtDuration(d)}`;
@@ -312,6 +324,7 @@ class Player {
   setRecording(id, title) {
     this.recId = id;
     this.recBtn.classList.toggle('on', !!id);
+    this.tmRecBtn?.classList.toggle('on', !!id);
     this.recBtn.title = id ? `Recording "${title}" — click to stop` : 'Record this programme (R)';
   }
   async toggleRecord() {
@@ -429,6 +442,68 @@ class Player {
     this.menuEl = h('div', { class: 'p-menu', dataset: { kind }, onClick: e => e.stopPropagation() }, items);
     this.el.append(this.menuEl);
     this.poke();
+  }
+
+  // ---------- Live TV, TiviMate layout ----------
+  arrange(live) {
+    this.el.classList.toggle('tm', live);
+    this.seekbar.classList.toggle('readonly', live);
+    if (live) {
+      this.chUp.innerHTML = icon('prev'); this.chUp.title = 'Previous channel (↑)';
+      this.chDown.innerHTML = icon('next'); this.chDown.title = 'Next channel (↓)';
+      const ch = this.meta.channel;
+      this.restartBtn.classList.toggle('hidden', !(ch?.archive && ch?.now && this.meta.catchup));
+      this.tmRecBtn.classList.toggle('hidden', !(ch && this.meta.providerId));
+      this.liveCtrls.replaceChildren(this.tmTime,
+        h('div', { class: 'tm-center' }, this.chUp, this.playBtn, this.chDown),
+        h('div', { class: 'tm-right' }, this.restartBtn, this.goLiveBtn, this.tmRecBtn, this.volBtn, this.vol, this.guideBtn, this.listBtn, this.audioBtn, this.ccBtn, this.qBtn, this.infoBtn, this.pipBtn, this.fsBtn));
+    } else {
+      this.chUp.innerHTML = icon('up'); this.chDown.innerHTML = icon('down');
+      this.ctrls.replaceChildren(this.playBtn, this.rwBtn, this.ffBtn, this.chUp, this.chDown, this.prevChBtn, this.nextBtn, this.volBtn, this.vol, this.timeEl,
+        h('div', { class: 'spacer' }), this.guideBtn, this.listBtn, this.audioBtn, this.ccBtn, this.qBtn, this.infoBtn, this.pipBtn, this.fsBtn);
+    }
+  }
+
+  renderLive() {
+    const m = this.meta, ch = m.channel, p = ch?.now && ch.now.start <= nowS() && ch.now.stop > nowS() ? ch.now : null;
+    const prov = store.providers?.find(x => String(x.id) === String(m.providerId))?.name;
+    this.tmTopL.textContent = [prov, m.zap?.title].filter(Boolean).join('  •  ');
+    this.tmClock.textContent = new Date().toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    const v = this.video, hgt = v.videoHeight;
+    const badges = [hgt ? (hgt >= 2000 ? '4K' : hgt >= 1000 ? 'FHD' : hgt >= 700 ? 'HD' : 'SD') : null].filter(Boolean);
+    const key = [ch?.id, p?.start, badges.join(), Math.floor(nowS() / 30)].join('|');
+    if (this.tmKey !== key) {
+      this.tmKey = key;
+      const nx = ch?.next && ch.next !== p ? ch.next : null;
+      this.tmInfo.replaceChildren(
+        h('div', { class: 'tm-logo' }, ch?.logo ? h('img', { src: ch.logo, alt: '' }) : h('b', {}, ch?.name || '')),
+        h('div', { class: 'grow' },
+          h('div', { class: 'tm-title' }, p?.title || ch?.name || m.title || ''),
+          h('div', { class: 'tm-line' },
+            p ? h('span', {}, `${fmtTime(p.start)} – ${fmtTime(p.stop)}`) : null,
+            p ? h('span', { class: 'tm-mini' }, h('i', { style: { width: `${Math.round(((nowS() - p.start) / (p.stop - p.start)) * 100)}%` } })) : null,
+            p ? h('span', {}, `${Math.max(0, Math.round((p.stop - nowS()) / 60))} min`) : null,
+            h('b', {}, [ch?.num, ch?.name].filter(x => x !== undefined && x !== null && x !== '').join('  ')),
+            ...badges.map(b => h('span', { class: 'tm-badge' }, b))),
+          nx ? h('div', { class: 'tm-next' }, `${fmtTime(nx.start)} – ${fmtTime(nx.stop)}   ${nx.title}`) : null));
+    }
+    // programme progress on the bar, elapsed / length on the left
+    const frac = p ? Math.min(1, Math.max(0, (nowS() - p.start) / (p.stop - p.start))) : 0;
+    this.fill.style.width = `${frac * 100}%`; this.knob.style.left = `${frac * 100}%`; this.buf.style.width = '0';
+    this.tmTime.textContent = p ? `${fmtDuration(nowS() - p.start)} / ${fmtDuration(p.stop - p.start)}` : '';
+  }
+
+  /** Jump back to the live edge (after pausing) or from catch-up back to live. */
+  goLive() {
+    const v = this.video;
+    if (v.seekable?.length) { try { v.currentTime = v.seekable.end(v.seekable.length - 1) - 1; } catch { /* ignore */ } }
+    v.play().catch(() => {});
+    toast('Live');
+  }
+
+  watchFromStart() {
+    const ch = this.meta.channel;
+    if (ch?.now && this.meta.catchup) this.meta.catchup(ch.now);
   }
 
   /** Move every subtitle cue by delta seconds (0 = undo). */

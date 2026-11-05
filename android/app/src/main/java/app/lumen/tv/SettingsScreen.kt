@@ -77,7 +77,7 @@ fun SettingsScreen() {
             runCatching { Net.post("/api/plex/users/switch", JSONObject().put("uuid", u.optString("uuid")).put("makeDefault", makeDefault).apply { if (pin != null) put("pin", pin) }) }
                 .onSuccess {
                     android.widget.Toast.makeText(ctx, if (makeDefault) "${u.optString("title")} is now the default for all apps" else "Watching as ${u.optString("title")}", android.widget.Toast.LENGTH_SHORT).show()
-                    Net.clearCache(); Nav.memory.clear(); AppState.resumeTick++; tick++
+                    Net.clearCache(); Nav.memory.clear(); AppState.discoverOn = Discover.configured(); AppState.resumeTick++; tick++
                 }
                 .onFailure {
                     // Only if Plex wouldn't give Lumen this user's token.

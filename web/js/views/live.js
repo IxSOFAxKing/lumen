@@ -25,7 +25,20 @@ export default async function live(el, route) {
   const pvVideo = h('video', { playsinline: true, autoplay: true });
   const pvMsg = h('div', { class: 'msg' }, 'Select a channel to preview');
   const info = h('div', { class: 'info' });
-  const pvCol = h('div', { class: 'col preview' }, h('div', { class: 'pv', onDblclick: () => fullscreen() }, pvVideo, pvMsg), info);
+  // Preview controls (shown on hover): play/pause, sound, open the full player, browser fullscreen.
+  const pvBtn = (name, title, fn) => h('button', { class: 'pbtn', title, 'aria-label': title, html: icon(name), onClick: e => { e.stopPropagation(); fn(e); } });
+  const pvPlay = pvBtn('pause', 'Play / pause', () => { pvVideo.paused ? pvVideo.play().catch(() => {}) : pvVideo.pause(); });
+  const pvMute = pvBtn('vol', 'Mute', () => { pvVideo.muted = !pvVideo.muted; });
+  const pvVol = h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: pvVideo.volume, onInput: e => { pvVideo.volume = Number(e.target.value); pvVideo.muted = false; }, onClick: e => e.stopPropagation() });
+  pvVideo.addEventListener('play', () => { pvPlay.innerHTML = icon('pause'); });
+  pvVideo.addEventListener('pause', () => { pvPlay.innerHTML = icon('play'); });
+  pvVideo.addEventListener('volumechange', () => { pvMute.innerHTML = icon(pvVideo.muted || pvVideo.volume === 0 ? 'mute' : 'vol'); pvVol.value = pvVideo.muted ? 0 : pvVideo.volume; });
+  const pvBox = h('div', { class: 'pv', onDblclick: () => fullscreen() }, pvVideo, pvMsg);
+  const pvCtrls = h('div', { class: 'pv-ctrls' }, pvPlay, pvMute, pvVol, h('span', { class: 'pv-live' }, 'LIVE'), h('div', { class: 'spacer', style: { flex: 1 } }),
+    pvBtn('play', 'Watch in the full player', () => fullscreen()),
+    pvBtn('fs', 'Fullscreen', () => { document.fullscreenElement ? document.exitFullscreen() : pvBox.requestFullscreen?.().catch(() => {}); }));
+  pvBox.append(pvCtrls);
+  const pvCol = h('div', { class: 'col preview' }, pvBox, info);
   el.append(h('div', { class: 'live' }, catsCol, listCol, pvCol));
 
   // ---- categories & favourite lists ----

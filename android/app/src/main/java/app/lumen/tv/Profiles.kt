@@ -50,7 +50,7 @@ fun WhoIsWatching(pu: JSONObject, onExit: () -> Unit, onDone: () -> Unit) {
         busy = true
         scope.launch {
             runCatching { Net.post("/api/plex/users/switch", JSONObject().put("uuid", u.optString("uuid")).apply { if (pin != null) put("pin", pin) }) }
-                .onSuccess { onDone() }
+                .onSuccess { Net.clearCache(); AppState.discoverOn = Discover.configured(); if (!AppState.discoverOn && Nav.current is Screen.Discover) Nav.root(Screen.Home); onDone() }
                 .onFailure {
                     busy = false
                     if (it is Net.HttpError && it.code == 403 && pin == null) pinFor = u

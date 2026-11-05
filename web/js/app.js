@@ -72,8 +72,8 @@ export function navEntries(route = parseHash()) {
   const list = [
     { id: 'home', href: '#/home', label: 'Home', icon: 'home', active: n === 'home' },
     { id: 'search', href: '#/search', label: 'Search', icon: 'search', active: n === 'search' },
-    { id: 'discover', href: '#/discover', label: 'Discover', icon: 'compass', active: n === 'discover' },
   ];
+  if (store.discover) list.push({ id: 'discover', href: '#/discover', label: 'Discover', icon: 'compass', active: n === 'discover' });
   if (hasIptv) list.push(
     { id: 'live', href: '#/live', label: 'Live TV', icon: 'tv', active: n === 'live', group: 'iptv' },
     { id: 'guide', href: '#/guide', label: 'Guide', icon: 'guide', active: n === 'guide', group: 'iptv' },
@@ -108,6 +108,7 @@ function renderNav(route) {
 export function rerenderNav() { renderNav(parseHash()); }
 
 export async function refreshStore() {
+  api.get('/api/discover/config').then(c => { const was = store.discover; store.discover = !!c.configured; if (was !== store.discover) renderNav(parseHash()); }).catch(() => { store.discover = false; });
   const [providers, plex, settings] = await Promise.all([
     api.get('/api/iptv/providers').catch(() => []),
     api.get('/api/plex/status').catch(() => ({ configured: false })),
@@ -171,6 +172,7 @@ export async function askWhoIsWatching(force = false) {
       try {
         await api.post('/api/plex/users/switch', { uuid: u.uuid, pin });
         sessionStorage.setItem('lumen.profileChosen', '1'); api.clearCache(); box.remove(); resolve();
+        refreshStore().catch(() => {});
         if (force) window.dispatchEvent(new HashChangeEvent('hashchange'));
       } catch (e) {
         if (e.status === 403 && !pin) {

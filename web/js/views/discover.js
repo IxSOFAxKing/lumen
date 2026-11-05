@@ -67,6 +67,7 @@ const ROWS = [['trending', 'Trending'], ['movies', 'Popular movies'], ['tv', 'Po
 export default async function discover(el, route) {
   el.className = 'page';
   const cfg = await api.get('/api/discover/config').catch(() => ({ configured: false }));
+  if (cfg.blocked) { el.append(empty('Discover isn\'t available for this profile', 'Switch to an adult Plex user to browse and request titles.')); return; }
   if (!cfg.configured) {
     el.append(empty('Connect Overseerr to discover and request', 'Add your Overseerr (or Jellyseerr) address and API key in Settings → Discover. Every Lumen app will use it.',
       btn('Open Settings', () => go('#/settings?tab=discover'), { cls: 'primary', iconName: 'settings' })));

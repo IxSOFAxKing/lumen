@@ -18,7 +18,7 @@ export function selectedUser(req) {
   const c = plex.plexConf();
   const uuid = req.device?.plex_user || cookies(req).lumen_plex_user || c.defaultUser || null;
   const u = uuid && c.homeUsers?.[uuid];
-  return u?.token ? { uuid, token: u.token, title: u.title } : null;
+  return u?.token ? { uuid, token: u.token, title: u.title, restricted: !!u.restricted } : null;
 }
 r.use((req, res, next) => {
   const u = selectedUser(req);
@@ -36,7 +36,8 @@ r.get('/users', ah(async (req, res) => {
     let changed = false;
     for (const u of users) {
       const tok = shared.get(u.id);
-      if (!u.admin && tok && homeUsers[u.uuid]?.token !== tok) { homeUsers[u.uuid] = { title: u.title, thumb: u.thumb, admin: false, token: tok }; changed = true; }
+      if (!u.admin && tok && homeUsers[u.uuid]?.token !== tok) { homeUsers[u.uuid] = { title: u.title, thumb: u.thumb, admin: false, token: tok, restricted: u.restricted }; changed = true; }
+      if (homeUsers[u.uuid] && homeUsers[u.uuid].restricted !== u.restricted) { homeUsers[u.uuid] = { ...homeUsers[u.uuid], restricted: u.restricted }; changed = true; }
     }
     if (changed) { plex.saveServer({ homeUsers }); Object.assign(c, { homeUsers }); }
   } catch (e) { console.warn(`[plex] couldn't read shared-server tokens: ${e.message}`); }
@@ -62,7 +63,7 @@ r.post('/users/switch', ah(async (req, res) => {
     if (u.protected && !pin) return res.status(403).json({ error: 'This user needs a PIN', needsPin: true });
     token = await plex.switchHomeUser(u, pin);
   }
-  const homeUsers = { ...(c.homeUsers || {}), [u.uuid]: { title: u.title, thumb: u.thumb, admin: u.admin, token } };
+  const homeUsers = { ...(c.homeUsers || {}), [u.uuid]: { title: u.title, thumb: u.thumb, admin: u.admin, token, restricted: u.restricted } };
   plex.saveServer({ homeUsers, ...(makeDefault ? { defaultUser: u.uuid } : {}) });
   if (req.device) setDevicePlexUser(req.device.id, u.uuid);
   else {
