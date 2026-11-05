@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -91,7 +90,7 @@ fun BottomNav(current: Screen, modifier: Modifier = Modifier) {
 @Composable
 fun MobileTopBar(title: String, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
-    Row(modifier.fillMaxWidth().statusBarsPadding().padding(start = 18.dp, end = 8.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.fillMaxWidth().padding(start = 18.dp, end = 8.dp, top = topSafe() + 10.dp), verticalAlignment = Alignment.CenterVertically) {
         T(title, 24.sp, weight = FontWeight.Bold)
         Spacer(Modifier.weight(1f))
         TopIcon(Icons.Filled.Search, "Search") { Nav.root(Screen.Search) }
@@ -99,6 +98,21 @@ fun MobileTopBar(title: String, modifier: Modifier = Modifier) {
         if (AppState.plexOnline) TopIcon(Icons.Filled.Person, "Switch user") { scope.launch { AppState.checkProfile(force = true) } }
         TopIcon(Icons.Filled.Settings, "Settings") { Nav.root(Screen.Settings) }
     }
+}
+
+/**
+ * Space taken by the status bar / camera cut-out at the top of a phone. Uses the bar's height even while it is
+ * hidden or showing a call chip, and never less than 32dp, so headers can't end up underneath it.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+fun topSafe(): androidx.compose.ui.unit.Dp {
+    val d = androidx.compose.ui.platform.LocalDensity.current
+    val px = maxOf(
+        androidx.compose.foundation.layout.WindowInsets.statusBarsIgnoringVisibility.getTop(d),
+        androidx.compose.foundation.layout.WindowInsets.displayCutout.getTop(d),
+    )
+    return maxOf(with(d) { px.toDp() }, 32.dp)
 }
 
 /** Search + Settings shortcuts for phone screens that draw their own header. */
@@ -127,11 +141,12 @@ fun PortraitHome(d: HomeData, title: String = "Home", extra: (@Composable () -> 
         pager.animateScrollToPage((pager.currentPage + 1) % feat.size)
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+        // Title + actions get their own row below the status bar (not drawn over the banner).
+        item(key = "top") { MobileTopBar(title, Modifier.padding(bottom = 10.dp)) }
         item(key = "hero") {
-            if (showHero) Box(Modifier.fillMaxWidth().height(520.dp)) {
+            if (showHero) Box(Modifier.fillMaxWidth().height(500.dp)) {
                 HorizontalPager(pager, Modifier.fillMaxSize()) { i -> HeroPage(feat[i]) }
-                MobileTopBar(title)
-            } else MobileTopBar(title, Modifier.padding(bottom = 12.dp))
+            }
         }
         if (showHero && feat.size > 1) item(key = "dots") {
             Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 4.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {

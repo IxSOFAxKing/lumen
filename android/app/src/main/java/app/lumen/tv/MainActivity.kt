@@ -1,6 +1,5 @@
 package app.lumen.tv
 
-import androidx.compose.foundation.layout.statusBars
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -178,7 +177,7 @@ fun Shell(onExit: () -> Unit) {
         val navLeft = navPad.calculateLeftPadding(androidx.compose.ui.unit.LayoutDirection.Ltr)
         val navRight = navPad.calculateRightPadding(androidx.compose.ui.unit.LayoutDirection.Ltr)
         // Phone screens without a full-bleed banner also keep clear of the status bar at the top.
-        val statusTop = androidx.compose.foundation.layout.WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+        val statusTop = topSafe()
         val padTop = if (portrait && screen.topLevel && screen != Screen.Home && screen !is Screen.Lib && screen != Screen.Discover) statusTop + 8.dp else 0.dp
         Box(Modifier.fillMaxSize().padding(start = (if (showRail) 52.dp else 0.dp) + navLeft, end = navRight, top = padTop, bottom = if (showBottomNav) 64.dp + navInset else navInset)) {
             // Screens cross-fade with a slight zoom.
