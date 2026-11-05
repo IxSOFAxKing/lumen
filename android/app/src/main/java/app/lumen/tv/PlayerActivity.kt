@@ -262,6 +262,7 @@ class PlayerActivity : ComponentActivity() {
             fallbacks = 0; upNextDismissed = false; skippedMarkers.clear(); st.upNext = null; st.skip = null
         }
         source = src
+        if (boostLive != src.isLive) applyVolumeBoost(exo.audioSessionId)
         desc = null
         st.error = null
         st.live = src.isLive
@@ -449,14 +450,22 @@ class PlayerActivity : ComponentActivity() {
 
     private var markerSince: Pair<String, Long>? = null
 
-    // ---------- volume boost (Settings → Audio → Maximum volume) ----------
+    // ---------- volume (Settings → Audio → Maximum volume, Live TV / Plex volume offset) ----------
     private var loudness: android.media.audiofx.LoudnessEnhancer? = null
+    private var boostLive: Boolean? = null
     private fun applyVolumeBoost(session: Int) {
-        val pct = AppState.uiNum("maxVolume", 100.0)
+        val live = source?.isLive == true
+        boostLive = live
+        // Offset in dB, separately for Live TV and the Plex library, on top of Maximum volume.
+        val offsetDb = AppState.uiNum(if (live) "liveVolumeOffset" else "plexVolumeOffset", 0.0)
+        val maxMb = AppState.uiNum("maxVolume", 100.0).takeIf { it > 100 }?.let { 2000 * kotlin.math.log10(it / 100.0) } ?: 0.0
+        val gainMb = maxMb + offsetDb * 100
+        // Quieter: turn the player down. Louder: the loudness enhancer (which won't clip like a plain gain).
+        runCatching { exo.volume = if (gainMb < 0) Math.pow(10.0, gainMb / 2000).toFloat().coerceIn(0f, 1f) else 1f }
         runCatching { loudness?.release() }; loudness = null
-        if (pct <= 100 || session == C.AUDIO_SESSION_ID_UNSET) return
+        if (gainMb <= 0 || session == C.AUDIO_SESSION_ID_UNSET) return
         loudness = runCatching {
-            android.media.audiofx.LoudnessEnhancer(session).apply { setTargetGain((2000 * kotlin.math.log10(pct / 100.0)).toInt()); enabled = true }
+            android.media.audiofx.LoudnessEnhancer(session).apply { setTargetGain(gainMb.toInt()); enabled = true }
         }.getOrNull()
     }
 

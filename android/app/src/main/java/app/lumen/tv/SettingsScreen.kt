@@ -177,6 +177,8 @@ fun SettingsScreen() {
         item { Section("Audio") }
         item { SettingRow("Audio channels", label("audioOutput", AUDIO_OUT, "auto")) { cycle("audioOutput", AUDIO_OUT, "auto", "Audio channels") } }
         item { SettingRow("Maximum volume", label("maxVolume", MAX_VOL, 100)) { cycle("maxVolume", MAX_VOL, 100, "Maximum volume") } }
+        item { SettingRow("Live TV volume offset", label("liveVolumeOffset", VOL_OFFSET, 0), hint = "Make IPTV channels louder or quieter than everything else") { cycle("liveVolumeOffset", VOL_OFFSET, 0, "Live TV volume offset") } }
+        item { SettingRow("Plex volume offset", label("plexVolumeOffset", VOL_OFFSET, 0), hint = "Make movies and shows louder or quieter than everything else") { cycle("plexVolumeOffset", VOL_OFFSET, 0, "Plex volume offset") } }
 
         item { Section("Subtitles") }
         item { SettingRow("Subtitle size", label("subtitleSize", SUB_SIZE, 100)) { cycle("subtitleSize", SUB_SIZE, 100, "Subtitle size") } }
@@ -340,6 +342,7 @@ private fun SettingRow(label: String, value: String, fr: FocusRequester? = null,
 private fun Toggle(label: String, on: Boolean, onClick: () -> Unit) = SettingRow(label, if (on) "On" else "Off", onClick = onClick)
 
 private val AUDIO_OUT = listOf(Opt("auto", "Auto (surround / passthrough)"), Opt("stereo", "Stereo (mix down)"))
+private val VOL_OFFSET = listOf(Opt(-6, "−6 dB (quieter)"), Opt(-3, "−3 dB"), Opt(0, "Off"), Opt(3, "+3 dB"), Opt(6, "+6 dB"), Opt(9, "+9 dB"), Opt(12, "+12 dB (loudest)"))
 private val MAX_VOL = listOf(Opt(100, "100%"), Opt(125, "125%"), Opt(150, "150%"), Opt(200, "200%"))
 private val SUB_SIZE = listOf(Opt(75, "Small"), Opt(100, "Normal"), Opt(125, "Large"), Opt(150, "Extra large"))
 private val SUB_COLOR = listOf(Opt("#ffffff", "White"), Opt("#ffff00", "Yellow"), Opt("#00ffff", "Cyan"), Opt("#00ff00", "Green"))
