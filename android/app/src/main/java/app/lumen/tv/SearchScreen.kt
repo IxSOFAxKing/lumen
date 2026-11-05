@@ -49,7 +49,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private class SearchResults(val channels: List<Channel>, val hubs: List<Hub>)
+private class SearchResults(val channels: List<Channel>, val hubs: List<Hub>, val requestable: List<DItem> = emptyList())
 
 @Composable
 fun SearchScreen() {
@@ -68,8 +68,9 @@ fun SearchScreen() {
         busy = true
         val r = coroutineScope {
             val ch = async { if (AppState.providers.isNotEmpty()) runCatching { Repo.channelSearch(q.trim()) }.getOrDefault(emptyList()) else emptyList() }
+            val os = async { if (AppState.discoverOn) runCatching { Discover.search(q.trim()) }.getOrDefault(emptyList()) else emptyList() }
             val px = async { if (AppState.plexOnline) runCatching { Repo.plexSearch(q.trim()) }.getOrDefault(emptyList()) else emptyList() }
-            SearchResults(ch.await(), px.await())
+            SearchResults(ch.await(), px.await(), os.await())
         }
         res = r; mem.data["res"] = r; busy = false
     }
@@ -106,7 +107,7 @@ fun SearchScreen() {
         when {
             q.trim().length < 2 -> Message("Find something to watch", "Press OK on the search box to type with your remote or voice keyboard.")
             r == null -> {}
-            r.channels.isEmpty() && r.hubs.isEmpty() -> Message("No results for \"${q.trim()}\"")
+            r.channels.isEmpty() && r.hubs.isEmpty() && r.requestable.isEmpty() -> Message("No results for \"${q.trim()}\"")
             else -> LazyColumn(contentPadding = PaddingValues(bottom = 120.dp)) {
                 if (r.channels.isNotEmpty()) item(key = "channels") {
                     CardRow("Live channels", startPad = 32.dp) {
@@ -115,6 +116,11 @@ fun SearchScreen() {
                 }
                 itemsIndexed(r.hubs, key = { i, h -> "${h.id}-$i" }) { _, hub ->
                     PlexRow("s/${hub.id}", hub.title, hub.items, hub.type == "episode", 32.dp) { Nav.openDetails(it) }
+                }
+                if (r.requestable.isNotEmpty()) item(key = "request") {
+                    CardRow("Request with Overseerr", startPad = 32.dp) {
+                        itemsIndexed(r.requestable, key = { _, d -> "${d.type}${d.id}" }) { _, d -> DiscoverCard(d, "s/os/${d.type}${d.id}") }
+                    }
                 }
             }
         }

@@ -21,6 +21,8 @@ object AppState {
     var favLists by mutableStateOf<List<Group>>(emptyList())
     var loaded by mutableStateOf(false)
     var startApplied = false
+    /** Overseerr is connected on the server (Discover). */
+    var discoverOn by mutableStateOf(false)
     /** Running on a TV (leanback) rather than a phone/tablet. */
     var isTv = true
     var checkingProfile by mutableStateOf(false)
@@ -54,6 +56,7 @@ object AppState {
         val libs = async { runCatching { Net.arr("/api/plex/libraries", 60_000) }.getOrNull() }
         val favs = async { runCatching { Net.arr("/api/iptv/fav-lists") }.getOrNull() }
         providerId = Net.prefs.providerId
+        val disc = async { runCatching { Net.obj("/api/discover/config").optBoolean("configured") }.getOrDefault(false) }
         val s = settings.await()
         if (s == null && prov.await() == null) {
             loadError = "Can't reach your Lumen server at ${Net.server}"
@@ -67,6 +70,7 @@ object AppState {
         }
         if (plexOnline) libs.await()?.let { a -> libraries = a.objects().map { Library.from(it) }.filter { it.type == "movie" || it.type == "show" } }
         favs.await()?.let { a -> favLists = a.objects().map { Group("__fav:${it.optInt("id")}", it.optString("name"), it.optInt("count")) } }
+        discoverOn = disc.await()
         loaded = true
     }
 

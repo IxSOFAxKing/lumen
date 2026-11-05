@@ -442,3 +442,16 @@ body.tv-mode .hrow { scroll-padding: 0 60px; }
 body.tv-mode h2.sec .row-menu { opacity: .7; }
 body.tv-mode .chlist .ch:focus, body.tv-mode .cat:focus { outline-offset: -3px; }
 body.tv-mode .btn { min-height: 44px; }
+
+/* ---------- Discover (Overseerr) ---------- */
+.disc-detail { position: relative; }
+.disc-backdrop { height: 180px; margin: -18px -18px 14px; background-size: cover; background-position: center 25%; border-radius: 12px 12px 0 0; mask-image: linear-gradient(#000 40%, transparent); -webkit-mask-image: linear-gradient(#000 40%, transparent); }
+.disc-main { display: flex; gap: 18px; align-items: flex-start; }
+.disc-poster { width: 150px; border-radius: 10px; flex: none; box-shadow: 0 6px 24px rgba(0,0,0,.4); }
+.disc-seasons { margin-top: 10px; display: grid; gap: 4px; }
+.disc-season { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.disc-cast { display: flex; gap: 12px; overflow-x: auto; margin-top: 16px; padding-bottom: 4px; }
+.disc-person { width: 76px; flex: none; text-align: center; }
+.disc-person img, .disc-person .ph { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; display: grid; place-items: center; margin: 0 auto 4px; background: var(--bg3, #222); }
+.disc-reqs { display: grid; gap: 8px; }
+@media (max-width: 640px) { .disc-main { flex-direction: column; } .disc-poster { width: 110px; } }

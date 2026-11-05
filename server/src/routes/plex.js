@@ -14,7 +14,7 @@ const MC = j => j?.MediaContainer || {};
 
 // ---------- Plex Home user for this request ----------
 // Each device (or browser) can pick its own Home user; otherwise the default user (or the owner) is used.
-function selectedUser(req) {
+export function selectedUser(req) {
   const c = plex.plexConf();
   const uuid = req.device?.plex_user || cookies(req).lumen_plex_user || c.defaultUser || null;
   const u = uuid && c.homeUsers?.[uuid];

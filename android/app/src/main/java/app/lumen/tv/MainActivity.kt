@@ -199,6 +199,8 @@ fun Shell(onExit: () -> Unit) {
                             is Screen.Lib -> LibraryScreen(s.lib)
                             is Screen.Detail -> DetailScreen(s)
                             is Screen.Grid -> GridScreen(s)
+                            Screen.Discover -> DiscoverScreen()
+                            is Screen.DiscoverItem -> DiscoverItemScreen(s)
                         }
                     }
                 }
@@ -217,6 +219,7 @@ private fun railEntries(): List<RailEntry> {
         if (AppState.isTv) list += RailEntry("guide", "Guide", Ico.Guide, Screen.Guide)
         list += RailEntry("dvr", "Recordings", Ico.Rec, Screen.Recordings)
     }
+    if (AppState.discoverOn) list += RailEntry("discover", "Discover", Ico.Compass, Screen.Discover)
     for (l in AppState.libraries) list += RailEntry("lib:${l.key}", l.title, if (l.type == "movie") Ico.Movie else Ico.Tv, Screen.Lib(l))
     // Same order / visibility as the web app's sidebar (Settings → Appearance → Sidebar).
     val hidden = AppState.uiList("navHidden").toSet()

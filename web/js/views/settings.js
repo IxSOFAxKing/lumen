@@ -8,12 +8,12 @@ import { tvModeSetting, setTvModeSetting, tvDetected } from '../tv.js';
 export default async function settings(el, route) {
   el.className = 'page settings';
   const tab = route.query.tab || 'plex';
-  const tabs = [['plex', 'Plex'], ['iptv', 'IPTV Providers'], ['appearance', 'Appearance'], ['playback', 'Playback'], ['devices', 'Devices'], ['transcode', 'Transcoding'], ['system', 'System']];
+  const tabs = [['plex', 'Plex'], ['iptv', 'IPTV Providers'], ['discover', 'Discover'], ['appearance', 'Appearance'], ['playback', 'Playback'], ['devices', 'Devices'], ['transcode', 'Transcoding'], ['system', 'System']];
   el.append(h('div', { class: 'page-head' }, h('h1', {}, 'Settings')),
     h('div', { class: 'tabs' }, tabs.map(([k, l]) => h('a', { class: `tab ${tab === k ? 'active' : ''}`, href: `#/settings?tab=${k}` }, l))));
   const body = h('div');
   el.append(body);
-  const fn = { plex: plexTab, iptv: iptvTab, appearance: appearanceTab, transcode: transcodeTab, playback: playbackTab, devices: devicesTab, system: systemTab }[tab] || plexTab;
+  const fn = { plex: plexTab, iptv: iptvTab, discover: discoverTab, appearance: appearanceTab, transcode: transcodeTab, playback: playbackTab, devices: devicesTab, system: systemTab }[tab] || plexTab;
   return fn(body, route);
 }
 
@@ -335,6 +335,27 @@ function accountForm(auth) {
     try { await api.put('/api/auth/account', { current: cur.value, username: user.value.trim(), password: pw.value || undefined }); toast('Login updated', { type: 'ok' }); cur.value = ''; pw.value = ''; }
     catch (ex) { toastErr(ex); }
   } }, h('b', {}, 'Change username or password'), user, cur, pw, h('button', { class: 'btn', type: 'submit', style: { justifySelf: 'start' } }, 'Save'));
+}
+
+// ---------------- Discover (Overseerr) ----------------
+async function discoverTab(el) {
+  const field = (label, control) => h('label', { class: 'field' }, label, control);
+  const cfg = await api.get('/api/discover/config').catch(() => ({}));
+  const url = h('input', { class: 'input', value: cfg.url || '', placeholder: 'http://192.168.1.20:5055' });
+  const key = h('input', { class: 'input', type: 'password', placeholder: cfg.hasKey ? 'Saved — leave empty to keep it' : 'API key (Overseerr → Settings → General)' });
+  const status = h('div', { class: 'muted small', style: { minHeight: '20px' } }, cfg.configured ? 'Connected.' : 'Not connected.');
+  el.append(h('div', { class: 'card-box', style: { maxWidth: '640px' } },
+    h('h3', { style: { marginTop: 0 } }, 'Overseerr / Jellyseerr'),
+    h('p', { class: 'muted' }, 'Browse trending titles and request movies and shows from Lumen. This is saved on your Lumen server, so the TV and phone apps use it too. Requests are made as the matching Overseerr user for the current Plex user when there is one.'),
+    field('Address', url), field('API key', key), status,
+    h('div', { class: 'row wrap', style: { gap: '8px' } },
+      btn('Save & test', async (ev) => {
+        const b = ev.currentTarget; b.disabled = true; status.textContent = 'Testing…';
+        try { const r = await api.put('/api/discover/config', { url: url.value.trim(), apiKey: key.value.trim() || undefined }); status.textContent = r.configured ? `Connected to Overseerr ${r.version || ''}${r.user ? ` as ${r.user}` : ''}.` : 'Disconnected.'; key.value = ''; await refreshStore(); }
+        catch (e) { status.textContent = e.message; }
+        b.disabled = false;
+      }, { cls: 'primary' }),
+      cfg.configured ? btn('Disconnect', async () => { await api.put('/api/discover/config', { url: '' }); status.textContent = 'Disconnected.'; url.value = ''; await refreshStore(); }, { cls: 'danger' }) : null)));
 }
 
 // ---------------- System ----------------

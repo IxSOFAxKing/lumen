@@ -23,6 +23,7 @@ const routes = {
   settings: () => import('./views/settings.js'),
   pair: () => import('./views/settings.js'),
   multiview: () => import('./views/multiview.js'),
+  discover: () => import('./views/discover.js'),
 };
 
 export function parseHash() {
@@ -71,6 +72,7 @@ export function navEntries(route = parseHash()) {
   const list = [
     { id: 'home', href: '#/home', label: 'Home', icon: 'home', active: n === 'home' },
     { id: 'search', href: '#/search', label: 'Search', icon: 'search', active: n === 'search' },
+    { id: 'discover', href: '#/discover', label: 'Discover', icon: 'compass', active: n === 'discover' },
   ];
   if (hasIptv) list.push(
     { id: 'live', href: '#/live', label: 'Live TV', icon: 'tv', active: n === 'live', group: 'iptv' },

@@ -8,6 +8,7 @@ import { config } from './config.js';
 import { db } from './db.js';
 import * as auth from './auth.js';
 import plexRoutes from './routes/plex.js';
+import discoverRoutes from './routes/discover.js';
 import iptvRoutes from './routes/iptv.js';
 import streamRoutes from './routes/stream.js';
 import { allConfig, setConfig, DEFAULTS, getConfig } from './services/settings.js';
@@ -79,6 +80,7 @@ app.get('/api/img', (req, res) => {
   serveCachedImage(`url|${u}`, () => fetch(u, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(15000), redirect: 'follow' }), res);
 });
 app.use('/api/plex', plexRoutes);
+app.use('/api/discover', discoverRoutes);
 app.use('/api/iptv', iptvRoutes);
 app.use('/api/stream', streamRoutes);
 

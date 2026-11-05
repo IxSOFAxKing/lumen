@@ -14,6 +14,8 @@ sealed class Screen(val key: String, val topLevel: Boolean) {
     data object Guide : Screen("guide", true)
     data object Recordings : Screen("dvr", true)
     data object Settings : Screen("settings", true)
+    data object Discover : Screen("discover", true)
+    data class DiscoverItem(val type: String, val id: Int, val title: String) : Screen("ditem:$type:$id", false)
     data class Lib(val lib: Library) : Screen("lib:${lib.key}", true)
     data class Detail(val ratingKey: String, val seasonKey: String? = null) : Screen("detail:$ratingKey", false)
     /** A grid of Plex items: a library A–Z, a collection, a playlist or a genre. */

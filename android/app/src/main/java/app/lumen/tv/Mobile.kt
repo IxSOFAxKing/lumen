@@ -72,6 +72,7 @@ fun BottomNav(current: Screen, modifier: Modifier = Modifier) {
             add(NavItem("Live TV", Ico.LiveTv, Screen.Live) { it == Screen.Live || it == Screen.Recordings })
             if (AppState.isTv) add(NavItem("Guide", Ico.Guide, Screen.Guide) { it == Screen.Guide })
         }
+        if (AppState.discoverOn) add(NavItem("Discover", Ico.Compass, Screen.Discover) { it == Screen.Discover })
         add(NavItem("Search", Icons.Filled.Search, Screen.Search) { it == Screen.Search })
         add(NavItem("Settings", Icons.Filled.Settings, Screen.Settings) { it == Screen.Settings })
     }
