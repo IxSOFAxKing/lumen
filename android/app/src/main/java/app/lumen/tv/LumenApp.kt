@@ -11,6 +11,8 @@ class LumenApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         Net.init(this)
+        AppState.isTv = packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK) ||
+            (getSystemService(UI_MODE_SERVICE) as android.app.UiModeManager).currentModeType == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
         Themes.apply(Net.prefs.tvTheme, Net.prefs.tvAccent)
         // Coming back to the app after 5+ minutes away asks "Who's watching?" again.
         var awaySince = 0L

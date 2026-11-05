@@ -77,7 +77,7 @@ object Menus {
         }
         ch.onAir?.let { p -> l += "Record \"${p.title}\"" to { AppScope.launch { runCatching { Repo.record(ch, p) }.onSuccess { toast(it) }.onFailure { toast(it.message) } } } }
         if (ch.archive) ch.onAir?.let { p -> l += "Watch from start" to { Nav.playCatchup(ch, p) } }
-        l += "Open the Guide" to { Nav.root(Screen.Guide) }
+        if (AppState.isTv) l += "Open the Guide" to { Nav.root(Screen.Guide) }
         current = MenuSpec(listOfNotNull(ch.num?.toString(), ch.name).joinToString("  "), ch.onAir?.let { "${fmtTime(it.start)} – ${fmtTime(it.stop)} · ${it.title}" }, l)
     }
 }

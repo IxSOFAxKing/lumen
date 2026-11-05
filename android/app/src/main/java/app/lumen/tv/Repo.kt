@@ -21,6 +21,8 @@ object AppState {
     var favLists by mutableStateOf<List<Group>>(emptyList())
     var loaded by mutableStateOf(false)
     var startApplied = false
+    /** Running on a TV (leanback) rather than a phone/tablet. */
+    var isTv = true
     var checkingProfile by mutableStateOf(false)
     /** Plex Home users to choose from at launch ("Who's watching?"), or null. */
     var askProfile by mutableStateOf<JSONObject?>(null)

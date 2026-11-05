@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -68,12 +69,12 @@ fun BottomNav(current: Screen, modifier: Modifier = Modifier) {
         AppState.libraries.firstOrNull()?.let { l -> add(NavItem("Libraries", Ico.Library, Screen.Lib(l)) { it is Screen.Lib }) }
         if (AppState.providers.isNotEmpty()) {
             add(NavItem("Live TV", Ico.LiveTv, Screen.Live) { it == Screen.Live || it == Screen.Recordings })
-            add(NavItem("Guide", Ico.Guide, Screen.Guide) { it == Screen.Guide })
+            if (AppState.isTv) add(NavItem("Guide", Ico.Guide, Screen.Guide) { it == Screen.Guide })
         }
         add(NavItem("Search", Icons.Filled.Search, Screen.Search) { it == Screen.Search })
         add(NavItem("Settings", Icons.Filled.Settings, Screen.Settings) { it == Screen.Settings })
     }
-    Row(modifier.fillMaxWidth().height(64.dp).background(C.bg2.copy(alpha = 0.97f)).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.fillMaxWidth().background(C.bg2.copy(alpha = 0.97f)).navigationBarsPadding().height(64.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         items.forEach { n ->
             val sel = n.selected(current)
             Column(Modifier.weight(1f).tapped { Nav.root(n.screen) }.padding(vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {

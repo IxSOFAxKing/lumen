@@ -5,6 +5,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
@@ -65,6 +68,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Net.init(this)
+        if (!AppState.isTv) enableEdgeToEdge()
         Nav.appContext = applicationContext
         if (!Net.prefs.isPaired) { startActivity(Intent(this, SetupActivity::class.java)); finish(); return }
         Net.onUnauthorized = {
@@ -120,7 +124,7 @@ fun Shell(onExit: () -> Unit) {
                 AppState.startApplied = true
                 when (AppState.uiStr("startPage", "home")) {
                     "live" -> if (AppState.providers.isNotEmpty()) Nav.root(Screen.Live)
-                    "guide" -> if (AppState.providers.isNotEmpty()) Nav.root(Screen.Guide)
+                    "guide" -> if (AppState.providers.isNotEmpty()) Nav.root(if (AppState.isTv) Screen.Guide else Screen.Live)
                 }
             }
         }
@@ -165,7 +169,12 @@ fun Shell(onExit: () -> Unit) {
         val portrait = LocalPortrait.current
         val showRail = screen.topLevel && !portrait
         val showBottomNav = screen.topLevel && portrait
-        Box(Modifier.fillMaxSize().padding(start = if (showRail) 64.dp else 0.dp, bottom = if (showBottomNav) 64.dp else 0.dp)) {
+        // Phones draw edge-to-edge: keep content clear of Android's navigation / gesture bar.
+        val navPad = androidx.compose.foundation.layout.WindowInsets.navigationBars.asPaddingValues()
+        val navInset = navPad.calculateBottomPadding()
+        val navLeft = navPad.calculateLeftPadding(androidx.compose.ui.unit.LayoutDirection.Ltr)
+        val navRight = navPad.calculateRightPadding(androidx.compose.ui.unit.LayoutDirection.Ltr)
+        Box(Modifier.fillMaxSize().padding(start = (if (showRail) 64.dp else 0.dp) + navLeft, end = navRight, bottom = if (showBottomNav) 64.dp + navInset else navInset)) {
             // Screens cross-fade with a slight zoom.
             androidx.compose.animation.AnimatedContent(
                 targetState = screen, contentKey = { it.key }, label = "screen",
@@ -203,7 +212,7 @@ private fun railEntries(): List<RailEntry> {
     val list = mutableListOf(RailEntry("search", "Search", Icons.Filled.Search, Screen.Search), RailEntry("home", "Home", Icons.Filled.Home, Screen.Home))
     if (AppState.providers.isNotEmpty()) {
         list += RailEntry("live", "Live TV", Ico.LiveTv, Screen.Live)
-        list += RailEntry("guide", "Guide", Ico.Guide, Screen.Guide)
+        if (AppState.isTv) list += RailEntry("guide", "Guide", Ico.Guide, Screen.Guide)
         list += RailEntry("dvr", "Recordings", Ico.Rec, Screen.Recordings)
     }
     for (l in AppState.libraries) list += RailEntry("lib:${l.key}", l.title, if (l.type == "movie") Ico.Movie else Ico.Tv, Screen.Lib(l))

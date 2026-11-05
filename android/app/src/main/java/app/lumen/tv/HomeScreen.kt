@@ -1,6 +1,8 @@
 package app.lumen.tv
 
 import androidx.compose.animation.Crossfade
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.Icon
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.ui.layout.layout
@@ -204,16 +206,25 @@ private fun HomeContent(d: HomeData) {
         Column(Modifier.fillMaxSize()) {
             HeroInfoOf(hero, compact, Modifier.fillMaxWidth().height(heroH).padding(start = 32.dp, top = if (compact) 22.dp else 34.dp, end = if (LocalPortrait.current) 20.dp else 360.dp))
             if (showBillboard) {
-                val alpha by animateFloatAsState(if (billboardFocused) 1f else 0f, label = "bb")
+                // The dots under the banner are what you select: ◀ ▶ change the featured title, OK opens its details.
                 Row(
-                    Modifier.padding(start = 32.dp).height(bbH).clipToBounds().alpha(alpha)
-                        // Remote: ▶ past "More info" / ◀ before "Play" steps through the featured titles.
-                        .onPreviewKeyEvent { ev ->
-                            if (ev.type != KeyEventType.KeyDown || d.featured.size < 2) return@onPreviewKeyEvent false
+                    Modifier.padding(start = 30.dp, bottom = 4.dp)
+                        .onFocusChanged {
+                            billboardFocused = it.hasFocus
+                            if (it.hasFocus) { focusTarget.value = null; d.featured.getOrNull(featIndex)?.let { f -> hero.value = Hero.of(f) }; scope.launch { listState.smoothScrollToItem(0) } }
+                        },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Focusable(
+                        onClick = { d.featured.getOrNull(featIndex)?.let { Nav.openDetails(it) } },
+                        focusRequester = playFr, memKey = "billboard/dots", shape = RoundedCornerShape(50), focusedScale = 1.06f, outline = false,
+                        background = Color.Transparent, focusedBackground = Color.White.copy(alpha = 0.16f),
+                        modifier = Modifier.onPreviewKeyEvent { ev ->
+                            if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                             val code = ev.nativeKeyEvent.keyCode
-                            val step = when {
-                                code == android.view.KeyEvent.KEYCODE_DPAD_RIGHT && bbBtn == 1 -> 1
-                                code == android.view.KeyEvent.KEYCODE_DPAD_LEFT && bbBtn == 0 && featIndex > 0 -> -1
+                            val step = when (code) {
+                                android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> if (d.featured.size > 1) 1 else 0
+                                android.view.KeyEvent.KEYCODE_DPAD_LEFT -> if (featIndex > 0) -1 else 0 // at the first title, ◀ goes to the side menu
                                 else -> 0
                             }
                             if (step == 0) false else {
@@ -222,22 +233,15 @@ private fun HomeContent(d: HomeData) {
                                 hero.value = Hero.of(d.featured[featIndex])
                                 true
                             }
-                        }
-                        .onFocusChanged {
-                            billboardFocused = it.hasFocus
-                            if (it.hasFocus) { focusTarget.value = null; d.featured.getOrNull(featIndex)?.let { f -> hero.value = Hero.of(f) }; scope.launch { listState.smoothScrollToItem(0) } }
                         },
-                ) {
-                    val f = d.featured.getOrNull(featIndex)
-                    PillButton(if (f?.isShowLike == true) "Watch" else if ((f?.viewOffsetMs ?: 0) > 0) "Resume" else "Play", Icons.Filled.PlayArrow, primary = true, focusRequester = playFr, memKey = "billboard/play", small = true, onFocus = { bbBtn = 0 }) {
-                        f?.let { if (it.isShowLike) Nav.openDetails(it) else Nav.play(it, resume = true) }
-                    }
-                    Spacer(Modifier.width(10.dp))
-                    PillButton("More info", Icons.Filled.Info, memKey = "billboard/info", small = true, onFocus = { bbBtn = 1 }) { f?.let { Nav.openDetails(it) } }
-                    if (d.featured.size > 1) {
-                        Spacer(Modifier.width(16.dp))
-                        Row(Modifier.align(Alignment.CenterVertically)) {
-                            d.featured.indices.forEach { i -> Box(Modifier.padding(horizontal = 3.dp).size(if (i == featIndex) 16.dp else 6.dp, 4.dp).background(if (i == featIndex) Color.White else Color.White.copy(alpha = 0.35f))) }
+                    ) { f ->
+                        Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            d.featured.indices.forEach { i ->
+                                val on = i == featIndex
+                                Box(Modifier.padding(horizontal = 3.dp).size(if (on) 18.dp else 7.dp, 7.dp).clip(RoundedCornerShape(50))
+                                    .background(if (on) Color.White else Color.White.copy(alpha = if (f) 0.55f else 0.35f)))
+                            }
+                            if (f) { Spacer(Modifier.width(10.dp)); T("◀ ▶  ·  OK for details", 11.sp, C.text2) }
                         }
                     }
                 }

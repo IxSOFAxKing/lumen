@@ -2,6 +2,7 @@ package app.lumen.tv
 
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
@@ -83,7 +84,7 @@ fun LiveScreen() {
     Row(Modifier.fillMaxSize().padding(top = 20.dp)) {
         // ---- groups ----
         val portrait = LocalPortrait.current
-        Column(Modifier.width(if (portrait) 112.dp else if (groupsFocused) 200.dp else 150.dp).fillMaxHeight().onFocusChanged { groupsFocused = it.hasFocus }) {
+        if (!portrait) Column(Modifier.width(if (groupsFocused) 200.dp else 150.dp).fillMaxHeight().onFocusChanged { groupsFocused = it.hasFocus }) {
             T("Live TV", 20.sp, weight = FontWeight.Bold, modifier = Modifier.padding(start = 20.dp, bottom = 10.dp))
             if (AppState.providers.size > 1) {
                 Box(Modifier.padding(start = 12.dp, bottom = 8.dp)) {
@@ -115,6 +116,32 @@ fun LiveScreen() {
         }
         // ---- channels ----
         Column(Modifier.weight(1f).fillMaxHeight()) {
+            if (portrait) {
+                // Phone: title, then the groups as a row of large buttons you can swipe through.
+                Row(Modifier.padding(start = 16.dp, end = 12.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    T("Live TV", 24.sp, weight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    if (AppState.providers.size > 1) Chip(prov.name, true) {
+                        val l = AppState.providers
+                        mem.data.clear(); groups = null; channels = null; group = "__all"
+                        AppState.selectProvider(l[(l.indexOf(prov) + 1) % l.size].id)
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    Chip("Recordings", false) { Nav.root(Screen.Recordings) }
+                }
+                groups?.let { gl ->
+                    val rowState = androidx.compose.foundation.lazy.rememberLazyListState(initialFirstVisibleItemIndex = gl.indexOfFirst { it.id == group }.coerceAtLeast(0))
+                    androidx.compose.foundation.lazy.LazyRow(state = rowState, contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        itemsIndexed(gl, key = { _, g -> g.id }) { _, g ->
+                            val on = g.id == group
+                            Box(Modifier.clip(RoundedCornerShape(50)).background(if (on) Color.White else Color.White.copy(alpha = 0.10f))
+                                .clickable { group = g.id }.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                                T(g.name + (g.count?.takeIf { it > 0 }?.let { "  $it" } ?: ""), 15.sp, if (on) Color.Black else C.text, if (on) FontWeight.Bold else FontWeight.Medium)
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+            }
             if (portrait) Preview.channel?.let { pc ->
                 Box(Modifier.padding(start = 8.dp, end = 12.dp, bottom = 10.dp).fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(10.dp))) { LivePreview(pc, Modifier.fillMaxSize()) }
             }
