@@ -340,11 +340,13 @@ private fun LiveBanner(st: PlayerState, clock: Long) {
             Spacer(Modifier.height(10.dp))
             // programme progress bar (full width)
             val frac = p?.progress ?: 0f
-            BoxWithConstraints(Modifier.fillMaxWidth().height(12.dp)) {
-                Box(Modifier.align(Alignment.CenterStart).fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.3f))) {
+            BoxWithConstraints(Modifier.fillMaxWidth().height(18.dp)) {
+                Box(Modifier.align(Alignment.CenterStart).fillMaxWidth().height(if (st.liveOverlay && st.liveZone == 1) 5.dp else 3.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.3f))) {
                     Box(Modifier.fillMaxHeight().fillMaxWidth(frac).background(C.accent))
                 }
-                Box(Modifier.align(Alignment.CenterStart).offset(x = maxWidth * frac - 6.dp).size(12.dp).clip(CircleShape).background(Color.White))
+                val onBar = st.liveOverlay && st.liveZone == 1
+                Box(Modifier.align(Alignment.CenterStart).offset(x = maxWidth * frac - if (onBar) 9.dp else 6.dp).size(if (onBar) 18.dp else 12.dp).clip(CircleShape)
+                    .background(if (onBar) C.accent else Color.White).border(if (onBar) 2.dp else 0.dp, Color.White, CircleShape))
             }
             Spacer(Modifier.height(8.dp))
             SplitBar(
@@ -356,21 +358,21 @@ private fun LiveBanner(st: PlayerState, clock: Long) {
                 },
                 // centre: ⏮ ⏪ ▶ ⏩ ⏭
                 centre = {
-                    LiveBtn(Ico.SkipPrev, st.liveBtn == 0, index = 0)
-                    LiveBtn(Ico.Rewind, st.liveBtn == 1, index = 1)
-                    LiveBtn(if (st.playing) Ico.Pause else Icons.Filled.PlayArrow, st.liveBtn == 2, big = true, index = 2)
-                    LiveBtn(Ico.Forward, st.liveBtn == 3, index = 3)
-                    LiveBtn(Ico.SkipNext, st.liveBtn == 4, index = 4)
+                    LiveBtn(Ico.SkipPrev, (st.liveZone == 0 && st.liveBtn == 0), index = 0)
+                    LiveBtn(Ico.Rewind, (st.liveZone == 0 && st.liveBtn == 1), index = 1)
+                    LiveBtn(if (st.playing) Ico.Pause else Icons.Filled.PlayArrow, (st.liveZone == 0 && st.liveBtn == 2), big = true, index = 2)
+                    LiveBtn(Ico.Forward, (st.liveZone == 0 && st.liveBtn == 3), index = 3)
+                    LiveBtn(Ico.SkipNext, (st.liveZone == 0 && st.liveBtn == 4), index = 4)
                 },
                 // right: restart, LIVE, record
                 right = {
-                    LiveBtn(Ico.Restart, st.liveBtn == 5, index = 5)
-                    Box(Modifier.clip(RoundedCornerShape(5.dp)).background(if (st.liveBtn == 6) Color.White else Color.Transparent).tap { playerActions?.liveButton(6) }
-                        .border(1.5.dp, if (st.liveBtn == 6) Color.White else C.text, RoundedCornerShape(5.dp)).padding(horizontal = 7.dp, vertical = 3.dp)) {
-                        T("LIVE", 12.sp, if (st.liveBtn == 6) Color.Black else C.text, FontWeight.Bold)
+                    LiveBtn(Ico.Restart, (st.liveZone == 0 && st.liveBtn == 5), index = 5)
+                    Box(Modifier.clip(RoundedCornerShape(5.dp)).background(if ((st.liveZone == 0 && st.liveBtn == 6)) Color.White else Color.Transparent).tap { playerActions?.liveButton(6) }
+                        .border(1.5.dp, if ((st.liveZone == 0 && st.liveBtn == 6)) Color.White else C.text, RoundedCornerShape(5.dp)).padding(horizontal = 7.dp, vertical = 3.dp)) {
+                        T("LIVE", 12.sp, if ((st.liveZone == 0 && st.liveBtn == 6)) Color.Black else C.text, FontWeight.Bold)
                     }
-                    Box(Modifier.size(36.dp).clip(CircleShape).background(if (st.liveBtn == 7) Color.White else Color.Transparent).tap { playerActions?.liveButton(7) }, contentAlignment = Alignment.Center) {
-                        Box(Modifier.size(16.dp).clip(CircleShape).background(if (st.liveBtn == 7) C.live else C.text))
+                    Box(Modifier.size(36.dp).clip(CircleShape).background(if ((st.liveZone == 0 && st.liveBtn == 7)) Color.White else Color.Transparent).tap { playerActions?.liveButton(7) }, contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(16.dp).clip(CircleShape).background(if ((st.liveZone == 0 && st.liveBtn == 7)) C.live else C.text))
                     }
                 },
             )

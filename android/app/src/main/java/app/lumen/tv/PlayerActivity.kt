@@ -82,6 +82,9 @@ class PlayerState {
     var subOffsetMs by mutableIntStateOf(0)
     /** TiviMate-style live bar: selected button (0 prev ch, 1 rewind, 2 play, 3 forward, 4 next ch, 5 restart, 6 live, 7 record). */
     var liveBtn by mutableIntStateOf(2)
+    /** Live overlay opened with OK (not just the banner after a channel change); 0 = buttons, 1 = seek bar. */
+    var liveOverlay by mutableStateOf(false)
+    var liveZone by mutableIntStateOf(0)
     var badges by mutableStateOf<List<String>>(emptyList())
     var providerName by mutableStateOf("")
     var poster by mutableStateOf<String?>(null)
@@ -157,7 +160,7 @@ class PlayerActivity : ComponentActivity() {
                     st.panel != null -> st.panel = null
                     st.chList -> st.chList = false
                     st.controls -> { st.controls = false; st.zone = 0 }
-                    else -> { st.liveBtn = 2; poke() }
+                    else -> if (st.live) openLiveOverlay() else poke()
                 }
             }
             override fun button(id: String) { st.zone = 1; st.btn = st.buttons.indexOfFirst { it.id == id }.coerceAtLeast(0); activate(id) }
@@ -386,6 +389,7 @@ class PlayerActivity : ComponentActivity() {
         }
         if (st.scrub != null && now > scrubCommitAt) commitScrub()
         if (st.sleepAt > 0 && now >= st.sleepAt) { finish(); return }
+        if (!st.controls && st.liveOverlay) { st.liveOverlay = false; st.liveZone = 0 }
         updateBadges()
         if (st.message != null && now > hideAt + 2000) st.message = null
         if (st.digits.isNotEmpty() && now - digitsAt > 1500) commitDigits()
@@ -957,20 +961,30 @@ class PlayerActivity : ComponentActivity() {
     private fun nextItem(p: Panel, from: Int): Int { var i = from + 1; while (i < p.items.size && p.items[i].header) i++; return if (i < p.items.size) i else from }
     private fun prevItem(p: Panel, from: Int): Int { var i = from - 1; while (i >= 0 && p.items[i].header) i--; return if (i >= 0) i else from }
 
+    private fun openLiveOverlay() { st.liveBtn = 2; st.liveZone = 0; st.liveOverlay = true; poke() }
+
     private fun liveKey(code: Int, repeat: Int, back: Boolean): Boolean {
+        val ov = st.controls && st.liveOverlay
         if (code in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9) {
             st.digits = (st.digits + (code - KeyEvent.KEYCODE_0)).takeLast(5); digitsAt = System.currentTimeMillis(); poke(); return true
         }
         when {
             back -> if (st.controls) st.controls = false else finish()
+            // Overlay open (OK): ▲ ▼ move between the seek bar and the buttons instead of changing channel.
+            ov && code == KeyEvent.KEYCODE_DPAD_UP -> { st.liveZone = 1; poke() }
+            ov && code == KeyEvent.KEYCODE_DPAD_DOWN -> { st.liveZone = 0; poke() }
             code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_CHANNEL_UP || code == KeyEvent.KEYCODE_PAGE_UP -> zap(-1)
             code == KeyEvent.KEYCODE_DPAD_DOWN || code == KeyEvent.KEYCODE_CHANNEL_DOWN || code == KeyEvent.KEYCODE_PAGE_DOWN -> zap(1)
-            // Bar showing: ◀ ▶ move between its buttons, OK presses the selected one (like TiviMate).
-            st.controls && code == KeyEvent.KEYCODE_DPAD_LEFT -> { st.liveBtn = (st.liveBtn - 1).coerceAtLeast(0); poke() }
-            st.controls && code == KeyEvent.KEYCODE_DPAD_RIGHT -> { st.liveBtn = (st.liveBtn + 1).coerceAtMost(7); poke() }
-            st.controls && isOk(code) -> { if (repeat == 0) liveAction(st.liveBtn); poke() }
-            // Bar hidden: OK shows it, ◀ opens the channel list, ▶ the programme guide.
-            isOk(code) -> { if (repeat == 0) { st.liveBtn = 2; poke() } }
+            // Seek bar selected: ◀ ▶ rewind / forward, OK play / pause.
+            ov && st.liveZone == 1 && code == KeyEvent.KEYCODE_DPAD_LEFT -> { liveAction(1); poke() }
+            ov && st.liveZone == 1 && code == KeyEvent.KEYCODE_DPAD_RIGHT -> { liveAction(3); poke() }
+            ov && st.liveZone == 1 && isOk(code) -> { if (repeat == 0) togglePause(); poke() }
+            // Buttons selected: ◀ ▶ move between them, OK presses the selected one (like TiviMate).
+            ov && code == KeyEvent.KEYCODE_DPAD_LEFT -> { st.liveBtn = (st.liveBtn - 1).coerceAtLeast(0); poke() }
+            ov && code == KeyEvent.KEYCODE_DPAD_RIGHT -> { st.liveBtn = (st.liveBtn + 1).coerceAtMost(7); poke() }
+            ov && isOk(code) -> { if (repeat == 0) liveAction(st.liveBtn); poke() }
+            // Overlay closed (or just the banner after a channel change): OK opens it, ◀ channel list, ▶ programme guide.
+            isOk(code) -> { if (repeat == 0) openLiveOverlay() }
             code == KeyEvent.KEYCODE_DPAD_LEFT -> { if (repeat == 0 && Playback.zapList.size > 1) { st.chList = true; st.controls = false } }
             code == KeyEvent.KEYCODE_LAST_CHANNEL -> prevChannel?.let { pc -> Playback.zapList.indexOfFirst { it.id == pc.id }.takeIf { it >= 0 }?.let { zapTo(it) } }
             code == KeyEvent.KEYCODE_MENU || code == KeyEvent.KEYCODE_SETTINGS -> source?.let { st.panel = liveOptions(it); st.controls = true; poke() }
