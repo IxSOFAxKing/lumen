@@ -337,6 +337,13 @@ function accountForm(auth) {
   } }, h('b', {}, 'Change username or password'), user, cur, pw, h('button', { class: 'btn', type: 'submit', style: { justifySelf: 'start' } }, 'Save'));
 }
 
+/** Per browser: show "Who's watching?" when Lumen opens. */
+function askProfileCheck() {
+  const on = localStorage.getItem('lumen.askProfile') !== 'false';
+  return h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: on, onChange: e => localStorage.setItem('lumen.askProfile', String(e.target.checked)) }),
+    h('span', {}, 'Ask "Who\'s watching?" when Lumen opens (this browser)', h('div', { class: 'dim small' }, 'Pick the Plex Home user each time. Only shown when your Plex account has more than one user.')));
+}
+
 // ---------------- Discover (Overseerr) ----------------
 async function discoverTab(el) {
   const field = (label, control) => h('label', { class: 'field' }, label, control);
@@ -540,8 +547,16 @@ async function appearanceTab(el) {
       field('Skip forward', chips([[10, '10s'], [15, '15s'], [30, '30s'], [60, '60s']], 'seekForward'))),
     check('autoplayNext', 'Autoplay next episode'),
     field('Autoplay countdown', range('autoplayCountdown', 3, 30, 1, v => `${v}s`)),
-    check('autoSkipIntro', 'Automatically skip intros', 'Uses Plex intro markers. Otherwise a "Skip Intro" button is shown.'),
-    check('autoSkipCredits', 'Automatically skip credits', 'Jumps to the next episode, or to the end, when credits start.'),
+    h('div', { class: 'set-grid', style: { marginTop: '10px' } },
+      field('Skip intro', chips([['off', 'Off'], ['button', 'Show button'], ['auto', 'Skip automatically']], 'skipIntroMode')),
+      field('Skip credits', chips([['off', 'Off'], ['button', 'Show button'], ['auto', 'Skip automatically']], 'skipCreditsMode')),
+      field('Auto skip delay', chips([[0, 'Immediately'], [3, '3s'], [5, '5s'], [10, '10s']], 'autoSkipDelay')),
+      field('Rewind on resume', chips([[0, 'Off'], [5, '5s'], [10, '10s'], [15, '15s'], [30, '30s']], 'rewindOnResume')),
+      field('Default sleep timer', chips([[0, 'Off'], [30, '30 min'], [60, '1 h'], [90, '90 min'], [120, '2 h']], 'defaultSleep')),
+      field('Maximum volume', chips([[100, '100%'], [125, '125%'], [150, '150%'], [200, '200%']], 'maxVolume'))),
+    check('forceFallbackMarkers', 'Find intros & credits from chapter names', 'Uses chapter titles like "Intro" or "Credits" even when Plex has markers (always used when it has none).'),
+    check('chapterMarks', 'Show chapter marks on the seek bar'),
+    askProfileCheck(),
     h('div', { class: 'set-grid', style: { marginTop: '10px' } },
       field('When resuming', chips([['resume', 'Resume'], ['start', 'Start over'], ['ask', 'Ask me']], 'resumeMode')),
       field('Mark as watched at', chips([[90, '90%'], [95, '95%'], ['credits', 'When credits start']], 'watchedAt'))),

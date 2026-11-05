@@ -45,6 +45,10 @@ class Player {
       if (this.desc?.session) api.post('/api/plex/ping', { session: this.desc.session }).catch(() => {});
     }, 20000));
     this.timers.push(setInterval(() => this.tick(), 500));
+    const ds = Number(window.lumenSettings?.ui?.defaultSleep) || 0;
+    if (ds && !meta.live) this.sleepAt = Date.now() + ds * 60000; // Settings → Player → Default sleep timer
+    this.timers.push(setInterval(() => { if (this.sleepAt && Date.now() >= this.sleepAt) { toast('Sleep timer: playback stopped'); this.close(); } }, 5000));
+    this.applyBoost();
     this.onKey = this.onKey.bind(this);
     document.addEventListener('keydown', this.onKey);
     this.onUnload = () => releaseDesc(this.desc, { beacon: true });
@@ -116,6 +120,7 @@ class Player {
   // ---------- Loading ----------
   load(desc, meta = this.meta) {
     this.engine?.destroy();
+    this.audioCtx?.close().catch(() => {});
     if (this.desc && this.desc !== desc) releaseDesc(this.desc);
     this.desc = desc; this.meta = meta;
     this.upNextDismissed = false; clearInterval(this.upNextTimer); this.autoSkipped = new Set();
@@ -243,20 +248,28 @@ class Player {
     for (const m of this.meta.markers || []) {
       this.marks.append(h('div', { class: 'mk', style: { left: `${(m.start / d) * 100}%`, width: `${((m.end - m.start) / d) * 100}%` } }));
     }
+    // Chapter marks (Settings → Player)
+    if (window.lumenSettings?.ui?.chapterMarks !== false) {
+      for (const c of (this.meta.chapters || []).slice(1)) this.marks.append(h('div', { class: 'chap', style: { left: `${(c.start / d) * 100}%` } }));
+    }
   }
   updateSkip(p, d) {
     const pu = window.lumenSettings?.ui || {};
     const m = (this.meta.markers || []).find(x => p >= x.start && p < x.end - 1);
-    // Automatic skipping (Settings → Appearance → Player)
-    if (m && !(this.autoSkipped ||= new Set()).has(m)) {
-      if (m.type === 'intro' && pu.autoSkipIntro) { this.autoSkipped.add(m); toast('Skipped intro'); this.seek(m.end); return; }
-      if (m.type === 'credits' && pu.autoSkipCredits) {
+    // Skip intro / credits: Off, Show button, or Skip automatically (after an optional delay) — Settings → Player.
+    const modeOf = t => t === 'intro' ? (pu.skipIntroMode || (pu.autoSkipIntro ? 'auto' : 'button')) : t === 'credits' ? (pu.skipCreditsMode || (pu.autoSkipCredits ? 'auto' : 'button')) : 'button';
+    if (m && modeOf(m.type) === 'auto' && !(this.autoSkipped ||= new Set()).has(m)) {
+      if (this.markerSince?.m !== m) this.markerSince = { m, t: Date.now() };
+      if (Date.now() - this.markerSince.t >= (Number(pu.autoSkipDelay) || 0) * 1000) {
         this.autoSkipped.add(m);
-        if (this.meta.next && pu.autoplayNext !== false) { this.meta.next.run(); return; }
-        if (!this.meta.next) { toast('Skipped credits'); this.seek(d - 1); return; }
+        if (m.type === 'intro') { toast('Skipped intro'); this.seek(m.end); return; }
+        if (m.type === 'credits') {
+          if (this.meta.next && pu.autoplayNext !== false) { this.meta.next.run(); return; }
+          if (!this.meta.next) { toast('Skipped credits'); this.seek(d - 1); return; }
+        }
       }
     }
-    const wantSkip = m && (m.type === 'intro' || m.type === 'commercial' || (m.type === 'credits' && !this.meta.next));
+    const wantSkip = m && modeOf(m.type) !== 'off' && (m.type === 'intro' || m.type === 'commercial' || (m.type === 'credits' && !this.meta.next));
     if (wantSkip && this.skipFor !== m) {
       this.skipFor = m;
       this.skipEl?.remove();
@@ -375,6 +388,9 @@ class Player {
       const anySel = (m.subtitles || []).some(s => s.selected);
       items.push(opt('Off', !anySel, () => this.reload({ subtitle: 0 })));
       for (const s of m.subtitles || []) items.push(opt(s.label, s.selected, () => this.reload({ subtitle: s.id })));
+      // Subtitle sync: shift the loaded subtitle cues (works for text subtitles in the browser).
+      items.push(h('h5', {}, `Subtitle sync${this.subShift ? ` (${this.subShift > 0 ? '+' : ''}${this.subShift.toFixed(2)}s)` : ''}`));
+      for (const [dlt, l] of [[-1, 'Earlier 1s'], [-0.25, 'Earlier ¼s'], [0.25, 'Later ¼s'], [1, 'Later 1s'], [0, 'Reset']]) items.push(opt(l, false, () => this.shiftSubs(dlt)));
     } else if (kind === 'quality') {
       if (m.qualities?.length) {
         items.push(h('h5', {}, 'Quality'));
@@ -391,6 +407,20 @@ class Player {
           items.push(opt(label, cur.includes(val) || (val === 'direct' && cur.startsWith('plex-directplay')), () => this.reload({ mode: val })));
         }
       }
+      if (m.isPlex && m.reload) {
+        items.push(h('h5', {}, 'Audio boost'));
+        for (const [v, l] of [[100, 'Off'], [150, '150%'], [200, '200%'], [300, '300%']]) items.push(opt(l, (m.audioBoost || 100) === v, () => this.reload({ audioBoost: v })));
+      }
+      if (m.chapters?.length > 1) {
+        items.push(h('h5', {}, 'Chapters'));
+        const p = this.pos();
+        const cur = m.chapters.findLastIndex(c => p >= c.start);
+        m.chapters.forEach((c, i) => items.push(opt(`${fmtDuration(c.start)}  ${c.title}`, i === cur, () => this.seek(c.start))));
+      }
+      items.push(h('h5', {}, 'Sleep timer'));
+      const left = this.sleepAt ? Math.max(1, Math.round((this.sleepAt - Date.now()) / 60000)) : 0;
+      for (const mins of [0, 15, 30, 60, 90, 120]) items.push(opt(mins ? `${mins} minutes` : 'Off', mins === 0 ? !this.sleepAt : false, () => { this.sleepAt = mins ? Date.now() + mins * 60000 : 0; toast(mins ? `Stopping in ${mins} minutes` : 'Sleep timer off'); }));
+      if (left) items.push(h('div', { class: 'dim small', style: { padding: '2px 12px 6px' } }, `${left} min left`));
       items.push(h('h5', {}, 'Speed'));
       for (const r of [0.5, 0.75, 1, 1.25, 1.5, 2]) items.push(opt(`${r}×`, this.video.playbackRate === r, () => { this.video.playbackRate = r; }));
       items.push(h('h5', {}, 'Aspect'));
@@ -399,6 +429,30 @@ class Player {
     this.menuEl = h('div', { class: 'p-menu', dataset: { kind }, onClick: e => e.stopPropagation() }, items);
     this.el.append(this.menuEl);
     this.poke();
+  }
+
+  /** Move every subtitle cue by delta seconds (0 = undo). */
+  shiftSubs(delta) {
+    const by = delta === 0 ? -(this.subShift || 0) : delta;
+    this.subShift = delta === 0 ? 0 : (this.subShift || 0) + delta;
+    for (const t of this.video.textTracks) {
+      for (const c of Array.from(t.cues || [])) { c.startTime = Math.max(0, c.startTime + by); c.endTime = Math.max(0, c.endTime + by); }
+    }
+    toast(this.subShift ? `Subtitles ${this.subShift > 0 ? 'later' : 'earlier'} by ${Math.abs(this.subShift).toFixed(2)}s` : 'Subtitle timing reset');
+  }
+
+  /** Volume above 100% (Settings → Player → Maximum volume) through Web Audio. */
+  applyBoost() {
+    const pct = Number(window.lumenSettings?.ui?.maxVolume) || 100;
+    if (pct <= 100 || this.gain) { if (this.gain) this.gain.gain.value = pct / 100; return; }
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = ctx.createMediaElementSource(this.video);
+      this.gain = ctx.createGain(); this.gain.gain.value = pct / 100;
+      src.connect(this.gain).connect(ctx.destination);
+      this.audioCtx = ctx;
+      this.video.addEventListener('play', () => ctx.resume().catch(() => {}));
+    } catch { /* not available */ }
   }
 
   toggleInfo() {

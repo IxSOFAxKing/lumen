@@ -7,6 +7,7 @@ const uiPrefs = () => window.lumenSettings?.ui || {};
 /** Apply Settings → Appearance → Player → "When resuming": resume, start over, or ask. */
 async function resolveResume(offset, title) {
   if (!offset || offset < 30) return offset || 0;
+  offset = Math.max(0, offset - (Number(uiPrefs().rewindOnResume) || 0)); // Settings → Player → Rewind on resume
   const mode = uiPrefs().resumeMode || 'resume';
   if (mode === 'start') return 0;
   if (mode !== 'ask') return offset;
@@ -18,6 +19,21 @@ async function resolveResume(offset, title) {
 }
 /** Fraction of an item after which it counts as watched (Settings → Player). */
 const watchedFraction = () => { const w = uiPrefs().watchedAt; return w === 'credits' ? null : Math.min(0.99, Math.max(0.5, (Number(w) || 90) / 100)); };
+
+/** Intros / credits from chapter titles (Settings → Player), when Plex has no markers or when forced. */
+function withChapterMarkers(markers, chapters) {
+  const u = uiPrefs();
+  const force = !!u.forceFallbackMarkers;
+  if (!force && markers.some(m => m.type === 'intro' || m.type === 'credits')) return markers;
+  const re = (p, d) => { try { return new RegExp(p || d, 'i'); } catch { return new RegExp(d, 'i'); } };
+  const intro = re(u.introPattern, '\\b(intro|opening|op)\\b'), credits = re(u.creditsPattern, '\\b(credits|ending|outro|ed)\\b');
+  const found = chapters.map(c => {
+    const t = c.tag || '';
+    const start = (c.startTimeOffset || 0) / 1000, end = (c.endTimeOffset || 0) / 1000;
+    return intro.test(t) ? { type: 'intro', start, end } : credits.test(t) ? { type: 'credits', start, end } : null;
+  }).filter(Boolean);
+  return force ? (found.length ? found : markers) : [...markers, ...found];
+}
 
 const PLEX_QUALITIES = [
   { value: 'auto', label: 'Auto (direct play when possible)' }, { value: 'original', label: 'Original (direct stream)' },
@@ -40,12 +56,13 @@ async function plexNext(item) {
  * Play a Plex item. opts: { offset, queue: [items], queueIndex }
  */
 export async function playPlex(ratingKey, opts = {}) {
-  const state = { quality: opts.quality, audio: undefined, subtitle: undefined, mediaIndex: opts.mediaIndex || 0, forceTranscode: false, transcoder: undefined };
+  const state = { quality: opts.quality, audio: undefined, subtitle: undefined, mediaIndex: opts.mediaIndex || 0, forceTranscode: false, transcoder: undefined, audioBoost: 100 };
   const u = uiPrefs();
   const prefs = { audioLang: u.audioLang, subtitleMode: u.subtitleMode, subtitleLang: u.subtitleLang, subtitleSize: u.subtitleSize, qualityLocal: u.qualityLocal, qualityRemote: u.qualityRemote };
   const fetchDesc = async (offset) => api.post('/api/plex/play', {
     ratingKey, offset, quality: state.quality, mediaIndex: state.mediaIndex, prefs, client: window.LumenNative ? 'native' : 'web',
-    audioStreamID: state.audio, subtitleStreamID: state.subtitle, forceTranscode: state.forceTranscode, transcoder: state.transcoder,
+    audioStreamID: state.audio, subtitleStreamID: state.subtitle, forceTranscode: state.forceTranscode || state.audioBoost !== 100, transcoder: state.transcoder,
+    audioBoost: state.audioBoost,
   });
   try {
     const start = await resolveResume(opts.offset || 0);
@@ -62,7 +79,9 @@ export async function playPlex(ratingKey, opts = {}) {
     const buildMeta = (d) => ({
       title: item.type === 'episode' ? item.grandparentTitle : (item.title || d.title),
       subtitle, duration: d.duration,
-      markers: (d.markers || []).map(m => ({ type: m.type, start: m.startTimeOffset / 1000, end: m.endTimeOffset / 1000 })),
+      markers: withChapterMarkers((d.markers || []).map(m => ({ type: m.type, start: m.startTimeOffset / 1000, end: m.endTimeOffset / 1000 })), d.chapters || []),
+      chapters: (d.chapters || []).map((c, i) => ({ title: c.tag || `Chapter ${i + 1}`, start: (c.startTimeOffset || 0) / 1000 })),
+      audioBoost: state.audioBoost, isPlex: true,
       audio: d.audio, subtitles: d.subtitles, qualities: PLEX_QUALITIES, quality: d.quality,
       versions: d.media, mediaIndex: state.mediaIndex,
       next: nextItem ? {
@@ -79,7 +98,8 @@ export async function playPlex(ratingKey, opts = {}) {
           if (reached) { scrobbled = true; api.post(`/api/plex/watched/${ratingKey}`).catch(() => {}); }
         }
       },
-      reload: async ({ offset, mode, audio, subtitle: sub, quality, mediaIndex }) => {
+      reload: async ({ offset, mode, audio, subtitle: sub, quality, mediaIndex, audioBoost }) => {
+        if (audioBoost !== undefined) state.audioBoost = audioBoost;
         if (audio !== undefined) state.audio = audio;
         if (sub !== undefined) state.subtitle = sub;
         if (quality !== undefined) state.quality = quality;

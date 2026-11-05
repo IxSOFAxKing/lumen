@@ -52,6 +52,8 @@ export const DEFAULTS = {
     controlsHideSeconds: 3, playerButtons: {},
     clock: 'off',
     autoSkipIntro: false, autoSkipCredits: false,
+    skipIntroMode: 'button', skipCreditsMode: 'button', autoSkipDelay: 0, forceFallbackMarkers: false, chapterMarks: true,
+    rewindOnResume: 0, defaultSleep: 0, maxVolume: 100,
     seekBack: 10, seekForward: 30,
     subtitleSize: 100, subtitleColor: '#ffffff', subtitleBg: 60,
     // TV Guide

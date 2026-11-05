@@ -17,10 +17,19 @@ function channelCard(ch, list, title) {
       now ? h('div', { class: 'small dim' }, `${fmtTime(now.start)} – ${fmtTime(now.stop)}`) : null));
 }
 
+/** Plex title-logo artwork (clearLogo) for the banner, like Plex / Plezy. */
+export function clearLogo(m) {
+  const img = (m.Image || []).find(i => i.type === 'clearLogo')?.url;
+  if (img) return img;
+  const key = m.type === 'episode' ? m.grandparentRatingKey : m.type === 'season' ? m.parentRatingKey : m.ratingKey;
+  return key && ['movie', 'show', 'episode', 'season'].includes(m.type) ? `/library/metadata/${key}/clearLogo` : null;
+}
+
 function heroSlide(m) {
   const isShow = m.type === 'show';
   const resume = m.viewOffset ? m.viewOffset / 1000 : 0;
   return {
+    logo: clearLogo(m) ? plexImg(clearLogo(m), 800, 320) : null,
     art: plexImg(m.art, 1920, 1080),
     kicker: m._kicker || (isShow ? 'New episodes' : 'Recently added'),
     title: m.title,

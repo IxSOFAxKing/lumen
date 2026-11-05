@@ -91,6 +91,24 @@ export function confirmDialog(title, text, { okLabel = 'OK', danger = false } = 
   });
 }
 
+// ---------- Context menu (right-click / ⋯) ----------
+export function contextMenu(items, x, y, title) {
+  document.querySelector('.ctx-menu')?.remove();
+  const menu = h('div', { class: 'ctx-menu', role: 'menu' },
+    title ? h('div', { class: 'ctx-title' }, title) : null,
+    items.map(([label, fn]) => h('button', { class: 'ctx-item', role: 'menuitem', onClick: e => { e.stopPropagation(); close(); fn(); } }, label)));
+  const close = () => { menu.remove(); document.removeEventListener('mousedown', outside, true); document.removeEventListener('keydown', onKey, true); window.removeEventListener('scroll', close, true); };
+  const outside = e => { if (!menu.contains(e.target)) close(); };
+  const onKey = e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+  document.body.append(menu);
+  const r = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(x, innerWidth - r.width - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(y, innerHeight - r.height - 8))}px`;
+  setTimeout(() => { document.addEventListener('mousedown', outside, true); document.addEventListener('keydown', onKey, true); window.addEventListener('scroll', close, true); });
+  menu.querySelector('.ctx-item')?.focus();
+  return close;
+}
+
 // ---------- Cards ----------
 export function card({ img, title, sub, progress, corner, onClick, wide, square, placeholder, played }) {
   const art = h('div', { class: 'art' },
@@ -140,7 +158,8 @@ export function heroCarousel(slides, { interval = 8000, autoplay = true } = {}) 
     h('img', { class: 'bgimg', src: s.art, alt: '', loading: i < 2 ? 'eager' : 'lazy', decoding: 'async' }),
     h('div', { class: 'info' },
       s.kicker ? h('div', { class: 'kicker' }, s.kicker) : null,
-      h('h1', {}, s.title),
+      // Title logo when Plex has one, otherwise the title.
+      s.logo ? h('img', { class: 'hero-logo', src: s.logo, alt: s.title, onError: e => e.target.replaceWith(h('h1', {}, s.title)) }) : h('h1', {}, s.title),
       s.meta?.length ? h('div', { class: 'meta' }, s.meta.filter(Boolean).map(m => h('span', {}, m))) : null,
       s.summary ? h('div', { class: 'sum' }, s.summary) : null,
       h('div', { class: 'row wrap' },

@@ -100,7 +100,9 @@ function renderNav(route) {
     if (i > 0 && (e.group || 'main') !== (entries[i - 1].group || 'main')) kids.push(h('div', { class: 'nav-sec' }));
     kids.push(item(e));
   });
-  kids.push(h('div', { class: 'spacer' }), item({ href: '#/settings', label: 'Settings', icon: 'settings', active: route.name === 'settings' }));
+  kids.push(h('div', { class: 'spacer' }));
+  if (store.plex?.online) kids.push(h('a', { class: 'nav-item', href: '#', title: 'Switch user', html: `${icon('users')}<span>Switch user</span>`, onClick: e => { e.preventDefault(); askWhoIsWatching(true); } }));
+  kids.push(item({ href: '#/settings', label: 'Settings', icon: 'settings', active: route.name === 'settings' }));
   nav.replaceChildren(...kids);
 }
 export function rerenderNav() { renderNav(parseHash()); }
@@ -155,6 +157,39 @@ async function showLogin({ setup = false } = {}) {
   setTimeout(() => user.focus(), 50);
 }
 
+// ---------- Who's watching? (Plex Home users) ----------
+/** Shown once per browser session when the Plex account has several users (Settings → Playback to turn off). */
+export async function askWhoIsWatching(force = false) {
+  if (window.LumenNative || !store.plex?.online) return;
+  if (!force && (localStorage.getItem('lumen.askProfile') === 'false' || sessionStorage.getItem('lumen.profileChosen'))) return;
+  let d;
+  try { d = await api.get('/api/plex/users'); } catch { return; }
+  if (!d?.users || d.users.length < 2) return;
+  await new Promise(resolve => {
+    const err = h('div', { class: 'small', style: { color: 'var(--err)', minHeight: '20px', marginTop: '14px' } });
+    const pick = async (u, pin) => {
+      try {
+        await api.post('/api/plex/users/switch', { uuid: u.uuid, pin });
+        sessionStorage.setItem('lumen.profileChosen', '1'); api.clearCache(); box.remove(); resolve();
+        if (force) window.dispatchEvent(new HashChangeEvent('hashchange'));
+      } catch (e) {
+        if (e.status === 403 && !pin) {
+          const p = prompt(`PIN for ${u.title}`);
+          if (p) pick(u, p);
+        } else err.textContent = e.message;
+      }
+    };
+    const box = h('div', { class: 'profiles' },
+      h('h1', {}, 'Who\'s watching?'),
+      h('div', { class: 'profile-list' }, d.users.map(u => h('button', { class: `profile ${u.uuid === d.current ? 'cur' : ''}`, onClick: () => pick(u) },
+        u.thumb ? h('img', { src: u.thumb, alt: '' }) : h('div', { class: 'ph' }, (u.title || '?')[0].toUpperCase()),
+        h('span', {}, u.title), u.restricted ? h('small', {}, 'Kids') : null))),
+      err,
+      force ? h('button', { class: 'btn ghost', onClick: () => { box.remove(); resolve(); } }, 'Cancel') : null);
+    document.body.append(box);
+  });
+}
+
 // ---------- Reminders ----------
 const notified = new Set();
 async function checkReminders() {
@@ -182,6 +217,7 @@ let started = false;
 async function start() {
   if (started) return; started = true;
   await refreshStore();
+  await askWhoIsWatching();
   window.addEventListener('hashchange', render);
   // Show the login screen instead of reloading (a reload loop would re-request everything).
   let loggingIn = false;
