@@ -433,6 +433,7 @@ async function appearanceTab(el) {
   };
   const card = (title, ...kids) => h('div', { class: 'card-box', style: { marginBottom: '18px' } }, h('h3', { style: { marginTop: 0 } }, title), ...kids);
   const field = (label, control, hint) => h('div', { class: 'field', style: { marginBottom: '16px' } }, h('div', { style: { marginBottom: '6px', color: 'var(--text-2)', fontSize: '13px' } }, label), control, hint ? h('div', { class: 'dim small', style: { marginTop: '4px' } }, hint) : null);
+  const VOL_OFFSET = [[-6, '−6 dB'], [-3, '−3 dB'], [0, 'Off'], [3, '+3 dB'], [6, '+6 dB'], [9, '+9 dB'], [12, '+12 dB']];
   const chips = (opts, key, extra = {}) => {
     const box = h('div', { class: 'chips' });
     const draw = () => box.replaceChildren(...opts.map(([v, l]) => h('button', { class: `chip ${String(u[key]) === String(v) ? 'active' : ''}`, onClick: () => { save({ [key]: v }, extra); draw(); } }, l)));
@@ -553,7 +554,9 @@ async function appearanceTab(el) {
       field('Auto skip delay', chips([[0, 'Immediately'], [3, '3s'], [5, '5s'], [10, '10s']], 'autoSkipDelay')),
       field('Rewind on resume', chips([[0, 'Off'], [5, '5s'], [10, '10s'], [15, '15s'], [30, '30s']], 'rewindOnResume')),
       field('Default sleep timer', chips([[0, 'Off'], [30, '30 min'], [60, '1 h'], [90, '90 min'], [120, '2 h']], 'defaultSleep')),
-      field('Maximum volume', chips([[100, '100%'], [125, '125%'], [150, '150%'], [200, '200%']], 'maxVolume'))),
+      field('Maximum volume', chips([[100, '100%'], [125, '125%'], [150, '150%'], [200, '200%']], 'maxVolume')),
+      field('Live TV volume offset', chips(VOL_OFFSET, 'liveVolumeOffset')),
+      field('Plex volume offset', chips(VOL_OFFSET, 'plexVolumeOffset'))),
     check('forceFallbackMarkers', 'Find intros & credits from chapter names', 'Uses chapter titles like "Intro" or "Credits" even when Plex has markers (always used when it has none).'),
     check('chapterMarks', 'Show chapter marks on the seek bar'),
     askProfileCheck(),

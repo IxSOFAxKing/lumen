@@ -516,15 +516,22 @@ class Player {
     toast(this.subShift ? `Subtitles ${this.subShift > 0 ? 'later' : 'earlier'} by ${Math.abs(this.subShift).toFixed(2)}s` : 'Subtitle timing reset');
   }
 
-  /** Volume above 100% (Settings → Player → Maximum volume) through Web Audio. */
+  /** Volume through Web Audio: Maximum volume (above 100%) plus the Live TV / Plex volume offset (in dB). */
   applyBoost() {
-    const pct = Number(window.lumenSettings?.ui?.maxVolume) || 100;
-    if (pct <= 100 || this.gain) { if (this.gain) this.gain.gain.value = pct / 100; return; }
+    const ui = window.lumenSettings?.ui || {};
+    const pct = Math.max(100, Number(ui.maxVolume) || 100);
+    const offsetDb = Number(this.meta.live ? ui.liveVolumeOffset : ui.plexVolumeOffset) || 0;
+    const gain = (pct / 100) * Math.pow(10, offsetDb / 20);
+    if (this.gain) { this.gain.gain.value = gain; return; }
+    if (Math.abs(gain - 1) < 0.001) return;
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
       const src = ctx.createMediaElementSource(this.video);
-      this.gain = ctx.createGain(); this.gain.gain.value = pct / 100;
-      src.connect(this.gain).connect(ctx.destination);
+      this.gain = ctx.createGain(); this.gain.gain.value = gain;
+      // A limiter after the boost so loud scenes don't distort.
+      const limiter = ctx.createDynamicsCompressor();
+      limiter.threshold.value = -1; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.003; limiter.release.value = 0.25;
+      src.connect(this.gain).connect(limiter).connect(ctx.destination);
       this.audioCtx = ctx;
       this.video.addEventListener('play', () => ctx.resume().catch(() => {}));
     } catch { /* not available */ }
