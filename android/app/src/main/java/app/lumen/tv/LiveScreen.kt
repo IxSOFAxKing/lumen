@@ -144,6 +144,7 @@ fun LiveScreen() {
                     }
                     Spacer(Modifier.width(6.dp))
                     Chip("Recordings", false) { Nav.root(Screen.Recordings) }
+                    MobileTopActions()
                 }
                 groups?.let { gl ->
                     val rowState = androidx.compose.foundation.lazy.rememberLazyListState(initialFirstVisibleItemIndex = gl.indexOfFirst { it.id == group }.coerceAtLeast(0))

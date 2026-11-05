@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -73,8 +74,6 @@ fun BottomNav(current: Screen, modifier: Modifier = Modifier) {
             if (AppState.isTv) add(NavItem("Guide", Ico.Guide, Screen.Guide) { it == Screen.Guide })
         }
         if (AppState.discoverOn) add(NavItem("Discover", Ico.Compass, Screen.Discover) { it == Screen.Discover })
-        add(NavItem("Search", Icons.Filled.Search, Screen.Search) { it == Screen.Search })
-        add(NavItem("Settings", Icons.Filled.Settings, Screen.Settings) { it == Screen.Settings })
     }
     Row(modifier.fillMaxWidth().background(C.bg2.copy(alpha = 0.97f)).navigationBarsPadding().height(64.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         items.forEach { n ->
@@ -88,21 +87,30 @@ fun BottomNav(current: Screen, modifier: Modifier = Modifier) {
     }
 }
 
-/** Title + quick actions shown over the top of phone screens. */
+/** Title + quick actions shown over the top of phone screens (kept clear of the status bar). */
 @Composable
 fun MobileTopBar(title: String, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
-    Row(modifier.fillMaxWidth().padding(start = 18.dp, end = 10.dp, top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.fillMaxWidth().statusBarsPadding().padding(start = 18.dp, end = 8.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         T(title, 24.sp, weight = FontWeight.Bold)
         Spacer(Modifier.weight(1f))
-        Icon(Icons.Filled.Refresh, "Refresh", tint = Color.White, modifier = Modifier.size(40.dp).clip(CircleShape).tapped {
-            Net.clearCache(); AppState.resumeTick++
-        }.padding(8.dp))
-        if (AppState.plexOnline) Icon(Icons.Filled.Person, "Switch user", tint = Color.White, modifier = Modifier.size(40.dp).clip(CircleShape).tapped {
-            scope.launch { AppState.checkProfile(force = true) }
-        }.padding(8.dp))
+        TopIcon(Icons.Filled.Search, "Search") { Nav.root(Screen.Search) }
+        TopIcon(Icons.Filled.Refresh, "Refresh") { Net.clearCache(); AppState.resumeTick++ }
+        if (AppState.plexOnline) TopIcon(Icons.Filled.Person, "Switch user") { scope.launch { AppState.checkProfile(force = true) } }
+        TopIcon(Icons.Filled.Settings, "Settings") { Nav.root(Screen.Settings) }
     }
 }
+
+/** Search + Settings shortcuts for phone screens that draw their own header. */
+@Composable
+fun MobileTopActions() {
+    TopIcon(Icons.Filled.Search, "Search") { Nav.root(Screen.Search) }
+    TopIcon(Icons.Filled.Settings, "Settings") { Nav.root(Screen.Settings) }
+}
+
+@Composable
+private fun TopIcon(icon: ImageVector, label: String, onTap: () -> Unit) =
+    Icon(icon, label, tint = Color.White, modifier = Modifier.size(40.dp).clip(CircleShape).tapped(onTap).padding(8.dp))
 
 private fun typeLabel(m: PlexItem) = when (m.type) { "movie" -> "Movie"; "show" -> "TV Show"; "episode" -> "Episode"; "season" -> "Season"; else -> null }
 

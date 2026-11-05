@@ -176,7 +176,10 @@ fun Shell(onExit: () -> Unit) {
         val navInset = navPad.calculateBottomPadding()
         val navLeft = navPad.calculateLeftPadding(androidx.compose.ui.unit.LayoutDirection.Ltr)
         val navRight = navPad.calculateRightPadding(androidx.compose.ui.unit.LayoutDirection.Ltr)
-        Box(Modifier.fillMaxSize().padding(start = (if (showRail) 52.dp else 0.dp) + navLeft, end = navRight, bottom = if (showBottomNav) 64.dp + navInset else navInset)) {
+        // Phone screens without a full-bleed banner also keep clear of the status bar at the top.
+        val statusTop = androidx.compose.foundation.layout.WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+        val padTop = if (portrait && screen.topLevel && screen != Screen.Home && screen !is Screen.Lib && screen != Screen.Discover) statusTop + 8.dp else 0.dp
+        Box(Modifier.fillMaxSize().padding(start = (if (showRail) 52.dp else 0.dp) + navLeft, end = navRight, top = padTop, bottom = if (showBottomNav) 64.dp + navInset else navInset)) {
             // Screens cross-fade with a slight zoom.
             androidx.compose.animation.AnimatedContent(
                 targetState = screen, contentKey = { it.key }, label = "screen",
