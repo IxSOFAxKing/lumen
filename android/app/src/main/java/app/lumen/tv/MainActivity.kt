@@ -1,5 +1,6 @@
 package app.lumen.tv
 
+import androidx.compose.foundation.layout.statusBars
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
