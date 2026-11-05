@@ -107,7 +107,7 @@ private fun typeLabel(m: PlexItem) = when (m.type) { "movie" -> "Movie"; "show" 
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun PortraitHome(d: HomeData) {
+fun PortraitHome(d: HomeData, title: String = "Home", extra: (@Composable () -> Unit)? = null) {
     val feat = d.featured.ifEmpty { (d.rows.firstOrNull() as? HomeRow.Plex)?.items?.take(6).orEmpty() }
     val showHero = feat.isNotEmpty() && !AppState.uiList("homeHidden").contains("hero")
     val pager = rememberPagerState { feat.size }
@@ -121,8 +121,8 @@ fun PortraitHome(d: HomeData) {
         item(key = "hero") {
             if (showHero) Box(Modifier.fillMaxWidth().height(520.dp)) {
                 HorizontalPager(pager, Modifier.fillMaxSize()) { i -> HeroPage(feat[i]) }
-                MobileTopBar("Home")
-            } else MobileTopBar("Home", Modifier.padding(bottom = 12.dp))
+                MobileTopBar(title)
+            } else MobileTopBar(title, Modifier.padding(bottom = 12.dp))
         }
         if (showHero && feat.size > 1) item(key = "dots") {
             Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 4.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
@@ -134,6 +134,7 @@ fun PortraitHome(d: HomeData) {
                 }
             }
         }
+        if (extra != null) item(key = "extra") { Box(Modifier.padding(top = 10.dp)) { extra() } }
         itemsIndexed(d.rows, key = { _, r -> r.key }) { _, row ->
             Box(Modifier.padding(top = 14.dp)) {
                 when (row) {

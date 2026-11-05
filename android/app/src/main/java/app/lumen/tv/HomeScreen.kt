@@ -204,11 +204,11 @@ private fun HomeContent(d: HomeData) {
         HeroBackdrop(hero)
         TvTopBar(Modifier.align(Alignment.TopEnd))
         Column(Modifier.fillMaxSize()) {
-            HeroInfoOf(hero, compact, Modifier.fillMaxWidth().height(heroH).padding(start = 32.dp, top = if (compact) 22.dp else 34.dp, end = if (LocalPortrait.current) 20.dp else 360.dp))
+            HeroInfoOf(hero, compact, Modifier.fillMaxWidth().height(heroH).padding(start = 20.dp, top = if (compact) 22.dp else 34.dp, end = if (LocalPortrait.current) 20.dp else 360.dp))
             if (showBillboard) {
                 // The dots under the banner are what you select: ◀ ▶ change the featured title, OK opens its details.
                 Row(
-                    Modifier.padding(start = 30.dp, bottom = 4.dp)
+                    Modifier.padding(start = 16.dp, bottom = 2.dp)
                         .onFocusChanged {
                             billboardFocused = it.hasFocus
                             if (it.hasFocus) { focusTarget.value = null; d.featured.getOrNull(featIndex)?.let { f -> hero.value = Hero.of(f) }; scope.launch { listState.smoothScrollToItem(0) } }
@@ -217,8 +217,8 @@ private fun HomeContent(d: HomeData) {
                 ) {
                     Focusable(
                         onClick = { d.featured.getOrNull(featIndex)?.let { Nav.openDetails(it) } },
-                        focusRequester = playFr, memKey = "billboard/dots", shape = RoundedCornerShape(50), focusedScale = 1.06f, outline = false,
-                        background = Color.Transparent, focusedBackground = Color.White.copy(alpha = 0.16f),
+                        focusRequester = playFr, memKey = "billboard/dots", shape = RoundedCornerShape(50), focusedScale = 1f, outline = false,
+                        background = Color.Transparent, focusedBackground = Color.Transparent,
                         modifier = Modifier.onPreviewKeyEvent { ev ->
                             if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                             val code = ev.nativeKeyEvent.keyCode
@@ -235,13 +235,13 @@ private fun HomeContent(d: HomeData) {
                             }
                         },
                     ) { f ->
-                        Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        // Selected: the dots brighten and the current one takes the accent colour.
+                        Row(Modifier.padding(horizontal = 4.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                             d.featured.indices.forEach { i ->
                                 val on = i == featIndex
-                                Box(Modifier.padding(horizontal = 3.dp).size(if (on) 18.dp else 7.dp, 7.dp).clip(RoundedCornerShape(50))
-                                    .background(if (on) Color.White else Color.White.copy(alpha = if (f) 0.55f else 0.35f)))
+                                Box(Modifier.padding(horizontal = 2.5.dp).size(if (on) 14.dp else 5.dp, 5.dp).clip(RoundedCornerShape(50))
+                                    .background(if (on) (if (f) C.accent else Color.White) else Color.White.copy(alpha = if (f) 0.7f else 0.35f)))
                             }
-                            if (f) { Spacer(Modifier.width(10.dp)); T("◀ ▶  ·  OK for details", 11.sp, C.text2) }
                         }
                     }
                 }
@@ -261,11 +261,11 @@ private fun HomeContent(d: HomeData) {
                     val onRowFocused: () -> Unit = { rowIdx = idx; scope.launch { listState.smoothScrollToItem(idx) } }
                     when (row) {
                         is HomeRow.Plex -> PlexRow(
-                            row.key, row.title, row.items, row.wide, 32.dp, onRowFocused,
+                            row.key, row.title, row.items, row.wide, 20.dp, onRowFocused,
                             firstFocus = if (idx == 0) firstCardFr else null,
                             onItemFocus = { focusTarget.value = Hero.of(it) },
                         ) { if (it.type == "playlist") Nav.openDetails(it) else Nav.open(it) }
-                        is HomeRow.Channels -> CardRow(row.title, startPad = 32.dp, onRowFocused = onRowFocused) {
+                        is HomeRow.Channels -> CardRow(row.title, startPad = 20.dp, onRowFocused = onRowFocused) {
                             itemsIndexed(row.channels.distinctBy { "${it.providerId}:${it.id}" }, key = { _, c -> "${c.providerId}:${c.id}" }) { i, ch ->
                                 ChannelCard(ch, "${row.key}/${ch.providerId}:${ch.id}", onFocus = { focusTarget.value = Hero.of(ch) }, onMenu = { Menus.channel(ch, row.channels, row.title) }, fr = if (idx == 0 && i == 0) firstCardFr else null) {
                                     Nav.playLive(ch, row.channels, row.title)
@@ -288,7 +288,7 @@ fun HeroInfoOf(h: androidx.compose.runtime.State<Hero?>, compact: Boolean, modif
 
 /** Full-bleed artwork in the top-right, fading into the background like Netflix. */
 @Composable
-fun Backdrop(url: String?, heightFraction: Float = 0.78f, bleedLeft: androidx.compose.ui.unit.Dp = 64.dp) {
+fun Backdrop(url: String?, heightFraction: Float = 0.78f, bleedLeft: androidx.compose.ui.unit.Dp = 52.dp) {
     // Extends under the (transparent) side menu, so artwork runs to the edge of the screen.
     Box(Modifier.fillMaxSize().layout { m, c ->
         val extra = bleedLeft.roundToPx()

@@ -50,6 +50,23 @@ fun LibraryScreen(lib: Library) {
     LaunchedEffect(lib.key, AppState.resumeTick) {
         try { val h = Repo.hubsFor(lib.key); hubs = h; mem.data["hubs"] = h } catch (e: Exception) { if (hubs == null) error = e.message }
     }
+    // Phone (portrait): same layout as the Home screen.
+    if (LocalPortrait.current) {
+        val h = hubs
+        if (h == null) { if (error != null) Message("Couldn't load ${lib.title}", error) else Loading(Modifier.padding(top = 160.dp)); return }
+        val type0 = if (lib.type == "movie") "1" else "2"
+        val featHub = h.firstOrNull { it.id.contains("recentlyadded", true) || it.id.contains("recent", true) } ?: h.firstOrNull()
+        val feat = featHub?.items.orEmpty().filter { it.art != null || it.grandparentArt != null }.take(8)
+        PortraitHome(HomeData(h.mapIndexed { i, hub -> HomeRow.Plex("hub:${hub.id}:$i", hub.title, hub.items, hub.wide) }, feat), lib.title) {
+            androidx.compose.foundation.lazy.LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item { Chip("Browse A–Z", false) { Nav.push(Screen.Grid(lib.title, GridSource.Library(lib.key, type0))) } }
+                item { Chip("Recently added", false) { Nav.push(Screen.Grid("${lib.title} · Recently added", GridSource.Library(lib.key, type0, "addedAt:desc"))) } }
+                item { Chip("Unwatched", false) { Nav.push(Screen.Grid("${lib.title} · Unwatched", GridSource.Library(lib.key, type0, "titleSort", unwatched = true))) } }
+                item { Chip("Top rated", false) { Nav.push(Screen.Grid("${lib.title} · Top rated", GridSource.Library(lib.key, type0, "audienceRating:desc"))) } }
+            }
+        }
+        return
+    }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val focusTarget = remember { mutableStateOf<Hero?>(null) }
@@ -64,10 +81,9 @@ fun LibraryScreen(lib: Library) {
     Box(Modifier.fillMaxSize()) {
         HeroBackdrop(hero)
         Column(Modifier.fillMaxSize()) {
-            if (LocalPortrait.current) MobileTopBar(lib.title)
             val heroH by androidx.compose.animation.core.animateDpAsState(if (rowsFocused) 140.dp else 196.dp, androidx.compose.animation.core.tween(380), label = "heroH")
-            HeroInfoOf(hero, rowsFocused, Modifier.fillMaxWidth().height(heroH).padding(start = 32.dp, top = if (rowsFocused) 20.dp else 30.dp, end = if (LocalPortrait.current) 20.dp else 360.dp))
-            Row(Modifier.padding(start = 32.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            HeroInfoOf(hero, rowsFocused, Modifier.fillMaxWidth().height(heroH).padding(start = 20.dp, top = if (rowsFocused) 20.dp else 30.dp, end = if (LocalPortrait.current) 20.dp else 360.dp))
+            Row(Modifier.padding(start = 20.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (!LocalPortrait.current) T(lib.title, 18.sp, weight = FontWeight.Bold, modifier = Modifier.padding(end = 8.dp, top = 6.dp))
                 Chip("Browse A–Z", false, memKey = "chip/az", focusRequester = firstFr) { Nav.push(Screen.Grid(lib.title, GridSource.Library(lib.key, type))) }
                 Chip("Recently added", false, memKey = "chip/new") { Nav.push(Screen.Grid("${lib.title} · Recently added", GridSource.Library(lib.key, type, "addedAt:desc"))) }
@@ -80,7 +96,7 @@ fun LibraryScreen(lib: Library) {
                 else -> androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides NoScroll) {
                 LazyColumn(state = listState, modifier = Modifier.weight(1f).onFocusChanged { rowsFocused = it.hasFocus }, contentPadding = PaddingValues(top = 4.dp, bottom = 200.dp)) {
                     itemsIndexed(hubs!!, key = { i, h -> "${h.id}-$i" }) { idx, hub ->
-                        PlexRow("hub:${hub.id}", hub.title, hub.items, hub.wide, 32.dp, { scope.launch { listState.smoothScrollToItem(idx) } },
+                        PlexRow("hub:${hub.id}", hub.title, hub.items, hub.wide, 20.dp, { scope.launch { listState.smoothScrollToItem(idx) } },
                             onItemFocus = { focusTarget.value = Hero.of(it) }) { Nav.open(it) }
                     }
                 }

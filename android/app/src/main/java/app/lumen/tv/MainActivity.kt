@@ -174,7 +174,7 @@ fun Shell(onExit: () -> Unit) {
         val navInset = navPad.calculateBottomPadding()
         val navLeft = navPad.calculateLeftPadding(androidx.compose.ui.unit.LayoutDirection.Ltr)
         val navRight = navPad.calculateRightPadding(androidx.compose.ui.unit.LayoutDirection.Ltr)
-        Box(Modifier.fillMaxSize().padding(start = (if (showRail) 64.dp else 0.dp) + navLeft, end = navRight, bottom = if (showBottomNav) 64.dp + navInset else navInset)) {
+        Box(Modifier.fillMaxSize().padding(start = (if (showRail) 52.dp else 0.dp) + navLeft, end = navRight, bottom = if (showBottomNav) 64.dp + navInset else navInset)) {
             // Screens cross-fade with a slight zoom.
             androidx.compose.animation.AnimatedContent(
                 targetState = screen, contentKey = { it.key }, label = "screen",
@@ -225,17 +225,17 @@ private fun railEntries(): List<RailEntry> {
 @Composable
 private fun Rail(entries: List<RailEntry>, screen: Screen, railFocus: androidx.compose.runtime.MutableState<Boolean>, requesters: Map<String, FocusRequester>, onSelect: (Screen) -> Unit) {
     val expanded = railFocus.value
-    val width by animateDpAsState(if (expanded) 210.dp else 64.dp, androidx.compose.animation.core.tween(220, easing = androidx.compose.animation.core.FastOutSlowInEasing), label = "rail")
+    val width by animateDpAsState(if (expanded) 210.dp else 52.dp, androidx.compose.animation.core.tween(220, easing = androidx.compose.animation.core.FastOutSlowInEasing), label = "rail")
     val currentId = entries.firstOrNull { it.screen == screen }?.id ?: if (screen == Screen.Settings) "settings" else null
     Box(
-        Modifier.fillMaxHeight().width(if (expanded) 420.dp else 64.dp)
+        Modifier.fillMaxHeight().width(if (expanded) 420.dp else 52.dp)
             .background(if (expanded) Brush.horizontalGradient(listOf(Color.Black.copy(alpha = 0.92f), Color.Black.copy(alpha = 0.75f), Color.Transparent)) else Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent)))
     ) {
         // Every item in menu order, so ▲ / ▼ always move through the menu.
         val order = entries.map { it.id } + "settings"
         val focusedIdx = remember { mutableIntStateOf(-1) }
         Column(
-            Modifier.fillMaxHeight().width(width).padding(vertical = 18.dp, horizontal = 10.dp)
+            Modifier.fillMaxHeight().width(width).padding(vertical = 18.dp, horizontal = 5.dp)
                 // Entering the menu (◀ from the content) lands on the current section, like Netflix.
                 .focusProperties { enter = { currentId?.let { requesters[it] } ?: FocusRequester.Default } }
                 .focusGroup()
