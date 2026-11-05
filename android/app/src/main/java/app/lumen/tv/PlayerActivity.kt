@@ -1162,7 +1162,8 @@ class PlayerActivity : ComponentActivity() {
     private var handedOff = false
     override fun finish() {
         val src = source; val d = desc
-        if (!handedOff && src is LiveSource && d != null && st.error == null && (Nav.current == Screen.Live || Nav.current == Screen.Guide)) {
+        // Live preview window: TV only (phones go straight back to the channel list).
+        if (AppState.isTv && !handedOff && src is LiveSource && d != null && st.error == null && (Nav.current == Screen.Live || Nav.current == Screen.Guide)) {
             handedOff = true
             exo.removeListener(listener)
             view.player = null
@@ -1194,7 +1195,7 @@ class PlayerActivity : ComponentActivity() {
             if (!handedOff) AppScope.launch { Playback.release(d) }
         }
         // Back on the Live TV screen, keep watching this channel in the preview window.
-        if (src is LiveSource && (Nav.current == Screen.Live || Nav.current == Screen.Guide)) Preview.channel = src.channel
+        if (AppState.isTv && src is LiveSource && (Nav.current == Screen.Live || Nav.current == Screen.Guide)) Preview.channel = src.channel
         if (src is WebSource) PlayerBus.closed(if (src.isLive) 0.0 else absPos() - (d?.startOffset ?: 0.0))
         Net.clearCache()
         if (!handedOff) exo.stop()
