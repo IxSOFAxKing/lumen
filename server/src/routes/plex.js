@@ -290,6 +290,8 @@ r.get('/image', ah(async (req, res) => {
         raw: true, gate: 'image', timeout: 30000, params: { url: path, width: w, height: h, minSize: 1, upscale: 1 },
         headers: { Accept: 'image/jpeg,image/png,image/*' },
       });
+      // Title logos ("clearLogo") don't exist for every title: remember the misses so Plex isn't asked again.
+      if (!up.ok && path.includes('/clearLogo')) { badImages.set(path, Date.now() + 7 * 24 * 3600e3); saveBadImages(); return up; }
       if (up.status >= 500) { const e = new Error(`Plex returned ${up.status}`); e.serverError = true; throw e; }
       return up;
     } catch (e) {

@@ -186,3 +186,25 @@ fun fmtClock(sec: Double): String {
 
 private val timeFmt = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT)
 fun fmtTime(epochSec: Long): String = timeFmt.format(java.util.Date(epochSec * 1000))
+
+/** Plex's title-logo artwork ("clearLogo") for a movie or show, like Plex/Plezy show in the banner. */
+fun PlexItem.clearLogoPath(): String? {
+    raw.optJSONArray("Image").objects().firstOrNull { it.optString("type") == "clearLogo" }?.str("url")?.let { return it }
+    val key = when (type) { "episode" -> grandparentRatingKey; "season" -> parentRatingKey; "movie", "show" -> ratingKey; else -> null } ?: return null
+    return "/library/metadata/$key/clearLogo"
+}
+
+/** Banner metadata line: S1 E4 • 77% • TV-14 • 48min • October 20, 2026 */
+fun PlexItem.heroMeta(): String {
+    val date = raw.str("originallyAvailableAt")?.let { d ->
+        runCatching { java.text.SimpleDateFormat("MMMM d, yyyy", java.util.Locale.getDefault()).format(java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(d)!!) }.getOrNull()
+    }
+    return listOfNotNull(
+        episodeLabel?.replace(" ", " "),
+        (audienceRating ?: rating)?.let { "${(it * 10).toInt()}%" },
+        contentRating,
+        if (type == "show") childCount.takeIf { it > 0 }?.let { "$it Season${if (it > 1) "s" else ""}" } else durationMs.takeIf { it > 0 }?.let { "${it / 60000}min" },
+        if (isEpisode) date else year?.toString(),
+        if (!isEpisode) genres.take(2).joinToString(", ").takeIf { it.isNotBlank() } else null,
+    ).joinToString("  •  ")
+}

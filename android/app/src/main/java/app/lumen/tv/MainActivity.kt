@@ -148,10 +148,11 @@ fun Shell(onExit: () -> Unit) {
     val railRequesters = remember(entries) { entries.associate { it.id to FocusRequester() } + ("settings" to FocusRequester()) }
     val holder = rememberSaveableStateHolder()
 
+    val portraitNow = LocalPortrait.current
     BackHandler {
         when {
             Nav.pop() -> {}
-            !railFocus.value && screen.topLevel -> {
+            !railFocus.value && screen.topLevel && !portraitNow -> {
                 val id = entries.firstOrNull { it.screen == screen }?.id ?: if (screen == Screen.Settings) "settings" else entries.firstOrNull()?.id
                 runCatching { id?.let { railRequesters[it] }?.requestFocus() }
             }
@@ -161,8 +162,10 @@ fun Shell(onExit: () -> Unit) {
     }
 
     Box(Modifier.fillMaxSize().background(C.bg)) {
-        val showRail = screen.topLevel
-        Box(Modifier.fillMaxSize().padding(start = if (showRail) 64.dp else 0.dp)) {
+        val portrait = LocalPortrait.current
+        val showRail = screen.topLevel && !portrait
+        val showBottomNav = screen.topLevel && portrait
+        Box(Modifier.fillMaxSize().padding(start = if (showRail) 64.dp else 0.dp, bottom = if (showBottomNav) 64.dp else 0.dp)) {
             // Screens cross-fade with a slight zoom.
             androidx.compose.animation.AnimatedContent(
                 targetState = screen, contentKey = { it.key }, label = "screen",
@@ -191,6 +194,7 @@ fun Shell(onExit: () -> Unit) {
             }
         }
         if (showRail) Rail(entries, screen, railFocus, railRequesters) { e -> Nav.root(e) }
+        if (showBottomNav) BottomNav(screen, Modifier.align(Alignment.BottomCenter))
         MenuHost()
     }
 }
@@ -237,10 +241,7 @@ private fun Rail(entries: List<RailEntry>, screen: Screen, railFocus: androidx.c
                     true
                 },
         ) {
-            Row(Modifier.padding(start = 8.dp, bottom = 22.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(26.dp).clip(RoundedCornerShape(7.dp)).background(C.accent), contentAlignment = Alignment.Center) { T("▶", 12.sp, Color.Black, FontWeight.Bold) }
-                if (expanded) { Spacer(Modifier.width(10.dp)); T("Lumen", 18.sp, weight = FontWeight.Bold) }
-            }
+            Spacer(Modifier.height(30.dp))
             entries.forEachIndexed { i, e -> RailItem(e.label, e.icon, e.id == currentId, expanded, requesters[e.id], { focusedIdx.intValue = i }) { onSelect(e.screen) } }
             Spacer(Modifier.weight(1f))
             RailItem("Settings", Icons.Filled.Settings, currentId == "settings", expanded, requesters["settings"], { focusedIdx.intValue = order.size - 1 }) { onSelect(Screen.Settings) }

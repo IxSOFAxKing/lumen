@@ -1,6 +1,8 @@
 package app.lumen.tv
 
 import androidx.compose.animation.Crossfade
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -58,17 +60,18 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 /** What the big area at the top of the screen shows: the featured title, or whatever card has focus. */
-data class Hero(val title: String, val kicker: String?, val meta: String?, val summary: String?, val backdrop: String?, val logo: String? = null, val item: PlexItem? = null) {
+data class Hero(val title: String, val kicker: String?, val meta: String?, val summary: String?, val backdrop: String?, val logo: String? = null, val item: PlexItem? = null, val titleLogo: String? = null) {
     companion object {
         fun of(m: PlexItem, kicker: String? = null): Hero {
             val isEp = m.isEpisode
             return Hero(
                 title = if (isEp) (m.grandparentTitle ?: m.title) else m.title,
-                kicker = kicker ?: if (isEp) listOfNotNull(m.episodeLabel, m.title).joinToString(" · ") else null,
-                meta = m.metaLine(),
+                kicker = kicker ?: if (isEp) m.title else null,
+                meta = m.heroMeta(),
                 summary = m.summary ?: m.tagline,
                 backdrop = Net.plexImg(m.backdrop ?: m.thumb, 1280, 720),
                 item = m,
+                titleLogo = m.clearLogoPath()?.let { Net.plexImg(it, 800, 320) },
             )
         }
         fun of(ch: Channel): Hero {
@@ -197,6 +200,7 @@ private fun HomeContent(d: HomeData) {
 
     Box(Modifier.fillMaxSize()) {
         HeroBackdrop(hero)
+        TvTopBar(Modifier.align(Alignment.TopEnd))
         Column(Modifier.fillMaxSize()) {
             HeroInfoOf(hero, compact, Modifier.fillMaxWidth().height(heroH).padding(start = 32.dp, top = if (compact) 22.dp else 34.dp, end = if (LocalPortrait.current) 20.dp else 360.dp))
             if (showBillboard) {
@@ -320,10 +324,42 @@ private fun HeroBody(h: Hero?, compact: Boolean) {
             h.kicker?.let { T(it.uppercase(), 11.sp, if (it.startsWith("LIVE")) C.live else C.accent, FontWeight.Bold) }
         }
         Spacer(Modifier.height(4.dp))
-        T(h.title, if (compact) 24.sp else if (h.title.length > 28) 26.sp else 32.sp, weight = FontWeight.Bold, maxLines = if (compact) 1 else 2, lineHeight = 34.sp)
+        TitleLogo(h.titleLogo, h.title, if (compact) 46.dp else 72.dp) {
+            T(h.title, if (compact) 24.sp else if (h.title.length > 28) 26.sp else 32.sp, weight = FontWeight.Bold, maxLines = if (compact) 1 else 2, lineHeight = 34.sp)
+        }
         Spacer(Modifier.height(6.dp))
         h.meta?.takeIf { it.isNotBlank() }?.let { T(it, 13.sp, C.text2) }
         Spacer(Modifier.height(8.dp))
         h.summary?.let { T(it, 13.sp, C.text2, maxLines = 3, lineHeight = 18.sp) }
+    }
+}
+
+/** The title's logo artwork if Plex has one, otherwise the title as text. */
+@Composable
+fun TitleLogo(url: String?, title: String, height: androidx.compose.ui.unit.Dp, align: Alignment = Alignment.CenterStart, fallback: @Composable () -> Unit) {
+    var failed by remember(url) { mutableStateOf(url == null) }
+    if (failed) { fallback(); return }
+    coil.compose.AsyncImage(
+        model = url, contentDescription = title, contentScale = ContentScale.Fit, alignment = align,
+        modifier = Modifier.height(height).fillMaxWidth(0.9f),
+        onState = { st -> if (st is coil.compose.AsyncImagePainter.State.Error) failed = true },
+    )
+}
+
+/** Clock and "switch user" at the top right of the TV home screen (like Plezy). */
+@Composable
+fun TvTopBar(modifier: Modifier = Modifier) {
+    var clock by remember { mutableStateOf(nowS()) }
+    LaunchedEffect(Unit) { while (true) { delay(20_000); clock = nowS() } }
+    val scope = rememberCoroutineScope()
+    Row(modifier.padding(top = 18.dp, end = 26.dp), verticalAlignment = Alignment.CenterVertically) {
+        T(fmtTime(clock), 18.sp, weight = FontWeight.SemiBold)
+        if (AppState.plexOnline) {
+            Spacer(Modifier.width(14.dp))
+            Focusable(onClick = { scope.launch { AppState.checkProfile(force = true) } }, shape = androidx.compose.foundation.shape.CircleShape, focusedScale = 1.1f, outline = false,
+                background = Color.Transparent, focusedBackground = Color.White, modifier = Modifier.size(34.dp)) { f ->
+                Icon(Icons.Filled.Person, "Switch user", tint = if (f) Color.Black else Color.White, modifier = Modifier.align(Alignment.Center).size(20.dp))
+            }
+        }
     }
 }

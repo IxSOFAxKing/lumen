@@ -101,9 +101,6 @@ fun MobileTopBar(title: String, modifier: Modifier = Modifier) {
     }
 }
 
-private fun clearLogo(m: PlexItem): String? =
-    m.raw.optJSONArray("Image").objects().firstOrNull { it.optString("type") == "clearLogo" }?.str("url")
-
 private fun typeLabel(m: PlexItem) = when (m.type) { "movie" -> "Movie"; "show" -> "TV Show"; "episode" -> "Episode"; "season" -> "Season"; else -> null }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -156,9 +153,10 @@ private fun HeroPage(m: PlexItem) {
         Img(Net.plexImg(m.art ?: m.grandparentArt ?: m.thumb, 1280, 720), Modifier.fillMaxSize(), ContentScale.Crop)
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Color.Black.copy(alpha = 0.55f), 0.22f to Color.Transparent, 0.55f to Color.Transparent, 1f to C.bg)))
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 22.dp, vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            val logo = clearLogo(m)
-            if (logo != null) Img(Net.plexImg(logo, 800, 300), Modifier.fillMaxWidth(0.85f).height(84.dp), ContentScale.Fit)
-            else T(if (m.isEpisode) m.grandparentTitle ?: m.title else m.title, 30.sp, weight = FontWeight.Bold, maxLines = 2, lineHeight = 34.sp, modifier = Modifier.fillMaxWidth(), align = TextAlign.Center)
+            val name = if (m.isEpisode) m.grandparentTitle ?: m.title else m.title
+            TitleLogo(m.clearLogoPath()?.let { Net.plexImg(it, 800, 320) }, name, 84.dp, Alignment.Center) {
+                T(name, 30.sp, weight = FontWeight.Bold, maxLines = 2, lineHeight = 34.sp, modifier = Modifier.fillMaxWidth(), align = TextAlign.Center)
+            }
             Spacer(Modifier.height(8.dp))
             T(listOfNotNull(typeLabel(m), m.contentRating, m.year?.toString()).joinToString(" • "), 14.sp, C.text, FontWeight.SemiBold)
             Spacer(Modifier.height(14.dp))
