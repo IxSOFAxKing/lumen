@@ -6,9 +6,10 @@
         <item name="android:colorPrimary">@color/bg</item>
         <item name="android:statusBarColor">@color/bg</item>
         <item name="android:navigationBarColor">@color/bg</item>
-        <item name="android:windowFullscreen">true</item>
     </style>
+    <!-- Only the player hides the status bar; the rest of the app keeps it visible on phones. -->
     <style name="Theme.Lumen.Player" parent="Theme.Lumen">
         <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowFullscreen">true</item>
     </style>
 </resources>

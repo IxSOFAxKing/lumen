@@ -68,7 +68,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Net.init(this)
-        if (!AppState.isTv) enableEdgeToEdge()
+        // Light status-bar icons over the app's dark screens, whatever the phone's light/dark setting.
+        if (!AppState.isTv) enableEdgeToEdge(
+            statusBarStyle = androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+        )
         Nav.appContext = applicationContext
         if (!Net.prefs.isPaired) { startActivity(Intent(this, SetupActivity::class.java)); finish(); return }
         Net.onUnauthorized = {
