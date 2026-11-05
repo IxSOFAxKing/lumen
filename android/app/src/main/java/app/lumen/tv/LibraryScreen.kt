@@ -64,7 +64,7 @@ fun LibraryScreen(lib: Library) {
     Box(Modifier.fillMaxSize()) {
         HeroBackdrop(hero)
         Column(Modifier.fillMaxSize()) {
-            if (LocalPortrait.current) { MobileTopBar("Libraries"); LibrarySwitcher(lib) }
+            if (LocalPortrait.current) MobileTopBar(lib.title)
             val heroH by androidx.compose.animation.core.animateDpAsState(if (rowsFocused) 140.dp else 196.dp, androidx.compose.animation.core.tween(380), label = "heroH")
             HeroInfoOf(hero, rowsFocused, Modifier.fillMaxWidth().height(heroH).padding(start = 32.dp, top = if (rowsFocused) 20.dp else 30.dp, end = if (LocalPortrait.current) 20.dp else 360.dp))
             Row(Modifier.padding(start = 32.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {

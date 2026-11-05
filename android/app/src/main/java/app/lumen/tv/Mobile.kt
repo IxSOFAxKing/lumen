@@ -66,7 +66,8 @@ private data class NavItem(val label: String, val icon: ImageVector, val screen:
 fun BottomNav(current: Screen, modifier: Modifier = Modifier) {
     val items = buildList {
         add(NavItem("Home", Icons.Filled.Home, Screen.Home) { it == Screen.Home })
-        AppState.libraries.firstOrNull()?.let { l -> add(NavItem("Libraries", Ico.Library, Screen.Lib(l)) { it is Screen.Lib }) }
+        // One entry per Plex library (Movies, TV Shows…), like the TV side menu.
+        AppState.libraries.forEach { l -> add(NavItem(l.title, if (l.type == "movie") Ico.Movie else Ico.Tv, Screen.Lib(l)) { it is Screen.Lib && it.lib.key == l.key }) }
         if (AppState.providers.isNotEmpty()) {
             add(NavItem("Live TV", Ico.LiveTv, Screen.Live) { it == Screen.Live || it == Screen.Recordings })
             if (AppState.isTv) add(NavItem("Guide", Ico.Guide, Screen.Guide) { it == Screen.Guide })
