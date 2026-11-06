@@ -239,6 +239,11 @@ object Plex {
             .put("featured", JSONArray(featured)).put("recentMovies", JSONArray(recentMovies)).put("recentShows", JSONArray(recentShows))
     }
 
+    // The home screen as last loaded, kept on disk so the app can show it instantly at start-up.
+    private fun homeFile() = File(ctx.filesDir, "home-${prefs.plexUserUuid ?: "me"}.json")
+    fun diskHome(): JSONObject? = runCatching { homeFile().takeIf { it.exists() }?.readText()?.let { JSONObject(it) } }.getOrNull()
+    fun saveHome(j: JSONObject) { runCatching { homeFile().writeText(j.toString()) } }
+
     suspend fun libraryHubs(id: String): JSONArray = coroutineScope {
         val hubsJ = async { get("/hubs/sections/$id", mapOf("count" to 20, "includeEmptyHubs" to 0), 60_000) }
         val popJ = async { runCatching { get("/library/sections/$id/all", mapOf("sort" to "viewCount:desc"), 60_000, mapOf("X-Plex-Container-Start" to "0", "X-Plex-Container-Size" to "20")) }.getOrNull() }

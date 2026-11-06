@@ -79,6 +79,8 @@ interface PlayerActions {
     fun brightness(delta: Float)
     fun volume(delta: Float)
     fun pinch(zoomIn: Boolean)
+    /** Phones: double-tap the left / right half to skip back / forward. */
+    fun doubleTap(left: Boolean) {}
 }
 var playerActions: PlayerActions? = null
 
@@ -92,7 +94,7 @@ fun PlayerOverlay(st: PlayerState, view: PlayerView) {
         AndroidView(factory = { view }, modifier = Modifier.fillMaxSize())
         // Tap anywhere: show / hide the controls. Phones: swipe the left / right side for brightness / volume, pinch to zoom.
         Box(Modifier.fillMaxSize()
-            .pointerInput(Unit) { detectTapGestures(onTap = { playerActions?.tap() }) }
+            .pointerInput(Unit) { detectTapGestures(onTap = { playerActions?.tap() }, onDoubleTap = { o -> playerActions?.doubleTap(o.x < size.width / 2) }) }
             .pointerInput(Unit) {
                 var left = true
                 detectVerticalDragGestures(onDragStart = { o -> left = o.x < size.width / 2 }) { _, dy ->
@@ -267,6 +269,7 @@ private fun VodBtn(st: PlayerState, b: Btn, i: Int) {
         "prev" -> Ico.SkipPrev
         "episodes" -> Ico.Channels
         "chapters" -> Ico.Guide
+        "cast" -> Ico.Cast
         else -> Icons.Filled.List
     }
     val sel = st.zone == 1 && st.btn == i

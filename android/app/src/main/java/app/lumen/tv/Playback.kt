@@ -196,6 +196,16 @@ class PlexSource(override val ratingKey: String, private val queue: List<String>
         return Desc.from(j).also { current = it }
     }
 
+    /** An HLS stream from the current position for a Chromecast (Plex transcodes it; the Chromecast fetches it from Plex). */
+    suspend fun castUrl(offset: Double): String {
+        val body = JSONObject().put("ratingKey", ratingKey).put("offset", offset).put("client", "cast").put("prefs", uiPrefs())
+            .put("forceTranscode", true).put("quality", "12000")
+        if (mediaIndex > 0) body.put("mediaIndex", mediaIndex)
+        audioId?.let { body.put("audioStreamID", it) }
+        subtitleId?.let { body.put("subtitleStreamID", it) }
+        return Plex.play(body).getString("url")
+    }
+
     override fun choose(audioId: Int?, subtitleId: Int?, quality: String?) {
         if (audioId != null) this.audioId = audioId
         if (subtitleId != null) this.subtitleId = subtitleId

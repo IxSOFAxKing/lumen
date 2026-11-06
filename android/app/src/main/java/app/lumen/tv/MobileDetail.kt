@@ -141,6 +141,7 @@ fun PortraitDetail(
                         if (playLabel != null) { Spacer(Modifier.width(8.dp)); T(playLabel, 16.sp, Color.Black, FontWeight.Bold) }
                     }
                     if (onRestart != null) RoundAction(Ico.Restart, "Play from the beginning", onClick = onRestart)
+                    item.trailer()?.let { t -> RoundAction(Ico.Movie, "Trailer") { Nav.play(t, resume = false) } }
                     RoundAction(Icons.Filled.Check, if (item.watched) "Mark unwatched" else "Mark watched", on = item.watched, onClick = onToggleWatched)
                     RoundAction(Icons.Filled.MoreVert, "More") { Menus.item(item) }
                 }

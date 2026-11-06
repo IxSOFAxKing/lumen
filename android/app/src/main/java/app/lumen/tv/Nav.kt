@@ -15,6 +15,8 @@ sealed class Screen(val key: String, val topLevel: Boolean) {
     data object Recordings : Screen("dvr", true)
     data object Settings : Screen("settings", true)
     data object Discover : Screen("discover", true)
+    /** Several live channels at once (TV). */
+    data object MultiView : Screen("multiview", true)
     data class DiscoverItem(val type: String, val id: Int, val title: String) : Screen("ditem:$type:$id", false)
     data class Lib(val lib: Library) : Screen("lib:${lib.key}", true)
     /** A movie / show page. episodeKey: opened from an episode, so that episode is selected in its season. */

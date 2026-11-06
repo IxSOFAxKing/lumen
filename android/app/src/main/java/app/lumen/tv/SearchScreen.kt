@@ -60,6 +60,21 @@ fun SearchScreen() {
     var fieldFocused by remember { mutableStateOf(false) }
     val fieldFr = remember { FocusRequester() }
     InitialFocus(fieldFr)
+    // A search from Google Assistant / the system.
+    LaunchedEffect(VoiceSearch.pendingQuery) { VoiceSearch.pendingQuery?.let { q = it; VoiceSearch.pendingQuery = null } }
+    // Voice search: the microphone button, or the remote's search key.
+    val sctx = androidx.compose.ui.platform.LocalContext.current
+    val voice = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { r ->
+        r.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let { q = it }
+    }
+    val voiceIntent = remember {
+        android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Search movies, shows and channels")
+    }
+    val canVoice = remember { voiceIntent.resolveActivity(sctx.packageManager) != null }
+    fun listen() { runCatching { voice.launch(voiceIntent) }.onFailure { android.widget.Toast.makeText(sctx, "Voice search isn't available on this device", android.widget.Toast.LENGTH_SHORT).show() } }
+    LaunchedEffect(VoiceSearch.listenTick) { if (VoiceSearch.listenTick > 0) { delay(250); listen() } }
 
     LaunchedEffect(q) {
         mem.data["q"] = q
@@ -98,6 +113,12 @@ fun SearchScreen() {
                             modifier = Modifier.fillMaxWidth().focusRequester(fieldFr).onFocusChanged { fieldFocused = it.isFocused },
                         )
                     }
+                }
+            }
+            if (canVoice) {
+                Spacer(Modifier.width(12.dp))
+                Focusable(onClick = { listen() }, shape = androidx.compose.foundation.shape.CircleShape, modifier = Modifier.size(48.dp), background = Color.White.copy(alpha = 0.08f), focusedBackground = Color.White) { f ->
+                    Icon(Ico.Mic, "Voice search", tint = if (f) Color.Black else C.text, modifier = Modifier.align(Alignment.Center).size(24.dp))
                 }
             }
             if (busy) { Spacer(Modifier.width(14.dp)); T("Searching…", 13.sp, C.text3) }

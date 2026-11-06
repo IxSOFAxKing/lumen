@@ -1,5 +1,6 @@
 package app.lumen.tv
 
+import kotlinx.coroutines.launch
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -87,6 +88,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         scale.intValue = Net.prefs.uiScale
+        incoming(intent)?.let { Links.pending = it }
         // Opening the app (even if Android kept it in memory) asks "Who's watching?".
         if (AppState.loaded) AppState.profileCheckTick++
         setContent {
@@ -101,6 +103,11 @@ class MainActivity : ComponentActivity() {
     private var lastRepeat = 0L
     private var backLong = false
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        // The remote's search key: Search, listening straight away.
+        if (event.keyCode == android.view.KeyEvent.KEYCODE_SEARCH) {
+            if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0 && AppState.loaded) { Nav.root(Screen.Search); VoiceSearch.listenTick++ }
+            return true
+        }
         // Hold Back in Live TV / the Guide: return to full screen on the channel that's playing in the preview.
         if (event.keyCode == android.view.KeyEvent.KEYCODE_BACK) {
             if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount > 0) {
@@ -118,8 +125,18 @@ class MainActivity : ComponentActivity() {
     }
     private val DPAD_KEYS = setOf(android.view.KeyEvent.KEYCODE_DPAD_UP, android.view.KeyEvent.KEYCODE_DPAD_DOWN, android.view.KeyEvent.KEYCODE_DPAD_LEFT, android.view.KeyEvent.KEYCODE_DPAD_RIGHT)
 
+    /** A lumen:// link (TV home screen rows) or a search (Google Assistant / the system). */
+    private fun incoming(i: Intent?): android.net.Uri? = when (i?.action) {
+        Intent.ACTION_VIEW -> i.data?.takeIf { it.scheme == "lumen" }
+        Intent.ACTION_SEARCH, "com.google.android.gms.actions.SEARCH_ACTION" -> i.getStringExtra(android.app.SearchManager.QUERY)?.let { q ->
+            android.net.Uri.Builder().scheme("lumen").authority("search").appendQueryParameter("q", q).build()
+        }
+        else -> null
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        incoming(intent)?.let { Links.pending = it; return }
         // Back from pairing with a (new) server: reload everything.
         Net.clearCache()
         Nav.root(Screen.Home)
@@ -143,6 +160,14 @@ fun Shell(onExit: () -> Unit) {
     LaunchedEffect(AppState.loaded) {
         if (!AppState.loaded) {
             val first = !AppState.startApplied
+            // Fast start: show what the app had last time straight away; fresh data follows in the background.
+            if (first && AppState.loadSnapshot()) {
+                AppState.startApplied = true
+                AppState.checkingProfile = true
+                AppScope.launch { runCatching { AppState.refresh() }; TvHome.update(Nav.appContext, force = true) }
+                AppScope.launch { runCatching { AppState.checkProfile() }; AppState.checkingProfile = false }
+                return@LaunchedEffect
+            }
             if (first) AppState.checkingProfile = true
             AppState.refresh()
             // "Who's watching?" every time the app opens.
@@ -161,7 +186,30 @@ fun Shell(onExit: () -> Unit) {
         }
     }
     // Look for a newer app version when the app opens (offered in a small dialog).
-    LaunchedEffect(AppState.loaded) { if (AppState.loaded) Updater.autoCheck() }
+    LaunchedEffect(AppState.loaded) { if (AppState.loaded) { Updater.autoCheck(); TvHome.update(Nav.appContext) } }
+    // Links from the TV home screen and searches from Google Assistant, once the app is ready.
+    LaunchedEffect(AppState.loaded, AppState.checkingProfile, AppState.askProfile, Links.pending) {
+        val p = Links.pending
+        if (p != null && AppState.loaded && !AppState.checkingProfile && AppState.askProfile == null) { Links.pending = null; Links.handle(p) }
+    }
+    // "Now available": requested titles that arrived (Overseerr), checked every few minutes.
+    LaunchedEffect(AppState.loaded) {
+        if (!AppState.loaded) return@LaunchedEffect
+        while (true) {
+            if (AppState.discoverOn) runCatching {
+                val since = Net.prefs.alertsSince
+                val j = Net.obj("/api/discover/alerts?since=$since")
+                Net.prefs.alertsSince = j.optLong("now", System.currentTimeMillis())
+                if (since > 0) j.optJSONArray("alerts").objects().take(3).forEach { a ->
+                    AppState.alert = a
+                    kotlinx.coroutines.delay(9000)
+                    AppState.alert = null
+                    kotlinx.coroutines.delay(400)
+                }
+            }
+            kotlinx.coroutines.delay(5 * 60_000)
+        }
+    }
     // Not connected to Lumen yet (e.g. it wasn't found during setup)? Look for it once in the background.
     LaunchedEffect(AppState.loaded) {
         if (AppState.loaded && !AppState.hasLumen && !LumenLink.tried) {
@@ -238,6 +286,7 @@ fun Shell(onExit: () -> Unit) {
                             Screen.Search -> SearchScreen()
                             Screen.Live -> LiveScreen()
                             Screen.Guide -> GuideScreen()
+                            Screen.MultiView -> MultiViewScreen()
                             Screen.Recordings -> RecordingsScreen()
                             Screen.Settings -> SettingsScreen()
                             is Screen.Lib -> LibraryScreen(s.lib)
@@ -253,6 +302,37 @@ fun Shell(onExit: () -> Unit) {
         if (showRail) Rail(entries, screen, railFocus, railRequesters) { e -> Nav.root(e) }
         if (showBottomNav) BottomNav(screen, Modifier.align(Alignment.BottomCenter))
         MenuHost()
+        AlertBanner(Modifier.align(Alignment.TopCenter))
+    }
+}
+
+/** "Now available": a requested title arrived in Plex (tap on a phone to open it). */
+@Composable
+private fun AlertBanner(modifier: Modifier) {
+    var last by remember { mutableStateOf<org.json.JSONObject?>(null) }
+    AppState.alert?.let { last = it }
+    androidx.compose.animation.AnimatedVisibility(AppState.alert != null, modifier,
+        enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.slideInVertically { -it },
+        exit = androidx.compose.animation.fadeOut()) {
+        val a = last ?: return@AnimatedVisibility
+        Row(
+            Modifier.padding(top = if (LocalPortrait.current) topSafe() + 8.dp else 20.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+                .background(C.bg2.copy(alpha = 0.97f))
+                .clickable(interactionSource = androidx.compose.foundation.interaction.MutableInteractionSource(), indication = null) {
+                    val key = a.str("ratingKey") ?: return@clickable
+                    AppState.alert = null
+                    AppScope.launch { runCatching { Repo.meta(key) }.getOrNull()?.let { Nav.openDetails(it) } }
+                }
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            a.str("poster")?.let { Img(it, Modifier.width(40.dp).height(60.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))); Spacer(Modifier.width(12.dp)) }
+            Column {
+                T("Now available", 12.sp, C.accent, FontWeight.SemiBold)
+                T(a.optString("title") + (a.str("year")?.let { " ($it)" } ?: ""), 16.sp, weight = FontWeight.Bold)
+                a.str("requestedBy")?.let { T("Requested by $it", 12.sp, C.text2) }
+            }
+        }
     }
 }
 
@@ -261,6 +341,7 @@ private fun railEntries(): List<RailEntry> {
     if (AppState.providers.isNotEmpty()) {
         list += RailEntry("live", "Live TV", Ico.LiveTv, Screen.Live)
         if (AppState.isTv) list += RailEntry("guide", "Guide", Ico.Guide, Screen.Guide)
+        if (AppState.isTv) list += RailEntry("multiview", "Multi-View", Ico.Grid, Screen.MultiView)
         list += RailEntry("dvr", "Recordings", Ico.Rec, Screen.Recordings)
     }
     if (AppState.discoverOn) list += RailEntry("discover", "Discover", Ico.Compass, Screen.Discover)

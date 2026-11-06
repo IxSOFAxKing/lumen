@@ -86,4 +86,10 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // Installs the libraries' baseline profiles so Compose is compiled ahead of time on sideloaded installs.
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
+    // Android TV home screen: Watch Next and the Live TV favourites row.
+    implementation("androidx.tvprovider:tvprovider:1.0.0")
+    // Phones: cast to a Chromecast.
+    implementation("com.google.android.gms:play-services-cast-framework:21.5.0")
+    implementation("androidx.mediarouter:mediarouter:1.7.0")
+    implementation("androidx.appcompat:appcompat:1.7.0")
 }

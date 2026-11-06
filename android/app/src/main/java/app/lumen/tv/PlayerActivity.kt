@@ -166,6 +166,7 @@ class PlayerActivity : ComponentActivity() {
         exo.addListener(listener)
         if (stereo) exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().setMaxAudioChannelCount(2).build()
         applyVolumeBoost(exo.audioSessionId)
+        if (!AppState.isTv) runCatching { Cast.context(this)?.sessionManager?.addSessionManagerListener(castListener, com.google.android.gms.cast.framework.CastSession::class.java) }
         // Settings → Seek & timing → Default sleep timer
         AppState.uiNum("defaultSleep", 0.0).toLong().takeIf { it > 0 }?.let { st.sleepAt = System.currentTimeMillis() + it * 60_000 }
 
@@ -212,6 +213,12 @@ class PlayerActivity : ComponentActivity() {
             override fun brightness(delta: Float) = gestureBrightness(delta)
             override fun volume(delta: Float) = gestureVolume(delta)
             override fun pinch(zoomIn: Boolean) = gesturePinch(zoomIn)
+            override fun doubleTap(left: Boolean) {
+                if (st.live) { tap(); return }
+                val by = if (left) -seekBack() else seekFwd()
+                seekAbs(st.pos + by)
+                st.message = if (left) "« ${seekBack().toInt()} s" else "${seekFwd().toInt()} s »"; hideAt = System.currentTimeMillis()
+            }
             override fun openOptions() { source?.let { st.panel = if (it.isLive) liveOptions(it) else vodSettings(it); poke() } }
         }
 
@@ -328,6 +335,7 @@ class PlayerActivity : ComponentActivity() {
         if (src.isPlex && src.ratingKey != null) l += Btn("episodes", "Episodes")
         if (src.chapters.size > 1) l += Btn("chapters", "Chapters")
         l += Btn("settings", "Settings")
+        if (!AppState.isTv && src is PlexSource) l += Btn("cast", "Cast")
         return l
     }
 
@@ -605,6 +613,7 @@ class PlayerActivity : ComponentActivity() {
             "settings" -> st.panel = vodSettings(src)
             "chapters" -> st.panel = chaptersPanel(src)
             "episodes" -> lifecycleScope.launch { episodesPanel(src)?.let { st.panel = it; poke() } }
+            "cast" -> Cast.showPicker(this)
         }
         poke()
     }
@@ -1181,7 +1190,28 @@ class PlayerActivity : ComponentActivity() {
         @Suppress("DEPRECATION") overridePendingTransition(0, if (handedOff) R.anim.lumen_shrink else 0)
     }
 
+    // ---------- Chromecast (phones) ----------
+    private val castListener = object : Cast.Listener() {
+        override fun onSessionStarted(session: com.google.android.gms.cast.framework.CastSession, sessionId: String) = castHere(session)
+        override fun onSessionResumed(session: com.google.android.gms.cast.framework.CastSession, wasSuspended: Boolean) = castHere(session)
+        override fun onSessionEnded(session: com.google.android.gms.cast.framework.CastSession, error: Int) { st.message = "Stopped casting"; hideAt = System.currentTimeMillis() }
+    }
+    private fun castHere(session: com.google.android.gms.cast.framework.CastSession) {
+        val src = source as? PlexSource ?: run { Toast.makeText(this, "Casting works for Plex movies and shows.", Toast.LENGTH_LONG).show(); return }
+        val pos = st.pos
+        lifecycleScope.launch {
+            runCatching { src.castUrl(pos) }
+                .onSuccess { url ->
+                    Cast.load(session, url, src.title, src.subtitle, src.poster)
+                    exo.pause()
+                    st.message = "Playing on ${session.castDevice?.friendlyName ?: "your TV"}"; hideAt = System.currentTimeMillis()
+                }
+                .onFailure { Toast.makeText(this@PlayerActivity, "Couldn't cast: ${it.message}", Toast.LENGTH_LONG).show() }
+        }
+    }
+
     override fun onDestroy() {
+        if (!AppState.isTv) runCatching { Cast.context(this)?.sessionManager?.removeSessionManagerListener(castListener, com.google.android.gms.cast.framework.CastSession::class.java) }
         if (!handedOff) Volume.release(exo) // a stream handed to the Live TV preview keeps its volume
         close()
         if (PlayerBus.player?.get() === this) PlayerBus.player = null

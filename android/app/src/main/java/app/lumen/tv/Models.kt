@@ -187,6 +187,10 @@ fun fmtClock(sec: Double): String {
 private val timeFmt = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT)
 fun fmtTime(epochSec: Long): String = timeFmt.format(java.util.Date(epochSec * 1000))
 
+/** The title's trailer among Plex's extras (needs a trailer from Plex Pass / local trailers), or null. */
+fun PlexItem.trailer(): PlexItem? = raw.optJSONObject("Extras")?.optJSONArray("Metadata").objects()
+    .firstOrNull { it.optString("subtype") == "trailer" || it.optInt("extraType") == 1 }?.let { PlexItem.from(it) }
+
 /** Plex's title-logo artwork ("clearLogo") for a movie or show, like Plex/Plezy show in the banner. */
 fun PlexItem.clearLogoPath(): String? {
     raw.optJSONArray("Image").objects().firstOrNull { it.optString("type") == "clearLogo" }?.str("url")?.let { return it }

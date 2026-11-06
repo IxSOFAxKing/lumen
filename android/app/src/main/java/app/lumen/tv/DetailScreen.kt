@@ -172,6 +172,7 @@ fun DetailScreen(s: Screen.Detail) {
                             PillButton(if (resume) "Resume ${fmtClock(item.resumeSec)}" else "Play", Icons.Filled.PlayArrow, primary = true, focusRequester = playFr, memKey = "btn/play") { Nav.play(item, resume = true) }
                             if (resume) PillButton("Play from beginning", Ico.Restart, memKey = "btn/start") { Nav.play(item, resume = false) }
                         }
+                        item.trailer()?.let { t -> PillButton("Trailer", Ico.Movie, memKey = "btn/trailer") { Nav.play(t, resume = false) } }
                         PillButton(if (item.watched) "Mark unwatched" else "Mark watched", Icons.Filled.Check, memKey = "btn/watched") {
                             scope.launch {
                                 runCatching { Repo.setWatched(item.ratingKey, !item.watched) }

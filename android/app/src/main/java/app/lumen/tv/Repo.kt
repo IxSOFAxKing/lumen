@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -49,6 +50,8 @@ object AppState {
         return u
     }
     var loadError by mutableStateOf<String?>(null)
+    /** A "now available" alert being shown (from the Lumen server's Overseerr check). */
+    var alert by mutableStateOf<JSONObject?>(null)
     /** Changes whenever the app comes back to the foreground (e.g. after the player), so rows refresh. */
     var resumeTick by mutableIntStateOf(0)
 
@@ -63,6 +66,23 @@ object AppState {
     /** What the Lumen server lets this account use. */
     var perms by mutableStateOf(JSONObject())
     private var lumenDiscover = false
+
+    // ---------- start-up snapshot: show the last known state instantly, then refresh ----------
+    private fun snapFile() = java.io.File(Nav.appContext.filesDir, "snapshot.json")
+    fun loadSnapshot(): Boolean = runCatching {
+        val j = JSONObject(snapFile().readText())
+        if (j.optString("server") != (Plex.serverName + "|" + Net.server)) return false
+        ui = j.optJSONObject("ui") ?: JSONObject()
+        providers = j.optJSONArray("providers").objects().map { Provider.from(it) }.filter { it.enabled }
+        libraries = j.optJSONArray("libraries").objects().map { Library.from(it) }.filter { it.type == "movie" || it.type == "show" }
+        favLists = j.optJSONArray("favLists").objects().map { Group("__fav:${it.optInt("id")}", it.optString("name"), it.optInt("count")) }
+        perms = j.optJSONObject("perms") ?: JSONObject()
+        lumenDiscover = j.optBoolean("discover"); discoverOn = lumenDiscover && !Net.prefs.plexUserRestricted
+        plexConfigured = Plex.signedIn && Plex.hasServer; plexOnline = plexConfigured && libraries.isNotEmpty()
+        providerId = Net.prefs.providerId
+        loaded = true
+        true
+    }.getOrDefault(false)
 
     suspend fun refresh() = coroutineScope {
         val lumen = hasLumen
@@ -81,12 +101,18 @@ object AppState {
         loadError = if (lumen && s == null && prov.await() == null && !online) "Can't reach your Lumen server at ${Net.server}" else null
         ui = s?.optJSONObject("ui") ?: runCatching { JSONObject(Net.prefs.localUi ?: "{}") }.getOrDefault(JSONObject())
         providers = prov.await()?.objects()?.map { Provider.from(it) }?.filter { it.enabled } ?: emptyList()
-        if (online) runCatching { Plex.libraries() }.getOrNull()?.let { a -> libraries = a.objects().map { Library.from(it) }.filter { it.type == "movie" || it.type == "show" } }
+        val snapLibs = if (online) runCatching { Plex.libraries() }.getOrNull() else null
+        snapLibs?.let { a -> libraries = a.objects().map { Library.from(it) }.filter { it.type == "movie" || it.type == "show" } }
         favLists = favs.await()?.objects()?.map { Group("__fav:${it.optInt("id")}", it.optString("name"), it.optInt("count")) } ?: emptyList()
         auth.await()?.optJSONObject("perms")?.let { perms = it }
         lumenDiscover = disc.await()
         discoverOn = lumenDiscover && !Net.prefs.plexUserRestricted
         loaded = true
+        if (online) runCatching {
+            snapFile().writeText(JSONObject().put("server", Plex.serverName + "|" + Net.server).put("ui", ui)
+                .put("providers", prov.await() ?: JSONArray()).put("libraries", snapLibs ?: JSONArray()).put("favLists", favs.await() ?: JSONArray())
+                .put("perms", perms).put("discover", lumenDiscover).toString())
+        }
     }
 
     // ---------- server UI settings (shared with the web app) ----------
@@ -142,7 +168,18 @@ fun homeSections(includeHidden: Boolean = false): List<HomeSection> {
 
 object Repo {
     // Plex: straight from the Plex server (see PlexDirect.kt).
-    suspend fun plexHome(): JSONObject = Plex.home()
+    private var homeFromDisk = false
+    /** First time after start-up: the saved home screen straight away, refreshed in the background. */
+    suspend fun plexHome(): JSONObject {
+        if (!homeFromDisk) {
+            homeFromDisk = true
+            Plex.diskHome()?.let { saved ->
+                AppScope.launch { runCatching { Plex.home() }.onSuccess { Plex.saveHome(it); AppState.resumeTick++ } }
+                return saved
+            }
+        }
+        return Plex.home().also { Plex.saveHome(it) }
+    }
     suspend fun hubsFor(lib: String): List<Hub> = Plex.libraryHubs(lib).objects().map { Hub.from(it) }.filter { it.items.isNotEmpty() }
     suspend fun meta(key: String): PlexItem = PlexItem.from(Plex.meta(key))
     suspend fun children(key: String): List<PlexItem> = Plex.children(key).objects().map { PlexItem.from(it) }

@@ -77,6 +77,10 @@ class Prefs(context: Context) {
     var plexDefaultUser: String? get() = s("plexDefaultUser"); set(v) = s("plexDefaultUser", v)
     /** Disconnected from Lumen on purpose: don't reconnect automatically. */
     var lumenOptOut: Boolean get() = sp.getBoolean("lumenOptOut", false); set(v) = sp.edit().putBoolean("lumenOptOut", v).apply()
+    /** The Live TV row on the Android TV home screen. */
+    var homeChannelId: Long get() = sp.getLong("homeChannelId", -1); set(v) = sp.edit().putLong("homeChannelId", v).apply()
+    /** "Now available" alerts already shown (time, ms). */
+    var alertsSince: Long get() = sp.getLong("alertsSince", 0); set(v) = sp.edit().putLong("alertsSince", v).apply()
     /** App settings when there's no Lumen server to keep them. */
     var localUi: String? get() = s("localUi"); set(v) = s("localUi", v)
 }
