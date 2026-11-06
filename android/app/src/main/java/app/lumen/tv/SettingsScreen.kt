@@ -239,10 +239,17 @@ fun SettingsScreen() {
             item { SettingRow("Reload from server", "") { scope.launch { Net.clearCache(); Plex.clearCache(); AppState.refresh(); tick++ } } }
             item { SettingRow("Disconnect from this server", "", hint = "The app keeps working with Plex only") { Net.prefs.forgetServer(); Net.prefs.lumenOptOut = true; scope.launch { AppState.refresh(); tick++ } } }
         } else {
-            item {
-                SettingRow("Not connected", "Find server", hint = "Connect a Lumen server for Live TV, Discover and shared settings") {
-                    ctx.startActivity(Intent(ctx, SetupActivity::class.java).putExtra("findLumen", true))
-                }
+            item { SettingRow("Status", "Not connected", hint = "Connect a Lumen server for Live TV, Discover and shared settings") {} }
+        }
+        // Either way: look for a Lumen server on the network, or type its address.
+        item {
+            SettingRow("Search for a Lumen server", "", hint = "Finds the Lumen server for your Plex server on this network") {
+                ctx.startActivity(Intent(ctx, SetupActivity::class.java).putExtra("findLumen", true))
+            }
+        }
+        item {
+            SettingRow("Enter server address", Net.server.removePrefix("http://").ifBlank { "e.g. 192.168.1.50:8080" }, hint = "Connect to a Lumen server by its address") {
+                ctx.startActivity(Intent(ctx, SetupActivity::class.java).putExtra("lumenAddress", true))
             }
         }
         item {

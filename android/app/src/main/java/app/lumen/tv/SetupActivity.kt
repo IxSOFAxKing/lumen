@@ -48,6 +48,7 @@ class SetupActivity : ComponentActivity() {
         setContentView(root)
         when {
             intent.getBooleanExtra("findLumen", false) && Plex.signedIn -> { prefs.lumenOptOut = false; findLumen(auto = false) }
+            intent.getBooleanExtra("lumenAddress", false) && Plex.signedIn -> { prefs.lumenOptOut = false; noLumen(emptyList(), manualOnly = true) }
             !Plex.signedIn -> plexSignIn()
             !Plex.hasServer -> lifecycleScope.launch { chooseServer(prefs.plexToken!!) }
             else -> done()
@@ -179,9 +180,10 @@ class SetupActivity : ComponentActivity() {
         setScreen(box)
     }
 
-    private fun noLumen(others: List<Discovery.Server>) {
-        val box = screen("No Lumen server found", "That's fine: Plex works on its own. Live TV, Discover and shared settings need a Lumen server; you can connect one later in Settings.")
-        val go = Ui.button(this, "Continue with Plex", primary = true) { prefs.forgetServer(); done() }
+    private fun noLumen(others: List<Discovery.Server>, manualOnly: Boolean = false) {
+        val box = if (manualOnly) screen("Connect to a Lumen server", "Enter its address, or search your network.")
+            else screen("No Lumen server found", "That's fine: Plex works on its own. Live TV, Discover and shared settings need a Lumen server; you can connect one later in Settings.")
+        val go = Ui.button(this, if (manualOnly) "Cancel" else "Continue with Plex", primary = !manualOnly) { if (!manualOnly) prefs.forgetServer(); done() }
         box.addView(go)
         box.addView(Ui.gap(this, 14))
         others.forEach { s ->
