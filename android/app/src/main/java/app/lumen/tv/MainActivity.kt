@@ -153,6 +153,13 @@ fun Shell(onExit: () -> Unit) {
     }
     // Look for a newer app version when the app opens (offered in a small dialog).
     LaunchedEffect(AppState.loaded) { if (AppState.loaded) Updater.autoCheck() }
+    // Not connected to Lumen yet (e.g. it wasn't found during setup)? Look for it once in the background.
+    LaunchedEffect(AppState.loaded) {
+        if (AppState.loaded && !AppState.hasLumen && !LumenLink.tried) {
+            LumenLink.tried = true
+            if (LumenLink.autoConnect()) AppState.loaded = false
+        }
+    }
     LaunchedEffect(AppState.profileCheckTick) { if (AppState.profileCheckTick > 0) AppState.checkProfile() }
     if (!AppState.loaded || AppState.checkingProfile) { Box(Modifier.fillMaxSize().background(C.bg)) { Loading(Modifier.align(Alignment.Center)) }; return }
     AppState.askProfile?.let { pu -> WhoIsWatching(pu, onExit) { AppState.askProfile = null; Net.clearCache(); Nav.memory.clear(); AppState.resumeTick++ }; return }

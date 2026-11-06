@@ -88,11 +88,16 @@ object Plex {
     // ------------------------------------------------------------------ sign in (plex.tv/link)
     data class Pin(val id: String, val code: String)
 
-    /** A 4-character code to enter at plex.tv/link. */
-    suspend fun createPin(): Pin {
-        val j = JSONObject(http("POST", tvUrl("/api/v2/pins", mapOf("strong" to "false")), null))
+    /** strong = false: a 4-character code to enter at plex.tv/link. strong = true: for the sign-in link in the QR code. */
+    suspend fun createPin(strong: Boolean = false): Pin {
+        val j = JSONObject(http("POST", tvUrl("/api/v2/pins", mapOf("strong" to strong.toString())), null))
         return Pin(j.optString("id"), j.optString("code"))
     }
+
+    /** Plex's sign-in page for a strong PIN (what the QR code opens on a phone). */
+    fun authUrl(code: String): String = "https://app.plex.tv/auth#?" + Uri.Builder()
+        .appendQueryParameter("clientID", clientId).appendQueryParameter("code", code)
+        .appendQueryParameter("context[device][product]", "Lumen").build().encodedQuery
 
     /** The account token once the code was entered, else null. */
     suspend fun checkPin(id: String): String? =

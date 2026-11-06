@@ -75,6 +75,8 @@ class Prefs(context: Context) {
     var plexUserUuid: String? get() = s("plexUserUuid"); set(v) = s("plexUserUuid", v)
     var plexUserRestricted: Boolean get() = sp.getBoolean("plexUserRestricted", false); set(v) = sp.edit().putBoolean("plexUserRestricted", v).apply()
     var plexDefaultUser: String? get() = s("plexDefaultUser"); set(v) = s("plexDefaultUser", v)
+    /** Disconnected from Lumen on purpose: don't reconnect automatically. */
+    var lumenOptOut: Boolean get() = sp.getBoolean("lumenOptOut", false); set(v) = sp.edit().putBoolean("lumenOptOut", v).apply()
     /** App settings when there's no Lumen server to keep them. */
     var localUi: String? get() = s("localUi"); set(v) = s("localUi", v)
 }

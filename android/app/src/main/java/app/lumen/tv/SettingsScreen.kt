@@ -237,7 +237,7 @@ fun SettingsScreen() {
                 }
             }
             item { SettingRow("Reload from server", "") { scope.launch { Net.clearCache(); Plex.clearCache(); AppState.refresh(); tick++ } } }
-            item { SettingRow("Disconnect from this server", "", hint = "The app keeps working with Plex only") { Net.prefs.forgetServer(); scope.launch { AppState.refresh(); tick++ } } }
+            item { SettingRow("Disconnect from this server", "", hint = "The app keeps working with Plex only") { Net.prefs.forgetServer(); Net.prefs.lumenOptOut = true; scope.launch { AppState.refresh(); tick++ } } }
         } else {
             item {
                 SettingRow("Not connected", "Find server", hint = "Connect a Lumen server for Live TV, Discover and shared settings") {

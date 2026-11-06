@@ -16,13 +16,23 @@ import java.net.URL
 object Discovery {
     data class Server(val url: String, val name: String, val version: String, val authRequired: Boolean, val plexMachineId: String? = null)
 
+    /**
+     * This device's address on the local network. Wi-Fi / Ethernet first: phones also have a mobile-data interface
+     * (rmnet…) whose 10.x carrier address must not be scanned.
+     */
     fun localIpv4(): String? = try {
+        val private = Regex("^(192\\.168\\.|10\\.|172\\.(1[6-9]|2\\d|3[01])\\.)")
+        fun rank(name: String) = when {
+            name.startsWith("wlan") || name.startsWith("eth") || name.startsWith("en") -> 0
+            name.startsWith("ap") || name.startsWith("swlan") -> 1
+            name.startsWith("rmnet") || name.startsWith("ccmni") || name.startsWith("v4-") || name.startsWith("tun") || name.startsWith("pdp") -> 9
+            else -> 5
+        }
         NetworkInterface.getNetworkInterfaces().toList()
             .filter { it.isUp && !it.isLoopback && !it.isVirtual }
-            .flatMap { it.inetAddresses.toList() }
-            .filterIsInstance<Inet4Address>()
-            .mapNotNull { it.hostAddress }
-            .firstOrNull { it.startsWith("192.168.") || it.startsWith("10.") || Regex("^172\\.(1[6-9]|2\\d|3[01])\\.").containsMatchIn(it) }
+            .sortedBy { rank(it.name ?: "") }
+            .flatMap { i -> i.inetAddresses.toList().filterIsInstance<Inet4Address>().mapNotNull { it.hostAddress }.map { rank(i.name ?: "") to it } }
+            .firstOrNull { (r, ip) -> r < 9 && private.containsMatchIn(ip) }?.second
     } catch (e: Exception) { null }
 
     suspend fun scan(ports: List<Int> = listOf(8080)): List<Server> = coroutineScope {

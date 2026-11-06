@@ -3,7 +3,6 @@ package app.lumen.tv
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.text.InputType
@@ -48,7 +47,7 @@ class SetupActivity : ComponentActivity() {
         root = FrameLayout(this).apply { setBackgroundColor(Ui.BG) }
         setContentView(root)
         when {
-            intent.getBooleanExtra("findLumen", false) && Plex.signedIn -> findLumen(auto = false)
+            intent.getBooleanExtra("findLumen", false) && Plex.signedIn -> { prefs.lumenOptOut = false; findLumen(auto = false) }
             !Plex.signedIn -> plexSignIn()
             !Plex.hasServer -> lifecycleScope.launch { chooseServer(prefs.plexToken!!) }
             else -> done()
@@ -89,6 +88,8 @@ class SetupActivity : ComponentActivity() {
         busy("Sign in with Plex", "Getting a code…")
         job = lifecycleScope.launch {
             val pin = try { Plex.createPin() } catch (e: Exception) { showError("Couldn't reach plex.tv", e.message ?: "Check this device's internet connection.") { plexSignIn() }; return@launch }
+            // The QR code needs its own (long) PIN: Plex's sign-in page doesn't accept the short plex.tv/link code.
+            val qrPin = runCatching { Plex.createPin(strong = true) }.getOrNull()
             val box = screen("Sign in with Plex", "On your phone or computer, go to plex.tv/link and enter this code, or scan the QR code.", 36)
             val row = Ui.hbox(this@SetupActivity)
             val codeBox = Ui.vbox(this@SetupActivity, Gravity.CENTER).apply {
@@ -97,9 +98,7 @@ class SetupActivity : ComponentActivity() {
                 addView(Ui.text(this@SetupActivity, pin.code, 64f, Ui.ACCENT, bold = true).apply { letterSpacing = 0.18f })
             }
             row.addView(codeBox, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            val authUrl = "https://app.plex.tv/auth#?" + Uri.Builder().appendQueryParameter("clientID", prefs.plexClientId ?: "")
-                .appendQueryParameter("code", pin.code).appendQueryParameter("context[device][product]", "Lumen").build().encodedQuery
-            qr(authUrl, dp(220))?.let { bmp ->
+            qrPin?.let { qr(Plex.authUrl(it.code), dp(220)) }?.let { bmp ->
                 row.addView(ImageView(this@SetupActivity).apply { setImageBitmap(bmp); setBackgroundColor(Color.WHITE); setPadding(dp(10), dp(10), dp(10), dp(10)) },
                     LinearLayout.LayoutParams(dp(240), dp(240)))
             }
@@ -112,7 +111,7 @@ class SetupActivity : ComponentActivity() {
             val started = System.currentTimeMillis()
             while (isActive) {
                 delay(2000)
-                val token = runCatching { Plex.checkPin(pin.id) }.getOrNull()
+                val token = runCatching { Plex.checkPin(pin.id) }.getOrNull() ?: qrPin?.let { q -> runCatching { Plex.checkPin(q.id) }.getOrNull() }
                 if (token != null) { chooseServer(token); return@launch }
                 if (System.currentTimeMillis() - started > 14 * 60_000) { plexSignIn(); return@launch } // codes expire
             }
@@ -227,9 +226,7 @@ class SetupActivity : ComponentActivity() {
     private suspend fun signInToLumen(url: String, name: String, auto: Boolean) {
         busy("Signing in to $name…", url.removePrefix("http://"))
         try {
-            val r = Api.post("$url/api/auth/plex/token", JSONObject().put("token", prefs.plexToken).put("name", (Build.MODEL ?: "Android").trim())
-                .put("platform", if (AppState.isTv) "android-tv" else "android-phone"), timeoutMs = 20_000)
-            prefs.server = url; prefs.serverName = name; prefs.token = r.getString("token")
+            LumenLink.signIn(url, name)
             done()
         } catch (e: Exception) {
             val box = screen("Couldn't sign in to $name", e.message ?: "Network error")
@@ -266,5 +263,29 @@ class SetupActivity : ComponentActivity() {
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK && !(Plex.signedIn && Plex.hasServer)) { finishAffinity(); return true }
         return super.onKeyDown(keyCode, event)
+    }
+}
+
+/** Finding the Lumen server that belongs to this Plex server, and signing in to it with the Plex account. */
+object LumenLink {
+    /** Looked for a Lumen server in the background since the app started. */
+    var tried = false
+
+    suspend fun signIn(url: String, name: String) {
+        val p = Net.prefs
+        val r = Api.post("$url/api/auth/plex/token", JSONObject().put("token", p.plexToken).put("name", (Build.MODEL ?: "Android").trim())
+            .put("platform", if (AppState.isTv) "android-tv" else "android-phone"), timeoutMs = 20_000)
+        p.server = url; p.serverName = name; p.token = r.getString("token"); p.lumenOptOut = false
+        Net.clearCache()
+    }
+
+    /** Quietly connect when exactly one Lumen server for our Plex server is on the network. */
+    suspend fun autoConnect(): Boolean {
+        val p = Net.prefs
+        if (p.isPaired || p.lumenOptOut || !Plex.signedIn) return false
+        val mid = p.plexMachineId ?: return false
+        val mine = Discovery.scan().filter { it.plexMachineId == mid }
+        if (mine.size != 1) return false
+        return runCatching { signIn(mine[0].url, mine[0].name) }.isSuccess
     }
 }
