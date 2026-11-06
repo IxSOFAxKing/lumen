@@ -7,13 +7,17 @@ import { tvModeSetting, setTvModeSetting, tvDetected } from '../tv.js';
 
 export default async function settings(el, route) {
   el.className = 'page settings';
-  const tab = route.query.tab || 'plex';
-  const tabs = [['plex', 'Plex'], ['iptv', 'IPTV Providers'], ['discover', 'Discover'], ['appearance', 'Appearance'], ['playback', 'Playback'], ['devices', 'Devices'], ['transcode', 'Transcoding'], ['system', 'System']];
+  // The owner sees everything; people signed in with their own Plex account only see their own settings.
+  const isAdmin = store.auth?.perms?.admin !== false;
+  const tabs = isAdmin
+    ? [['plex', 'Plex'], ['iptv', 'IPTV Providers'], ['discover', 'Discover'], ['appearance', 'Appearance'], ['playback', 'Playback'], ['people', 'People'], ['devices', 'Devices'], ['transcode', 'Transcoding'], ['system', 'System']]
+    : [['appearance', 'Appearance'], ['playback', 'Playback'], ['account', 'Account']];
+  const tab = tabs.some(([k]) => k === route.query.tab) ? route.query.tab : tabs[0][0];
   el.append(h('div', { class: 'page-head' }, h('h1', {}, 'Settings')),
     h('div', { class: 'tabs' }, tabs.map(([k, l]) => h('a', { class: `tab ${tab === k ? 'active' : ''}`, href: `#/settings?tab=${k}` }, l))));
   const body = h('div');
   el.append(body);
-  const fn = { plex: plexTab, iptv: iptvTab, discover: discoverTab, appearance: appearanceTab, transcode: transcodeTab, playback: playbackTab, devices: devicesTab, system: systemTab }[tab] || plexTab;
+  const fn = { plex: plexTab, iptv: iptvTab, discover: discoverTab, appearance: appearanceTab, transcode: transcodeTab, playback: playbackTab, people: peopleTab, devices: devicesTab, system: systemTab, account: accountTab }[tab] || appearanceTab;
   return fn(body, route);
 }
 
@@ -292,7 +296,7 @@ async function transcodeTab(el) {
 // ---------------- Playback / UI ----------------
 async function playbackTab(el) {
   const all = await api.get('/api/settings');
-  const ui = withDeviceOverrides(all.ui), iptv = all.iptv;
+  const ui = withDeviceOverrides(all.ui), iptv = store.auth?.perms?.admin === false ? null : all.iptv;
   const saveUiPB = async patch => { await saveUi(patch, api.put); Object.assign(ui, patch); await refreshStore(); toast('Saved', { type: 'ok', timeout: 1200 }); };
   const saveIptv = async patch => { Object.assign(iptv, await api.put('/api/settings/iptv', patch)); toast('Saved', { type: 'ok', timeout: 1200 }); };
   const field = (label, control, hint) => h('label', { class: 'field' }, label, control, hint ? h('span', { class: 'dim small' }, hint) : null);
@@ -310,7 +314,7 @@ async function playbackTab(el) {
     h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: ui.showPreview, onChange: e => saveUiPB({ showPreview: e.target.checked }) }), 'Show live preview when selecting a channel'),
     h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!ui.resumeLastChannel, onChange: e => saveUiPB({ resumeLastChannel: e.target.checked }) }), 'Start playing the last watched channel when Lumen opens'),
     h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: ui.zapWrap !== false, onChange: e => saveUiPB({ zapWrap: e.target.checked }) }), 'Channel up/down wraps around from the last channel to the first')),
-  h('div', { class: 'card-box', style: { marginTop: '18px' } }, h('h3', { style: { marginTop: 0 } }, 'IPTV'),
+  !iptv ? null : h('div', { class: 'card-box', style: { marginTop: '18px' } }, h('h3', { style: { marginTop: 0 } }, 'IPTV'),
     h('div', { class: 'set-grid' },
       field('Playlist refresh (hours)', num(iptv, 'playlistRefreshHours', saveIptv, 1, 168)),
       field('EPG refresh (hours)', num(iptv, 'epgRefreshHours', saveIptv, 1, 168)),
@@ -372,8 +376,8 @@ async function systemTab(el) {
   el.append(h('div', { class: 'card-box' }, h('h3', { style: { marginTop: 0 } }, 'Active transcoding sessions'), sess),
 
     h('div', { class: 'card-box', style: { marginTop: '18px' } }, h('h3', { style: { marginTop: 0 } }, 'Security'),
-      h('p', { class: 'muted' }, `Signed in as ${auth.username || 'admin'}.`, auth.envManaged ? ' The login is set with LUMEN_USERNAME / LUMEN_PASSWORD in docker-compose.yml.' : ''),
-      auth.envManaged ? null : accountForm(auth),
+      h('p', { class: 'muted' }, `Signed in as ${auth.username || 'admin'}${auth.account ? ' (Plex)' : ''}.`, !auth.account && auth.envManaged ? ' The login is set with LUMEN_USERNAME / LUMEN_PASSWORD in docker-compose.yml.' : ''),
+      auth.envManaged || auth.account ? null : accountForm(auth),
       btn('Sign out', async () => { await api.post('/api/auth/logout'); location.reload(); }, { iconName: 'logout' })));
   // Backup / restore
   const withProv = h('input', { type: 'checkbox' });
@@ -402,6 +406,49 @@ async function systemTab(el) {
   await load();
   const t = setInterval(load, 5000);
   return () => clearInterval(t);
+}
+
+// ---------------- Account (people signed in with their own Plex account) ----------------
+async function accountTab(el) {
+  const auth = await api.get('/api/auth/status');
+  const a = auth.account || {};
+  const yes = v => v ? 'Yes' : 'No';
+  el.append(h('div', { class: 'card-box', style: { maxWidth: '640px' } }, h('h3', { style: { marginTop: 0 } }, 'Your account'),
+    h('div', { class: 'row', style: { gap: '14px', marginBottom: '14px' } },
+      a.thumb ? h('img', { src: a.thumb, alt: '', style: { width: '56px', height: '56px', borderRadius: '50%' } }) : null,
+      h('div', {}, h('b', {}, a.title || auth.username), h('div', { class: 'dim small' }, `Signed in with Plex · ${a.role === 'home' ? 'Plex Home member' : 'Shared with you'}`))),
+    h('dl', { class: 'kv' }, h('dt', {}, 'Live TV'), h('dd', {}, yes(auth.perms?.live)), h('dt', {}, 'Discover'), h('dd', {}, yes(auth.perms?.discover))),
+    h('p', { class: 'muted small' }, 'Your appearance and player settings are your own. The server owner decides which features your account can use.'),
+    btn('Sign out', async () => { await api.post('/api/auth/logout'); location.reload(); }, { iconName: 'logout' })));
+}
+
+// ---------------- People (who signed in with Plex, and what they may use) ----------------
+async function peopleTab(el) {
+  const box = h('div');
+  el.append(h('div', { class: 'card-box', style: { marginBottom: '18px' } }, h('h3', { style: { marginTop: 0 } }, 'People'),
+    h('p', { class: 'muted small', style: { marginTop: 0 } }, 'Anyone with access to your Plex server can sign in with Plex: you, your Plex Home members and friends you\'ve shared the server with. Home members get Live TV and Discover; friends get Plex only unless you turn them on here. Removing someone\'s share in Plex signs them out of Lumen too.'),
+    box));
+  const ROLE = { owner: 'Owner', home: 'Plex Home', friend: 'Friend' };
+  const draw = async () => {
+    const { accounts } = await api.get('/api/accounts');
+    if (!accounts.length) { box.replaceChildren(h('div', { class: 'dim' }, 'Nobody has signed in with Plex yet.')); return; }
+    const set = async (a, patch) => { try { await api.put(`/api/accounts/${a.id}`, patch); draw(); } catch (e) { toastErr(e); } };
+    const toggle = (a, key) => a.role === 'owner' ? h('span', { class: 'dim small' }, 'Always')
+      : h('input', { type: 'checkbox', checked: a[key], title: a[`${key}Set`] ? 'Set by you' : 'Default for this kind of account', onChange: e => set(a, { [key]: e.target.checked }) });
+    box.replaceChildren(h('table', { class: 'tbl' },
+      h('thead', {}, h('tr', {}, ['Person', 'Type', 'Live TV', 'Discover', 'Last seen', ''].map(t => h('th', {}, t)))),
+      h('tbody', {}, accounts.map(a => h('tr', { style: a.blocked ? { opacity: 0.55 } : {} },
+        h('td', {}, h('div', { class: 'row', style: { gap: '10px' } }, a.thumb ? h('img', { src: a.thumb, alt: '', style: { width: '28px', height: '28px', borderRadius: '50%' } }) : null,
+          h('div', {}, h('b', {}, a.title), a.username && a.username !== a.title ? h('div', { class: 'dim small' }, a.username) : null))),
+        h('td', {}, ROLE[a.role] || a.role, a.blocked ? h('span', { class: 'badge', style: { marginLeft: '6px' } }, 'BLOCKED') : null),
+        h('td', {}, toggle(a, 'live')), h('td', {}, toggle(a, 'discover')),
+        h('td', {}, a.lastSeen ? fmtDateTime(a.lastSeen) : '—'),
+        h('td', { style: { textAlign: 'right', whiteSpace: 'nowrap' } }, a.role === 'owner' ? null : [
+          btn(a.blocked ? 'Unblock' : 'Block', () => set(a, { blocked: !a.blocked }), { cls: 'sm' }),
+          btn('Sign out', async () => { if (await confirmDialog(`Sign ${a.title} out?`, 'They are signed out on every device. They can sign in again with Plex unless you block them.', { okLabel: 'Sign out', danger: true })) { await api.del(`/api/accounts/${a.id}`); draw(); } }, { cls: 'sm danger' }),
+        ]))))));
+  };
+  await draw();
 }
 
 // ---------------- Appearance ----------------

@@ -7,6 +7,8 @@ import * as devices from './services/devices.js';
 import { config } from './config.js';
 import { db } from './db.js';
 import * as auth from './auth.js';
+import * as accounts from './services/accounts.js';
+import * as plexSvc from './services/plex.js';
 import plexRoutes from './routes/plex.js';
 import discoverRoutes from './routes/discover.js';
 import iptvRoutes from './routes/iptv.js';
@@ -33,9 +35,15 @@ app.get('/api/auth/status', auth.status);
 app.post('/api/auth/setup', auth.setup);
 app.post('/api/auth/login', auth.login);
 app.post('/api/auth/logout', auth.logout);
+// Sign in with Plex (web pop-up flow, and apps that signed in to Plex themselves).
+app.post('/api/auth/plex/pin', auth.plexPinStart);
+app.get('/api/auth/plex/pin/:id', auth.plexPinCheck);
+app.post('/api/auth/plex/token', auth.plexToken);
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url))).version;
 // Used by the Android TV app to discover Lumen servers on the local network.
-app.get('/api/health', (req, res) => res.json({ ok: true, app: 'lumen', version: VERSION, name: process.env.LUMEN_NAME || os.hostname(), authRequired: auth.authEnabled() }));
+app.get('/api/health', (req, res) => res.json({ ok: true, app: 'lumen', version: VERSION, name: process.env.LUMEN_NAME || os.hostname(), authRequired: auth.authEnabled(),
+  // Apps signed in with Plex use these to find the Lumen server that belongs to their Plex server.
+  plexLogin: plexSvc.isConfigured() && !!plexSvc.plexConf().machineId, plexMachineId: plexSvc.plexConf().machineId || null }));
 
 // ---------- Device pairing (no login needed to *request* pairing; a signed-in user approves it) ----------
 app.post('/api/pair/start', (req, res, next) => {
@@ -47,42 +55,77 @@ app.get(['/tv.apk', '/tv'], (req, res) => res.redirect(302, 'https://github.com/
 app.use('/api', auth.requireAuth);
 
 // ---------- Settings & system ----------
-app.put('/api/auth/account', auth.changeAccount);
-app.get('/api/devices', (req, res) => res.json({ devices: devices.listDevices(), pending: devices.pendingPairings(), current: req.device?.id || null }));
-app.post('/api/pair/approve', (req, res, next) => { try { res.json(devices.approvePairing(req.body?.code, req.body?.name)); } catch (e) { next(e); } });
-app.put('/api/devices/:id', (req, res) => { devices.renameDevice(req.params.id, req.body?.name || 'Device'); res.json({ ok: true }); });
-app.delete('/api/devices/:id', (req, res) => { devices.revokeDevice(req.params.id); res.json({ ok: true }); });
-app.get('/api/settings', (req, res) => res.json(allConfig()));
-app.put('/api/settings/:section', (req, res) => {
+const admin = auth.requireAdmin;
+app.put('/api/auth/account', admin, auth.changeAccount);
+app.get('/api/devices', admin, (req, res) => res.json({ devices: devices.listDevices(), pending: devices.pendingPairings(), current: req.device?.id || null }));
+app.post('/api/pair/approve', admin, (req, res, next) => { try { res.json(devices.approvePairing(req.body?.code, req.body?.name)); } catch (e) { next(e); } });
+app.put('/api/devices/:id', admin, (req, res) => { devices.renameDevice(req.params.id, req.body?.name || 'Device'); res.json({ ok: true }); });
+app.delete('/api/devices/:id', admin, (req, res) => { devices.revokeDevice(req.params.id); res.json({ ok: true }); });
+
+// People who signed in with Plex, and what they may use (owner only).
+app.get('/api/accounts', admin, (req, res) => res.json({ accounts: accounts.list() }));
+app.put('/api/accounts/:id', admin, (req, res, next) => { try { res.json(accounts.update(req.params.id, req.body || {})); } catch (e) { next(e); } });
+app.delete('/api/accounts/:id', admin, (req, res) => { accounts.remove(req.params.id); res.json({ ok: true }); });
+
+/** Accounts other than the owner keep their own app settings, over the server's defaults. */
+const ownUi = req => req.account && req.account.role !== 'owner';
+app.get('/api/settings', (req, res) => {
+  const all = allConfig();
+  // Plex tokens never leave the server.
+  all.plex = { configured: plexSvc.isConfigured(), serverName: all.plex.serverName || '', machineId: all.plex.machineId || '' };
+  if (ownUi(req)) all.ui = { ...all.ui, ...accounts.accountUi(req.account) };
+  if (!req.perms.admin) { delete all.transcode; }
+  res.json(all);
+});
+app.put('/api/settings/:section', (req, res, next) => {
   const { section } = req.params;
   if (!DEFAULTS[section] || section === 'plex') return res.status(400).json({ error: 'Unknown section' });
+  if (section === 'ui' && ownUi(req)) return res.json({ ...getConfig('ui'), ...accounts.saveAccountUi(req.account, req.body || {}) });
+  if (!req.perms.admin) return admin(req, res, next);
   const before = getConfig(section);
   const after = setConfig(section, req.body || {});
   if (section === 'iptv' && (before.vodEnabled !== false) !== (after.vodEnabled !== false)) applyVodSwitch(after.vodEnabled !== false);
   res.json(after);
 });
-app.get('/api/settings/export', (req, res) => {
+app.get('/api/settings/export', admin, (req, res) => {
   const data = exportAll({ includeProviders: req.query.providers === '1' });
   res.setHeader('Content-Disposition', `attachment; filename="lumen-settings-${new Date().toISOString().slice(0, 10)}.json"`);
   res.json(data);
 });
-app.post('/api/settings/import', (req, res, next) => {
+app.post('/api/settings/import', admin, (req, res, next) => {
   try { const report = importAll(req.body); res.json(report); for (const p of db.prepare('SELECT id FROM providers WHERE last_sync IS NULL').all()) syncProvider(p.id).catch(() => {}); }
   catch (e) { next(e); }
 });
-app.get('/api/system/hardware', async (req, res, next) => { try { res.json(await detectHardware()); } catch (e) { next(e); } });
-app.get('/api/system/sessions', (req, res) => res.json(listSessions()));
-app.delete('/api/system/sessions/:id', (req, res) => res.json({ stopped: stopSession(req.params.id) }));
+app.get('/api/system/hardware', admin, async (req, res, next) => { try { res.json(await detectHardware()); } catch (e) { next(e); } });
+app.get('/api/system/sessions', admin, (req, res) => res.json(listSessions()));
+app.delete('/api/system/sessions/:id', admin, (req, res) => res.json({ stopped: stopSession(req.params.id) }));
 
 app.get('/api/img', (req, res) => {
   const { u, s } = req.query;
   if (!u || !/^https?:\/\//i.test(u) || !verifyImg(u, s)) return res.status(403).end();
   serveCachedImage(`url|${u}`, () => fetch(u, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(15000), redirect: 'follow' }), res);
 });
-app.use('/api/plex', plexRoutes);
-app.use('/api/discover', discoverRoutes);
-app.use('/api/iptv', iptvRoutes);
-app.use('/api/stream', streamRoutes);
+// Connecting / disconnecting Plex is the owner's job.
+app.use('/api/plex', (req, res, next) => (/^\/(connect|disconnect|servers|pin|users\/default)\b/.test(req.path) && !req.perms.admin ? admin(req, res, next) : next()), plexRoutes);
+// Discover: per-account permission (the Overseerr connection itself is owner-only).
+app.use('/api/discover', (req, res, next) => {
+  if (req.method === 'PUT' && req.path === '/config') return admin(req, res, next);
+  if (req.perms.discover) return next();
+  if (req.method === 'GET' && req.path === '/config') return res.json({ url: '', configured: false, blocked: true });
+  return auth.requirePerm('discover')(req, res, next);
+}, discoverRoutes);
+// Live TV: per-account permission. Watching is open to anyone allowed Live TV; favourites, recordings and
+// reminders need a Home member (or the owner); providers and channel-list edits are owner-only.
+const IPTV_MANAGE = /^\/(favorites|recordings|reminders|progress|fav-lists)\b/;
+const IPTV_OPEN = /^\/(play\/|parental\/unlock|progress)/;
+app.use('/api/iptv', auth.requirePerm('live'), (req, res, next) => {
+  if (req.method === 'GET' || IPTV_OPEN.test(req.path)) return next();
+  if (/^\/fav-lists/.test(req.path) && req.method !== 'GET' && !req.perms.admin) return admin(req, res, next);
+  if (IPTV_MANAGE.test(req.path)) return req.perms.manage ? next() : auth.requirePerm('manage')(req, res, next);
+  return admin(req, res, next);
+}, iptvRoutes);
+// Live streams need Live TV; built-in transcoder sessions (also used for Plex) are open to everyone signed in.
+app.use('/api/stream', (req, res, next) => (/^\/(live|proxy)\b/.test(req.path) ? auth.requirePerm('live')(req, res, next) : next()), streamRoutes);
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 

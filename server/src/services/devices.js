@@ -14,6 +14,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS devices (
 )`);
 
 try { db.exec('ALTER TABLE devices ADD COLUMN plex_user TEXT'); } catch { /* exists */ }
+// The Plex account a device signed in with ("Sign in with Plex"); NULL for devices paired with a code.
+try { db.exec('ALTER TABLE devices ADD COLUMN plex_account TEXT'); } catch { /* exists */ }
 
 const hash = t => crypto.createHash('sha256').update(String(t)).digest('hex');
 const PAIR_TTL = 10 * 60 * 1000;
@@ -32,9 +34,9 @@ function newCode() {
   }
 }
 
-function issueToken(name, platform, ip) {
+function issueToken(name, platform, ip, account = null) {
   const token = crypto.randomBytes(32).toString('base64url');
-  const r = db.prepare('INSERT INTO devices(name, platform, token_hash, last_seen, last_ip) VALUES (?,?,?,unixepoch(),?)').run(name, platform || null, hash(token), ip || null);
+  const r = db.prepare('INSERT INTO devices(name, platform, token_hash, last_seen, last_ip, plex_account) VALUES (?,?,?,unixepoch(),?,?)').run(name, platform || null, hash(token), ip || null, account);
   return { token, deviceId: Number(r.lastInsertRowid) };
 }
 
@@ -69,6 +71,11 @@ export function approvePairing(code, nameOverride) {
   return { name: p.name, platform: p.platform };
 }
 
+/** A device that signed in with Plex gets its own token, tied to that Plex account. */
+export function issueAccountToken({ name, platform }, account, ip) {
+  return issueToken(String(name || 'Device').slice(0, 60), String(platform || '').slice(0, 30), ip, String(account));
+}
+
 export function pendingPairings() {
   cleanup();
   return [...pairs.values()].filter(p => p.status === 'pending').map(p => ({ code: p.code, name: p.name, platform: p.platform, age: Math.round((Date.now() - p.created) / 1000) }));
@@ -88,7 +95,7 @@ export function deviceForToken(token, ip) {
 }
 
 export function listDevices() {
-  return db.prepare('SELECT id, name, platform, created_at, last_seen, last_ip FROM devices ORDER BY last_seen DESC').all();
+  return db.prepare('SELECT d.id, d.name, d.platform, d.created_at, d.last_seen, d.last_ip, d.plex_account, a.title AS account_title FROM devices d LEFT JOIN accounts a ON a.plex_id = d.plex_account ORDER BY d.last_seen DESC').all();
 }
 export function renameDevice(id, name) { db.prepare('UPDATE devices SET name = ? WHERE id = ?').run(String(name).slice(0, 60), Number(id)); }
 export function revokeDevice(id) { db.prepare('DELETE FROM devices WHERE id = ?').run(Number(id)); }

@@ -101,7 +101,8 @@ function renderNav(route) {
     kids.push(item(e));
   });
   kids.push(h('div', { class: 'spacer' }));
-  if (store.plex?.online) kids.push(h('a', { class: 'nav-item', href: '#', title: 'Switch user', html: `${icon('users')}<span>Switch user</span>`, onClick: e => { e.preventDefault(); askWhoIsWatching(true); } }));
+  const ownAccount = store.auth?.account && store.auth.account.role !== 'owner'; // signed in as themselves: nobody to switch to
+  if (store.plex?.online && !ownAccount) kids.push(h('a', { class: 'nav-item', href: '#', title: 'Switch user', html: `${icon('users')}<span>Switch user</span>`, onClick: e => { e.preventDefault(); askWhoIsWatching(true); } }));
   kids.push(item({ href: '#/settings', label: 'Settings', icon: 'settings', active: route.name === 'settings' }));
   nav.replaceChildren(...kids);
 }
@@ -135,7 +136,25 @@ export function activeProvider() {
 export function setActiveProvider(id) { prefs.set('provider', Number(id)); }
 
 // ---------- Login ----------
-async function showLogin({ setup = false } = {}) {
+/** Sign in with Plex: plex.tv opens in a pop-up; Lumen checks the account can use its Plex server. */
+async function plexSignIn(err, button) {
+  const popup = window.open('', 'plexauth', 'width=600,height=720');
+  button.disabled = true; err.textContent = '';
+  try {
+    const pin = await api.post('/api/auth/plex/pin');
+    if (popup) popup.location.href = pin.authUrl; else location.href = pin.authUrl;
+    const until = Date.now() + 5 * 60000;
+    while (Date.now() < until) {
+      await new Promise(r => setTimeout(r, 1500));
+      const r = await api.get(`/api/auth/plex/pin/${encodeURIComponent(pin.id)}`);
+      if (r.authorized) { try { popup?.close(); } catch { /* ignore */ } location.reload(); return; }
+      if (popup && popup.closed) { err.textContent = 'Plex sign-in was closed.'; break; }
+    }
+  } catch (e) { err.textContent = e.message; try { popup?.close(); } catch { /* ignore */ } }
+  button.disabled = false;
+}
+
+async function showLogin({ setup = false, plex = false, server = null } = {}) {
   if (document.querySelector('.login')) return;
   document.getElementById('app').classList.add('hidden');
   const user = h('input', { class: 'input', type: 'text', placeholder: 'Username', autocomplete: 'username', autocapitalize: 'off', style: { width: '100%', marginBottom: '10px' } });
@@ -152,8 +171,12 @@ async function showLogin({ setup = false } = {}) {
     } catch (ex) { err.textContent = ex.message; }
   } }, h('img', { src: '/img/icon.svg', alt: '' }), h('h2', { style: { margin: '0 0 6px' } }, setup ? 'Welcome to Lumen' : 'Lumen'),
     setup ? h('p', { class: 'muted small', style: { margin: '0 0 16px' } }, 'Create the username and password that will protect this Lumen server.') : h('div', { style: { height: '12px' } }),
+    !setup && plex ? h('div', {},
+      h('button', { class: 'btn primary', type: 'button', style: { width: '100%', background: '#e5a00d', borderColor: '#e5a00d', color: '#1a1a1a', fontWeight: 600 }, onClick: e => plexSignIn(err, e.currentTarget) }, 'Sign in with Plex'),
+      h('div', { class: 'dim small', style: { margin: '8px 0 4px' } }, server ? `For anyone with access to the Plex server "${server}".` : 'For anyone with access to this Plex server.'),
+      h('div', { class: 'muted small', style: { margin: '14px 0 10px', textAlign: 'center' } }, 'or with your Lumen login')) : null,
     user, input, confirm, err,
-    h('button', { class: 'btn primary', style: { width: '100%', marginTop: '6px' }, type: 'submit' }, setup ? 'Create account' : 'Sign in')));
+    h('button', { class: `btn ${!setup && plex ? '' : 'primary'}`, style: { width: '100%', marginTop: '6px' }, type: 'submit' }, setup ? 'Create account' : 'Sign in')));
   document.body.append(box);
   setTimeout(() => user.focus(), 50);
 }
@@ -225,7 +248,7 @@ async function start() {
   let loggingIn = false;
   window.addEventListener('lumen:unauthorized', (e) => {
     if (window.LumenNative?.unpaired) { window.LumenNative.unpaired(); return; } // the TV app re-pairs instead of showing a password prompt
-    if (!loggingIn) { loggingIn = true; showLogin({ setup: !!e.detail?.setup }); }
+    if (!loggingIn) { loggingIn = true; api.get('/api/auth/status').catch(() => ({})).then(st => showLogin({ setup: !!e.detail?.setup, plex: !!st.plexLogin, server: st.plexServer })); }
   });
   render();
   // Optionally jump straight back into the last live channel (TiviMate-style).
@@ -241,6 +264,7 @@ async function start() {
 (async function boot() {
   initTv();
   const s = await api.get('/api/auth/status').catch(() => ({ required: false, authed: true }));
-  if (s.required && !s.authed) return window.LumenNative?.unpaired ? window.LumenNative.unpaired() : showLogin({ setup: !!s.setup });
+  store.auth = s;
+  if (s.required && !s.authed) return window.LumenNative?.unpaired ? window.LumenNative.unpaired() : showLogin({ setup: !!s.setup, plex: !!s.plexLogin, server: s.plexServer });
   start();
 })();

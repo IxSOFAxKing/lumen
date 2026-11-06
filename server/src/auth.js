@@ -1,10 +1,13 @@
-// Login: Lumen always requires a username and password (like Sonarr/Radarr).
+// Login: a Lumen username and password (the owner's admin login, like Sonarr/Radarr), or "Sign in with Plex" for
+// the Plex server's owner, Plex Home members and friends the server is shared with (see services/accounts.js).
 // Credentials come from LUMEN_USERNAME / LUMEN_PASSWORD (env), or are created on first start in the web UI
 // and stored hashed (scrypt) in the database. Paired TV apps use their own device tokens.
 import crypto from 'node:crypto';
 import { config } from './config.js';
 import { getSetting, setSetting } from './db.js';
-import { deviceForToken } from './services/devices.js';
+import { deviceForToken, issueAccountToken } from './services/devices.js';
+import * as accounts from './services/accounts.js';
+import * as plex from './services/plex.js';
 
 const COOKIE = 'lumen_session';
 const secret = () => config.sessionSecret || getSetting('sessionSecret');
@@ -48,20 +51,47 @@ export function deviceToken(req) {
   return m ? m[1].trim() : parseCookies(req.headers.cookie).lumen_device || null;
 }
 
+/**
+ * Who is making the request. Sets req.device (app device token), req.account (Plex account, or null for the
+ * Lumen login and code-paired devices) and req.perms. Returns true when signed in.
+ */
 export function isAuthed(req) {
+  if (req.authed !== undefined) return req.authed;
+  req.authed = false; req.account = null; req.perms = null;
   const dt = deviceToken(req);
   if (dt && req.device === undefined) req.device = deviceForToken(dt, req.ip) || null;
-  if (req.device) return true;
+  if (req.device) {
+    if (req.device.plex_account) {
+      const a = accounts.get(req.device.plex_account);
+      if (!a || a.blocked) return false;
+      req.account = a;
+    }
+    return grant(req);
+  }
   const tok = parseCookies(req.headers.cookie)[COOKIE];
   if (!tok || needsSetup()) return false;
   const [exp, ver, sig] = tok.split('.');
-  if (!exp || !ver || !sig || Number(exp) < Date.now() || ver !== credVersion()) return false;
-  return same(sig, sign(`${exp}.${ver}`));
+  if (!exp || !ver || !sig || Number(exp) < Date.now() || !same(sig, sign(`${exp}.${ver}`))) return false;
+  if (ver.startsWith('p-')) {
+    // Plex session: the account must still exist and not be blocked.
+    const a = accounts.get(ver.slice(2));
+    if (!a || a.blocked) return false;
+    req.account = a;
+    return grant(req);
+  }
+  if (ver !== credVersion()) return false;
+  return grant(req);
+}
+function grant(req) {
+  req.authed = true;
+  req.perms = accounts.permissions(req.account);
+  if (req.account) accounts.touch(req.account);
+  return true;
 }
 
-function startSession(req, res) {
+function startSession(req, res, account = null) {
   const exp = String(Date.now() + 1000 * 60 * 60 * 24 * 30);
-  const v = `${exp}.${credVersion()}`;
+  const v = `${exp}.${account ? `p-${account.plex_id}` : credVersion()}`;
   const secure = req.secure || req.headers['x-forwarded-proto'] === 'https';
   res.setHeader('Set-Cookie', `${COOKIE}=${v}.${sign(v)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}${secure ? '; Secure' : ''}`);
 }
@@ -80,7 +110,44 @@ function failed(ip) {
 }
 
 export function status(req, res) {
-  res.json({ required: true, authed: isAuthed(req), setup: needsSetup(), username: isAuthed(req) ? username() : undefined, envManaged: envManaged() });
+  const authed = isAuthed(req);
+  res.json({
+    required: true, authed, setup: needsSetup(), envManaged: envManaged(),
+    username: authed ? (req.account ? req.account.title : username()) : undefined,
+    account: authed ? accounts.publicAccount(req.account) : undefined,
+    perms: authed ? req.perms : undefined,
+    plexLogin: plex.isConfigured() && !!plex.plexConf().machineId,
+    plexServer: plex.plexConf().serverName || null,
+  });
+}
+
+// ---------- Sign in with Plex ----------
+/** Web: start a plex.tv sign-in (the page opens authUrl in a pop-up and polls /api/auth/plex/pin/:id). */
+export async function plexPinStart(req, res, next) {
+  try { res.json(await plex.createPin()); } catch (e) { next(e); }
+}
+/** Web: finish once the user approved the sign-in on plex.tv. */
+export async function plexPinCheck(req, res, next) {
+  try {
+    const token = await plex.checkPin(req.params.id);
+    if (!token) return res.json({ authorized: false });
+    const a = await accounts.verify(token);
+    startSession(req, res, a);
+    res.json({ authorized: true, account: accounts.publicAccount(a) });
+  } catch (e) { next(e); }
+}
+/** Apps: they sign in to Plex themselves and hand Lumen their plex.tv token; Lumen checks it and issues a device token. */
+export async function plexToken(req, res, next) {
+  if (throttled(req.ip)) return res.status(429).json({ error: 'Too many attempts. Wait a minute and try again.' });
+  try {
+    const { token, name, platform } = req.body || {};
+    if (!token) return res.status(400).json({ error: 'token is required' });
+    let a;
+    try { a = await accounts.verify(String(token)); }
+    catch (e) { if (e.status === 401 || e.status === 403) failed(req.ip); throw e; }
+    const issued = issueAccountToken({ name, platform }, a.plex_id, req.ip);
+    res.json({ token: issued.token, deviceId: issued.deviceId, account: accounts.publicAccount(a), perms: accounts.permissions(a) });
+  } catch (e) { next(e); }
 }
 
 function validNew(user, pw) {
@@ -137,3 +204,13 @@ export function requireAuth(req, res, next) {
   if (isAuthed(req)) return next();
   res.status(401).json({ error: needsSetup() ? 'Create your Lumen account first' : 'Unauthorized', lumenAuth: true, setup: needsSetup() });
 }
+
+/** Only the owner: the Lumen login, code-paired devices, or the Plex server owner. */
+export function requireAdmin(req, res, next) {
+  if (req.perms?.admin) return next();
+  res.status(403).json({ error: 'Only the server owner can change this.' });
+}
+export const requirePerm = name => (req, res, next) => {
+  if (req.perms?.[name]) return next();
+  res.status(403).json({ error: name === 'live' ? 'Live TV isn\'t enabled for your account.' : name === 'discover' ? 'Discover isn\'t enabled for your account.' : 'Your account can\'t change this.', perm: name });
+};

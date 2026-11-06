@@ -15,6 +15,9 @@ const MC = j => j?.MediaContainer || {};
 // ---------- Plex Home user for this request ----------
 // Each device (or browser) can pick its own Home user; otherwise the default user (or the owner) is used.
 export function selectedUser(req) {
+  // Signed in with their own Plex account (Home member or friend): always browse as themselves.
+  const a = req.account;
+  if (a && a.role !== 'owner') return a.server_token ? { uuid: a.uuid || a.plex_id, token: a.server_token, title: a.title, restricted: false, own: true } : null;
   const c = plex.plexConf();
   const uuid = req.device?.plex_user || cookies(req).lumen_plex_user || c.defaultUser || null;
   const u = uuid && c.homeUsers?.[uuid];
@@ -28,6 +31,12 @@ r.use((req, res, next) => {
 r.get('/users', ah(async (req, res) => {
   const c = plex.plexConf();
   if (!plex.isConfigured()) return res.status(400).json({ error: 'Plex is not connected' });
+  const own = selectedUser(req);
+  if (own?.own) {
+    // Someone signed in with their own Plex account only ever watches as themselves.
+    const a = req.account;
+    return res.json({ users: [{ id: a.plex_id, uuid: own.uuid, title: a.title, thumb: a.thumb, admin: false, protected: false, restricted: false, known: true }], current: own.uuid, default: own.uuid, defaultSet: false, own: true });
+  }
   const users = await plex.homeUsers();
   // Learn every user's token up front (no PIN needed), so switching is instant.
   try {
@@ -51,7 +60,9 @@ r.get('/users', ah(async (req, res) => {
 
 /** Switch this device/browser to a Home user (PIN checked by plex.tv). makeDefault also makes it everyone's default. */
 r.post('/users/switch', ah(async (req, res) => {
+  if (req.account && req.account.role !== 'owner') return res.status(403).json({ error: 'You\'re signed in with your own Plex account.' });
   const { uuid, pin, makeDefault } = req.body || {};
+  if (makeDefault && !req.perms.admin) return res.status(403).json({ error: 'Only the server owner can change the default user.' });
   const users = await plex.homeUsers();
   const u = users.find(x => x.uuid === uuid || x.id === String(uuid));
   if (!u) return res.status(404).json({ error: 'User not found' });
