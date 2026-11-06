@@ -146,7 +146,7 @@ label.check { display: flex; align-items: center; gap: 8px; cursor: pointer; mar
 .cast .p img { width: 100%; height: 100%; object-fit: cover; }
 
 /* ---------- Live TV (TiviMate style) ---------- */
-.live { display: grid; grid-template-columns: 230px minmax(280px, 420px) 1fr; height: 100%; }
+.live { display: grid; grid-template-columns: 230px minmax(280px, 420px) minmax(0, 1fr); height: 100%; overflow: hidden; }
 .live .col { overflow-y: auto; border-right: 1px solid var(--line); }
 .live .cats { background: var(--bg-2); padding: 10px 6px; }
 .cat { display: flex; justify-content: space-between; gap: 8px; padding: 9px 12px; border-radius: 7px; cursor: pointer; color: var(--text-2); }
@@ -161,9 +161,10 @@ label.check { display: flex; align-items: center; gap: 8px; cursor: pointer; mar
 .chlist .ch .pr { font-size: 12px; color: var(--text-2); }
 .chlist .ch .progress { margin-top: 5px; height: 3px; }
 .fav-star { color: var(--warn); }
-.live .preview { display: flex; flex-direction: column; min-width: 0; overflow-y: auto; }
-.preview .pv { position: relative; aspect-ratio: 16/9; background: #000; }
-.preview .pv video { width: 100%; height: 100%; }
+.live .preview { display: flex; flex-direction: column; min-width: 0; overflow-y: auto; overflow-x: hidden; }
+/* On wide / ultrawide screens the preview keeps a sensible height (and stays fully visible). */
+.preview .pv { position: relative; aspect-ratio: 16/9; background: #000; width: 100%; max-width: calc(58vh * 16 / 9); max-height: 58vh; align-self: center; flex-shrink: 0; }
+.preview .pv video { width: 100%; height: 100%; object-fit: contain; display: block; }
 .preview .pv .msg { position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-2); text-align: center; padding: 20px; }
 .preview .info { padding: 18px 20px; }
 .preview .info h2 { margin: 0 0 4px; }

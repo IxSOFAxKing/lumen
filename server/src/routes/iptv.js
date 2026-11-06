@@ -8,6 +8,7 @@ import * as dvr from '../services/recorder.js';
 import { startSession } from '../services/transcoder.js';
 import { proxied, proxyImages } from '../services/proxy.js';
 import { getConfig } from '../services/settings.js';
+import { viewerKey, claim, holdSession } from '../services/liveconn.js';
 
 const r = Router();
 // Route remote channel logos / posters through Lumen's image cache (faster, and avoids mixed-content on HTTPS).
@@ -331,8 +332,13 @@ r.post('/play/live', ah(async (req, res) => {
   db.prepare('INSERT INTO history(provider_id, channel_id, watched_at) VALUES (?,?,unixepoch()) ON CONFLICT DO UPDATE SET watched_at = unixepoch()').run(p.id, ch.id);
   const mode = liveMode(req.body.mode);
   const info = { channel: { ...ch, providerId: p.id }, live: true };
+  // Hang up this viewer's other live streams first (preview, previous channel): providers limit connections.
+  const viewer = viewerKey(req);
+  if (!req.body.multi) await claim(viewer);
   if (mode === 'remux' || mode === 'transcode') {
-    return res.json({ ...info, ...(await hlsFor(iptv.liveUrl(p, ch, 'ts'), { isLive: true, mode, label: `Live: ${ch.name}`, userAgent: iptv.userAgent(p) })) });
+    const out = await hlsFor(iptv.liveUrl(p, ch, 'ts'), { isLive: true, mode, label: `Live: ${ch.name}`, userAgent: iptv.userAgent(p) });
+    holdSession(viewer, out.sessionId);
+    return res.json({ ...info, ...out });
   }
   const url = iptv.liveUrl(p, ch);
   if (/\.m3u8(\?|$)/i.test(url)) return res.json({ ...info, type: 'hls', url: proxied(url, iptv.userAgent(p)), method: 'direct-hls' });

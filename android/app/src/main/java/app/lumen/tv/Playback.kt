@@ -230,13 +230,15 @@ class PlexSource(override val ratingKey: String, private val queue: List<String>
     }
 }
 
-class LiveSource(val channel: Channel) : Source() {
+/** multi: one of several channels at once (Multi-View), so the server keeps the others connected. */
+class LiveSource(val channel: Channel, private val multi: Boolean = false) : Source() {
     override val isLive = true
     override val title get() = channel.name
     override val subtitle get() = channel.onAir?.let { "${fmtTime(it.start)} – ${fmtTime(it.stop)} · ${it.title}" } ?: ""
     override suspend fun open(offset: Double, mode: String?): Desc {
         val body = JSONObject().put("providerId", channel.providerId).put("channelId", channel.id)
         if (mode != null) body.put("mode", mode)
+        if (multi) body.put("multi", true)
         return Desc.from(Net.post("/api/iptv/play/live", body))
     }
 }

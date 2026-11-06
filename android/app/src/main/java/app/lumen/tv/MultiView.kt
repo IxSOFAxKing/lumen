@@ -176,7 +176,7 @@ private fun MultiTile(ch: Channel, muted: Boolean, modifier: Modifier) {
         }
     }
     LaunchedEffect(exo) {
-        val d = runCatching { LiveSource(ch).open(0.0) }.getOrNull() ?: run { failed = true; return@LaunchedEffect }
+        val d = runCatching { LiveSource(ch, multi = true).open(0.0) }.getOrNull() ?: run { failed = true; return@LaunchedEffect }
         desc = d
         exo.setMediaItem(mediaItemFor(d))
         exo.prepare()

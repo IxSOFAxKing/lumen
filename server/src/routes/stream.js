@@ -6,6 +6,7 @@ import { ah, pipeFetch } from '../util.js';
 import { getProvider, liveUrl, userAgent } from '../services/iptv.js';
 import { sessionFile, touchSession, stopSession } from '../services/transcoder.js';
 import { verify, rewritePlaylist } from '../services/proxy.js';
+import { viewerKey, hold } from '../services/liveconn.js';
 
 const r = Router();
 
@@ -15,7 +16,9 @@ r.get('/live/:pid/:cid', ah(async (req, res) => {
   const ch = db.prepare('SELECT * FROM channels WHERE provider_id = ? AND id = ?').get(p.id, req.params.cid);
   if (!ch) return res.status(404).end();
   const ac = new AbortController();
-  res.on('close', () => ac.abort());
+  // Counts as this viewer's live stream until it ends (a new channel for the same viewer closes it).
+  const release = hold(viewerKey(req), { stop: () => { ac.abort(); res.destroy(); } });
+  res.on('close', () => { ac.abort(); release(); });
   const upstream = await fetch(liveUrl(p, ch, 'ts'), { headers: { 'User-Agent': userAgent(p) }, signal: ac.signal, redirect: 'follow' });
   if (!upstream.ok) return res.status(502).json({ error: `Provider returned ${upstream.status}` });
   res.setHeader('Content-Type', 'video/mp2t');

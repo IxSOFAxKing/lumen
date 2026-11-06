@@ -40,7 +40,7 @@ export default async function multiview(el, route) {
     video.muted = i !== focus;
     tileEl.prepend(video);
     try {
-      let desc = await api.post('/api/iptv/play/live', { providerId: t.pid, channelId: t.id });
+      let desc = await api.post('/api/iptv/play/live', { providerId: t.pid, channelId: t.id, multi: true });
       players[i] = { desc };
       if (!t.name && desc.channel) { t.name = desc.channel.name; t.logo = desc.channel.logo; tileEl.querySelector('.lbl').textContent = t.name; save(); }
       const attach = (d, level) => {
@@ -48,7 +48,7 @@ export default async function multiview(el, route) {
           players[i]?.engine?.destroy();
           const mode = level === 0 ? 'remux' : level === 1 ? 'transcode' : null;
           if (!mode) return;
-          const d2 = await api.post('/api/iptv/play/live', { providerId: t.pid, channelId: t.id, mode }).catch(() => null);
+          const d2 = await api.post('/api/iptv/play/live', { providerId: t.pid, channelId: t.id, mode, multi: true }).catch(() => null);
           if (!d2 || !players[i]) return;
           releaseDesc(players[i].desc); players[i].desc = d2; attach(d2, level + 1);
         } });
