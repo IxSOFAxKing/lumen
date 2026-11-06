@@ -17,7 +17,8 @@ sealed class Screen(val key: String, val topLevel: Boolean) {
     data object Discover : Screen("discover", true)
     data class DiscoverItem(val type: String, val id: Int, val title: String) : Screen("ditem:$type:$id", false)
     data class Lib(val lib: Library) : Screen("lib:${lib.key}", true)
-    data class Detail(val ratingKey: String, val seasonKey: String? = null) : Screen("detail:$ratingKey", false)
+    /** A movie / show page. episodeKey: opened from an episode, so that episode is selected in its season. */
+    data class Detail(val ratingKey: String, val seasonKey: String? = null, val episodeKey: String? = null) : Screen("detail:$ratingKey", false)
     /** A grid of Plex items: a library A–Z, a collection, a playlist or a genre. */
     data class Grid(val title: String, val source: GridSource) : Screen("grid:${source.id}", false)
 }
@@ -63,7 +64,7 @@ object Nav {
 
     fun openDetails(item: PlexItem) {
         when (item.type) {
-            "episode" -> item.grandparentRatingKey?.let { push(Screen.Detail(it, item.parentRatingKey)) } ?: push(Screen.Detail(item.ratingKey))
+            "episode" -> item.grandparentRatingKey?.let { push(Screen.Detail(it, item.parentRatingKey, item.ratingKey)) } ?: push(Screen.Detail(item.ratingKey))
             "season" -> item.parentRatingKey?.let { push(Screen.Detail(it, item.ratingKey)) } ?: push(Screen.Detail(item.ratingKey))
             "collection" -> push(Screen.Grid(item.title, GridSource.Collection(item.ratingKey)))
             "playlist" -> push(Screen.Grid(item.title, GridSource.Playlist(item.ratingKey)))
@@ -71,11 +72,8 @@ object Nav {
         }
     }
 
-    /** OK on a card: episodes and in-progress items play straight away (like Netflix); everything else opens details. */
-    fun open(item: PlexItem) {
-        if (item.type == "episode" || (item.type == "movie" && item.viewOffsetMs > 0)) play(item, resume = true)
-        else openDetails(item)
-    }
+    /** OK / tap on a card always opens the details page (an episode opens its show, at that episode). */
+    fun open(item: PlexItem) = openDetails(item)
 
     // ---------------- playback ----------------
     fun play(item: PlexItem, resume: Boolean, queue: List<PlexItem>? = null) {

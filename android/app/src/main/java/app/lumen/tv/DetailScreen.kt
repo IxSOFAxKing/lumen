@@ -82,12 +82,14 @@ fun DetailScreen(s: Screen.Detail) {
         val k = seasonKey ?: return@LaunchedEffect
         runCatching { Repo.children(k) }.onSuccess { episodes = it; mem.data["eps"] = it; mem.data["season"] = k }
     }
+    // Opened from an episode: that episode is the one to play (and is selected in its season).
+    val chosenEp = s.episodeKey?.let { k -> episodes?.firstOrNull { it.ratingKey == k } }
     if (LocalPortrait.current) {
         // Phone: its own roomier layout.
-        val target = d.onDeck
+        val target = chosenEp ?: d.onDeck
         PortraitDetail(
             item = item, seasons = d.seasons, onDeck = target, related = d.related,
-            seasonKey = seasonKey, onSeason = { seasonKey = it }, episodes = episodes,
+            seasonKey = seasonKey, onSeason = { seasonKey = it }, episodes = episodes, focusEpisode = s.episodeKey,
             onPlay = {
                 if (isShow) {
                     if (target != null) Nav.play(target, resume = true)
@@ -111,7 +113,16 @@ fun DetailScreen(s: Screen.Detail) {
         return
     }
     val playFr = remember { FocusRequester() }
+    // From an episode card: focus lands on that episode.
+    androidx.compose.runtime.LaunchedEffect(s.episodeKey) {
+        if (s.episodeKey != null && mem.data["epFocused"] == null) { mem.data["epFocused"] = true; mem.focusKey = "ep/${s.episodeKey}"; mem.restorePending = true }
+    }
     InitialFocus(playFr)
+    val epRow = rememberLazyListState()
+    androidx.compose.runtime.LaunchedEffect(episodes, s.episodeKey) {
+        val i = episodes?.indexOfFirst { it.ratingKey == s.episodeKey } ?: -1
+        if (i > 0 && mem.data["epScrolled"] == null) { mem.data["epScrolled"] = true; epRow.scrollToItem(i) }
+    }
     val listState = rememberLazyListState()
 
     Box(Modifier.fillMaxSize()) {
@@ -146,7 +157,7 @@ fun DetailScreen(s: Screen.Detail) {
                     Spacer(Modifier.height(18.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (isShow) {
-                            val target = d.onDeck
+                            val target = chosenEp ?: d.onDeck
                             val label = when {
                                 target == null -> "Play"
                                 target.viewOffsetMs > 0 -> "Resume ${target.episodeLabel ?: ""}"
@@ -184,7 +195,7 @@ androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.ge
                 }
                 item(key = "episodes") {
                     val eps = episodes
-                    if (eps == null) Loading() else CardRow("", startPad = 48.dp, onRowFocused = { scope.launch { listState.smoothScrollToItem(1) } }) {
+                    if (eps == null) Loading() else CardRow("", startPad = 48.dp, state = epRow, onRowFocused = { scope.launch { listState.smoothScrollToItem(1) } }) {
                         itemsIndexed(eps, key = { _, it -> it.ratingKey }) { _, ep ->
                             EpisodeCard(ep, onMenu = { Menus.item(ep) }) { Nav.play(ep, resume = true) }
                         }

@@ -24,7 +24,8 @@ export function plexCard(m, { wide = false, forcePlay = false } = {}) {
   const onClick = () => {
     if (m.type === 'playlist') return go(`#/playlist/${m.ratingKey}`);
     if (m.type === 'collection') return go(`#/collection/${m.ratingKey}`);
-    if (forcePlay || (m.viewOffset && (m.type === 'movie' || isEp)) || isClip) return playPlex(m.ratingKey, { offset: (m.viewOffset || 0) / 1000 });
+    // Cards open the details page (an episode opens its own page); only explicit play actions play.
+    if (forcePlay || isClip) return playPlex(m.ratingKey, { offset: (m.viewOffset || 0) / 1000 });
     go(`#/item/${m.ratingKey}`);
   };
   const el = card({ img, title, sub, progress, wide: useWide, onClick, corner: unwatched > 0 ? String(unwatched) : null, played, placeholder: title });

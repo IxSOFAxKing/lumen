@@ -68,13 +68,25 @@ fun PortraitDetail(
     seasonKey: String?,
     onSeason: (String) -> Unit,
     episodes: List<PlexItem>?,
+    focusEpisode: String? = null,
     onPlay: () -> Unit,
     onRestart: (() -> Unit)?,
     playLabel: String?,
     onToggleWatched: () -> Unit,
 ) {
     val isShow = item.type == "show"
-    LazyColumn(Modifier.fillMaxSize().background(C.bg), contentPadding = PaddingValues(bottom = 40.dp)) {
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    // Opened from an episode: scroll down to it once its season has loaded.
+    var scrolledTo by remember { mutableStateOf<String?>(null) }
+    androidx.compose.runtime.LaunchedEffect(episodes, focusEpisode) {
+        val i = episodes?.indexOfFirst { it.ratingKey == focusEpisode } ?: -1
+        if (i >= 0 && scrolledTo != focusEpisode) {
+            scrolledTo = focusEpisode
+            val before = 2 + (if (item.summary.isNullOrBlank()) 0 else 1) + 1 // banner, facts, overview, episodes heading
+            listState.animateScrollToItem(before + i)
+        }
+    }
+    LazyColumn(Modifier.fillMaxSize().background(C.bg), state = listState, contentPadding = PaddingValues(bottom = 40.dp)) {
         // ---- banner ----
         item(key = "banner") {
             Box(Modifier.fillMaxWidth().height(470.dp)) {
@@ -164,7 +176,7 @@ fun PortraitDetail(
                 }
             }
             if (episodes == null) item(key = "eps-loading") { Loading(Modifier.padding(24.dp)) }
-            else items(episodes, key = { "ep" + it.ratingKey }) { ep -> EpisodeRow(ep) }
+            else items(episodes, key = { "ep" + it.ratingKey }) { ep -> EpisodeRow(ep, highlight = ep.ratingKey == focusEpisode) }
         }
         // ---- cast ----
         val cast = item.raw.optJSONArray("Role").objects().take(20)
@@ -201,8 +213,8 @@ private fun RoundAction(icon: ImageVector, label: String, on: Boolean = false, o
 }
 
 @Composable
-private fun EpisodeRow(ep: PlexItem) {
-    Row(Modifier.fillMaxWidth().tap { Nav.play(ep, resume = true) }.padding(horizontal = 18.dp, vertical = 10.dp)) {
+private fun EpisodeRow(ep: PlexItem, highlight: Boolean = false) {
+    Row(Modifier.fillMaxWidth().background(if (highlight) Color.White.copy(alpha = 0.07f) else Color.Transparent).tap { Nav.play(ep, resume = true) }.padding(horizontal = 18.dp, vertical = 10.dp)) {
         Box(Modifier.width(150.dp).aspectRatio(16f / 9f).clip(RoundedCornerShape(8.dp)).background(C.card)) {
             Img(Net.plexImg(ep.thumb, 400, 225), Modifier.fillMaxSize())
             Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.align(Alignment.Center).size(36.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)).padding(6.dp))

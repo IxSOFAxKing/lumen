@@ -327,6 +327,7 @@ fun CardRow(
     modifier: Modifier = Modifier,
     startPad: Dp = 0.dp,
     onRowFocused: () -> Unit = {},
+    state: androidx.compose.foundation.lazy.LazyListState? = null,
     content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit,
 ) {
     var hasFocus by remember { mutableStateOf(false) }
@@ -336,7 +337,7 @@ fun CardRow(
         // Horizontal scrolling keeps the focused card fully on screen with a margin (not TV's default pivot).
         androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides EdgeScroll) {
             LazyRow(
-                state = rememberLazyListState(),
+                state = state ?: rememberLazyListState(),
                 contentPadding = PaddingValues(start = startPad, end = 48.dp, top = 12.dp, bottom = 14.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
                 content = content,
