@@ -96,7 +96,15 @@ fun LivePreview(ch: Channel, modifier: Modifier = Modifier) {
     val exo = remember(ch.providerId, ch.id) { taken?.first ?: buildExo(ctx) }
     var desc by remember(exo) { mutableStateOf(taken?.second) }
     DisposableEffect(exo) {
+        // Same loudness as full screen (Live TV volume offset + Maximum volume).
+        Volume.apply(exo, live = true, session = exo.audioSessionId)
+        val l = object : androidx.media3.common.Player.Listener {
+            override fun onAudioSessionIdChanged(audioSessionId: Int) { Volume.apply(exo, live = true, session = audioSessionId) }
+        }
+        exo.addListener(l)
         onDispose {
+            exo.removeListener(l)
+            Volume.release(exo)
             exo.release()
             desc?.let { d -> AppScope.launch { Playback.release(d) } }
         }
@@ -116,4 +124,29 @@ fun LivePreview(ch: Channel, modifier: Modifier = Modifier) {
         update = { it.player = exo },
         modifier = modifier.background(Color.Black),
     )
+}
+
+/**
+ * Loudness for a player: Settings → Audio → Maximum volume plus the Live TV / Plex volume offset (dB). Quieter
+ * turns the player down; louder uses Android's loudness enhancer (no clipping). Kept per player, so a stream
+ * handed from full screen to the Live TV preview keeps the same loudness.
+ */
+object Volume {
+    private val enhancers = java.util.WeakHashMap<androidx.media3.exoplayer.ExoPlayer, android.media.audiofx.LoudnessEnhancer>()
+
+    fun gainMb(live: Boolean): Double {
+        val offsetDb = AppState.uiNum(if (live) "liveVolumeOffset" else "plexVolumeOffset", 0.0)
+        val maxMb = AppState.uiNum("maxVolume", 100.0).takeIf { it > 100 }?.let { 2000 * kotlin.math.log10(it / 100.0) } ?: 0.0
+        return maxMb + offsetDb * 100
+    }
+
+    @Synchronized fun apply(exo: androidx.media3.exoplayer.ExoPlayer, live: Boolean, session: Int) {
+        val g = gainMb(live)
+        runCatching { exo.volume = if (g < 0) Math.pow(10.0, g / 2000).toFloat().coerceIn(0f, 1f) else 1f }
+        enhancers.remove(exo)?.let { runCatching { it.release() } }
+        if (g <= 0 || session == androidx.media3.common.C.AUDIO_SESSION_ID_UNSET) return
+        runCatching { android.media.audiofx.LoudnessEnhancer(session).apply { setTargetGain(g.toInt()); enabled = true } }.getOrNull()?.let { enhancers[exo] = it }
+    }
+
+    @Synchronized fun release(exo: androidx.media3.exoplayer.ExoPlayer) { enhancers.remove(exo)?.let { runCatching { it.release() } } }
 }

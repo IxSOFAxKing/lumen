@@ -94,6 +94,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Holding a direction on the remote sends a key every ~50 ms, faster than a list can scroll and lay out the
+     * next row, which made lists hang. Repeats are paced to one every 90 ms (single presses are never delayed).
+     */
+    private var lastRepeat = 0L
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount > 0 && event.keyCode in DPAD_KEYS) {
+            val now = android.os.SystemClock.uptimeMillis()
+            if (now - lastRepeat < 90) return true
+            lastRepeat = now
+        }
+        return super.dispatchKeyEvent(event)
+    }
+    private val DPAD_KEYS = setOf(android.view.KeyEvent.KEYCODE_DPAD_UP, android.view.KeyEvent.KEYCODE_DPAD_DOWN, android.view.KeyEvent.KEYCODE_DPAD_LEFT, android.view.KeyEvent.KEYCODE_DPAD_RIGHT)
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         // Back from pairing with a (new) server: reload everything.
@@ -191,13 +206,12 @@ fun Shell(onExit: () -> Unit) {
         val statusTop = topSafe()
         val padTop = if (portrait && screen.topLevel && screen != Screen.Home && screen !is Screen.Lib && screen != Screen.Discover) statusTop + 8.dp else 0.dp
         Box(Modifier.fillMaxSize().padding(start = (if (showRail) 52.dp else 0.dp) + navLeft, end = navRight, top = padTop, bottom = if (showBottomNav) 64.dp + navInset else navInset)) {
-            // Screens cross-fade with a slight zoom.
             androidx.compose.animation.AnimatedContent(
                 targetState = screen, contentKey = { it.key }, label = "screen",
                 transitionSpec = {
-                    (androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(260, delayMillis = 40)) +
-                        androidx.compose.animation.scaleIn(androidx.compose.animation.core.tween(300), initialScale = 0.97f)) togetherWith
-                        androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(140)) using
+                    // A plain cross-fade: scaling the whole screen as well was too heavy for TV hardware.
+                    androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(200, delayMillis = 30)) togetherWith
+                        androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(120)) using
                         androidx.compose.animation.SizeTransform(clip = false) // artwork may extend under the side menu
                 },
             ) { s ->

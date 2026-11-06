@@ -362,7 +362,9 @@ fun PlexRow(rowKey: String, title: String, items: List<PlexItem>, wide: Boolean,
 
 /** Lists whose rows are snapped into place by the screen itself: no automatic scrolling. */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
-val SmoothScroll: androidx.compose.animation.core.AnimationSpec<Float> = tween(340, easing = androidx.compose.animation.core.FastOutSlowInEasing)
+val SmoothScroll: androidx.compose.animation.core.AnimationSpec<Float> = tween(240, easing = androidx.compose.animation.core.FastOutSlowInEasing)
+/** Short and linear: keeps up when a direction is held down (each repeat starts a new scroll). */
+val QuickScroll: androidx.compose.animation.core.AnimationSpec<Float> = tween(110, easing = androidx.compose.animation.core.LinearEasing)
 
 /** Scroll a list so [index] sits at the top, with a smooth eased animation. */
 suspend fun androidx.compose.foundation.lazy.LazyListState.smoothScrollToItem(index: Int) {
@@ -387,6 +389,7 @@ val CalmScroll = object : androidx.compose.foundation.gestures.BringIntoViewSpec
 
 /** Standard list scrolling: only as far as needed to show the focused row, with the platform's default animation. */
 val PlainScroll = object : androidx.compose.foundation.gestures.BringIntoViewSpec {
+    override val scrollAnimationSpec: androidx.compose.animation.core.AnimationSpec<Float> get() = QuickScroll
     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
         val trailing = offset + size
         return when {
