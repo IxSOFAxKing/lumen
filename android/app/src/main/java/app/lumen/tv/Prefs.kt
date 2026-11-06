@@ -50,7 +50,31 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("askProfile", true)
         set(v) = sp.edit().putBoolean("askProfile", v).apply()
 
+    /** Connected to a Lumen server (optional: Live TV, Discover and shared settings). */
     val isPaired: Boolean get() = !server.isNullOrBlank() && !token.isNullOrBlank()
 
     fun clearPairing() = sp.edit().remove("token").apply()
+    /** Stop using the Lumen server (the app keeps working with Plex alone). */
+    fun forgetServer() = sp.edit().remove("token").remove("server").remove("serverName").apply()
+
+    // ---------- Plex (the app signs in to Plex itself) ----------
+    private fun s(key: String) = sp.getString(key, null)
+    private fun s(key: String, v: String?) = sp.edit().apply { if (v == null) remove(key) else putString(key, v) }.apply()
+    /** plex.tv account token. */
+    var plexToken: String? get() = s("plexToken"); set(v) = s("plexToken", v)
+    var plexClientId: String? get() = s("plexClientId"); set(v) = s("plexClientId", v)
+    var plexMachineId: String? get() = s("plexMachineId"); set(v) = s("plexMachineId", v)
+    var plexServerName: String? get() = s("plexServerName"); set(v) = s("plexServerName", v)
+    /** Token for the Plex server (the account's own). */
+    var plexServerToken: String? get() = s("plexServerToken"); set(v) = s("plexServerToken", v)
+    var plexOwned: Boolean get() = sp.getBoolean("plexOwned", false); set(v) = sp.edit().putBoolean("plexOwned", v).apply()
+    /** Last address of the Plex server that worked. */
+    var plexUrl: String? get() = s("plexUrl"); set(v) = s("plexUrl", v)
+    /** Current Plex Home user (null = the account itself). */
+    var plexUserToken: String? get() = s("plexUserToken"); set(v) = s("plexUserToken", v)
+    var plexUserUuid: String? get() = s("plexUserUuid"); set(v) = s("plexUserUuid", v)
+    var plexUserRestricted: Boolean get() = sp.getBoolean("plexUserRestricted", false); set(v) = sp.edit().putBoolean("plexUserRestricted", v).apply()
+    var plexDefaultUser: String? get() = s("plexDefaultUser"); set(v) = s("plexDefaultUser", v)
+    /** App settings when there's no Lumen server to keep them. */
+    var localUi: String? get() = s("localUi"); set(v) = s("localUi", v)
 }

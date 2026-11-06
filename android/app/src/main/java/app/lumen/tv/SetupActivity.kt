@@ -3,6 +3,7 @@ package app.lumen.tv
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.text.InputType
@@ -29,9 +30,11 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 /**
- * First-run setup: find the Lumen server on the network (or type its address), then pair this TV.
- * Pairing shows a 6-digit code + QR code; the user approves it from Lumen on a phone/computer
- * (Settings → Devices). The TV then receives its own device token.
+ * First run:
+ *  1. Sign in with Plex (a code to enter at plex.tv/link, or scan the QR code with a phone).
+ *  2. Pick the Plex server (automatic when there's one).
+ *  3. Look for a Lumen server on the network that belongs to that Plex server and sign in to it with the same
+ *     Plex account (no codes, no passwords). Without one the app works with Plex alone.
  */
 class SetupActivity : ComponentActivity() {
     private lateinit var prefs: Prefs
@@ -40,11 +43,16 @@ class SetupActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        prefs = Prefs(this)
+        Net.init(this)
+        prefs = Net.prefs
         root = FrameLayout(this).apply { setBackgroundColor(Ui.BG) }
         setContentView(root)
-        val preset = intent.getStringExtra("server")
-        if (preset != null) connect(preset) else showSearch()
+        when {
+            intent.getBooleanExtra("findLumen", false) && Plex.signedIn -> findLumen(auto = false)
+            !Plex.signedIn -> plexSignIn()
+            !Plex.hasServer -> lifecycleScope.launch { chooseServer(prefs.plexToken!!) }
+            else -> done()
+        }
     }
 
     private fun setScreen(content: LinearLayout) {
@@ -58,142 +66,193 @@ class SetupActivity : ComponentActivity() {
         root.addView(scroll, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     }
 
-    private fun header(box: LinearLayout, title: String, sub: String) {
+    private fun screen(title: String, sub: String, top: Int = 48): LinearLayout {
+        val box = Ui.vbox(this).apply { setPadding(dp(24), dp(top), dp(24), dp(40)) }
         box.addView(Ui.text(this, "▶  Lumen", 30f, Ui.ACCENT, bold = true))
         box.addView(Ui.gap(this, 18))
-        box.addView(Ui.text(this, title, 28f, bold = true))
+        box.addView(Ui.text(this, title, 28f, bold = true).apply { gravity = Gravity.CENTER })
         box.addView(Ui.gap(this, 8))
         box.addView(Ui.text(this, sub, 17f, Ui.TEXT2).apply { gravity = Gravity.CENTER })
         box.addView(Ui.gap(this, 28))
+        return box
     }
 
-    // ---------------- Step 1: find the server ----------------
-    private fun showSearch() {
+    private fun busy(title: String, sub: String) {
+        val box = screen(title, sub, 90)
+        box.addView(ProgressBar(this))
+        setScreen(box)
+    }
+
+    // ---------------- 1. Sign in with Plex ----------------
+    private fun plexSignIn() {
         job?.cancel()
-        val box = Ui.vbox(this).apply { setPadding(dp(24), dp(48), dp(24), dp(48)) }
-        header(box, "Connect to your Lumen server", "Looking for Lumen on your network…")
-        val results = Ui.vbox(this)
-        val progress = ProgressBar(this)
-        results.addView(progress)
-        box.addView(results, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        box.addView(Ui.gap(this, 30))
-        box.addView(Ui.text(this, "Or enter the address (e.g. 192.168.1.50:8080)", 16f, Ui.TEXT2))
+        busy("Sign in with Plex", "Getting a code…")
+        job = lifecycleScope.launch {
+            val pin = try { Plex.createPin() } catch (e: Exception) { showError("Couldn't reach plex.tv", e.message ?: "Check this device's internet connection.") { plexSignIn() }; return@launch }
+            val box = screen("Sign in with Plex", "On your phone or computer, go to plex.tv/link and enter this code, or scan the QR code.", 36)
+            val row = Ui.hbox(this@SetupActivity)
+            val codeBox = Ui.vbox(this@SetupActivity, Gravity.CENTER).apply {
+                addView(Ui.text(this@SetupActivity, "plex.tv/link", 22f, Ui.TEXT2))
+                addView(Ui.gap(this@SetupActivity, 6))
+                addView(Ui.text(this@SetupActivity, pin.code, 64f, Ui.ACCENT, bold = true).apply { letterSpacing = 0.18f })
+            }
+            row.addView(codeBox, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            val authUrl = "https://app.plex.tv/auth#?" + Uri.Builder().appendQueryParameter("clientID", prefs.plexClientId ?: "")
+                .appendQueryParameter("code", pin.code).appendQueryParameter("context[device][product]", "Lumen").build().encodedQuery
+            qr(authUrl, dp(220))?.let { bmp ->
+                row.addView(ImageView(this@SetupActivity).apply { setImageBitmap(bmp); setBackgroundColor(Color.WHITE); setPadding(dp(10), dp(10), dp(10), dp(10)) },
+                    LinearLayout.LayoutParams(dp(240), dp(240)))
+            }
+            box.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            box.addView(Ui.gap(this@SetupActivity, 24))
+            box.addView(Ui.text(this@SetupActivity, "Waiting for you to sign in…", 17f, Ui.TEXT2))
+            box.addView(Ui.gap(this@SetupActivity, 18))
+            box.addView(Ui.button(this@SetupActivity, "New code") { plexSignIn() }.also { it.requestFocus() })
+            setScreen(box)
+            val started = System.currentTimeMillis()
+            while (isActive) {
+                delay(2000)
+                val token = runCatching { Plex.checkPin(pin.id) }.getOrNull()
+                if (token != null) { chooseServer(token); return@launch }
+                if (System.currentTimeMillis() - started > 14 * 60_000) { plexSignIn(); return@launch } // codes expire
+            }
+        }
+    }
+
+    // ---------------- 2. Pick the Plex server ----------------
+    private suspend fun chooseServer(token: String) {
+        busy("Finding your Plex server…", "")
+        val servers = try { Plex.servers(token) } catch (e: Exception) { showError("Couldn't list your Plex servers", e.message ?: "") { lifecycleScope.launch { chooseServer(token) } }; return }
+        prefs.plexToken = token
+        when {
+            servers.isEmpty() -> showError("No Plex servers", "This Plex account has no servers and none are shared with it.") { Plex.signOut(); plexSignIn() }
+            servers.size == 1 -> useServer(servers[0], token)
+            else -> {
+                val box = screen("Choose your Plex server", "Your account can use more than one.")
+                servers.sortedByDescending { it.owned }.forEachIndexed { i, s ->
+                    val b = Ui.button(this, "${s.name}${if (s.owned) "" else "   ·   shared with you"}", primary = i == 0) { lifecycleScope.launch { useServer(s, token) } }
+                    box.addView(b, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) })
+                    if (i == 0) b.requestFocus()
+                }
+                setScreen(box)
+            }
+        }
+    }
+
+    private suspend fun useServer(s: Plex.Server, token: String) {
+        busy("Connecting to ${s.name}…", "")
+        val conn = Plex.pickConnection(s)
+        Plex.choose(s, conn, token)
+        // Already connected to a Lumen server (e.g. paired before this update)? Keep using it.
+        val tok = prefs.token
+        val srv = prefs.server
+        if (tok != null && srv != null && runCatching { Api.get("$srv/api/auth/status", tok).optBoolean("authed") }.getOrDefault(false)) { done(); return }
+        findLumen(auto = true)
+    }
+
+    // ---------------- 3. The Lumen server (optional) ----------------
+    private fun findLumen(auto: Boolean) {
+        job?.cancel()
+        busy("Looking for your Lumen server…", "Lumen adds Live TV, Discover and settings that follow you between devices.")
+        job = lifecycleScope.launch {
+            val mid = prefs.plexMachineId
+            val candidates = buildList {
+                prefs.server?.let { s -> Discovery.probe(s, 1500)?.let { add(it) } }
+                addAll(Discovery.scan())
+            }.distinctBy { it.url }
+            val mine = candidates.filter { it.plexMachineId != null && it.plexMachineId == mid }
+            when {
+                mine.size == 1 -> signInToLumen(mine[0].url, mine[0].name, auto)
+                mine.size > 1 -> chooseLumen(mine)
+                else -> noLumen(candidates)
+            }
+        }
+    }
+
+    private fun chooseLumen(list: List<Discovery.Server>) {
+        val box = screen("Choose your Lumen server", "")
+        list.forEachIndexed { i, s ->
+            val b = Ui.button(this, "${s.name}   ·   ${s.url.removePrefix("http://")}", primary = i == 0) { lifecycleScope.launch { signInToLumen(s.url, s.name, false) } }
+            box.addView(b, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) })
+            if (i == 0) b.requestFocus()
+        }
+        box.addView(Ui.button(this, "Continue without Lumen") { prefs.forgetServer(); done() })
+        setScreen(box)
+    }
+
+    private fun noLumen(others: List<Discovery.Server>) {
+        val box = screen("No Lumen server found", "That's fine: Plex works on its own. Live TV, Discover and shared settings need a Lumen server; you can connect one later in Settings.")
+        val go = Ui.button(this, "Continue with Plex", primary = true) { prefs.forgetServer(); done() }
+        box.addView(go)
+        box.addView(Ui.gap(this, 14))
+        others.forEach { s ->
+            box.addView(Ui.button(this, "Use ${s.name}   ·   ${s.url.removePrefix("http://")}") { lifecycleScope.launch { signInToLumen(s.url, s.name, false) } },
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) })
+        }
+        box.addView(Ui.gap(this, 10))
+        box.addView(Ui.text(this, "Or enter its address (e.g. 192.168.1.50:8080)", 16f, Ui.TEXT2))
         box.addView(Ui.gap(this, 10))
         val input = EditText(this).apply {
             setText(prefs.server ?: "")
             hint = "192.168.1.50:8080"
-            setHintTextColor(0xFF6D7588.toInt())
-            setTextColor(Ui.TEXT)
-            textSize = 20f
-            setSingleLine()
+            setHintTextColor(0xFF6D7588.toInt()); setTextColor(Ui.TEXT); textSize = 20f; setSingleLine()
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             imeOptions = EditorInfo.IME_ACTION_GO
-            setOnEditorActionListener { v, _, _ -> connect(v.text.toString()); true }
+            setOnEditorActionListener { v, _, _ -> manual(v.text.toString()); true }
         }
         val row = Ui.hbox(this).apply {
-            addView(input, LinearLayout.LayoutParams(dp(460), ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(input, LinearLayout.LayoutParams(dp(420), ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(Ui.gap(this@SetupActivity, 0).apply { layoutParams = LinearLayout.LayoutParams(dp(12), 1) })
-            addView(Ui.button(this@SetupActivity, "Connect", primary = true) { connect(input.text.toString()) })
+            addView(Ui.button(this@SetupActivity, "Connect") { manual(input.text.toString()) })
             addView(Ui.gap(this@SetupActivity, 0).apply { layoutParams = LinearLayout.LayoutParams(dp(12), 1) })
-            addView(Ui.button(this@SetupActivity, "Search again") { showSearch() })
+            addView(Ui.button(this@SetupActivity, "Search again") { findLumen(auto = false) })
         }
         box.addView(row)
         setScreen(box)
-
-        job = lifecycleScope.launch {
-            val found = Discovery.scan()
-            results.removeAllViews()
-            if (found.isEmpty()) {
-                results.addView(Ui.text(this@SetupActivity,
-                    if (Discovery.localIpv4() == null) "This TV doesn't seem to be on a local network." else "No Lumen server found automatically. Enter its address below.",
-                    17f, Ui.TEXT2))
-                input.requestFocus()
-            } else {
-                found.forEachIndexed { i, s ->
-                    val b = Ui.button(this@SetupActivity, "${s.name}   ·   ${s.url.removePrefix("http://")}", primary = i == 0) { connect(s.url) }
-                    results.addView(b, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) })
-                    if (i == 0) b.requestFocus()
-                }
-            }
-        }
+        go.requestFocus()
     }
 
-    // ---------------- Step 2: check the server and pair ----------------
-    private fun connect(raw: String) {
+    private fun manual(raw: String) {
         if (raw.isBlank()) return
         val url = Api.normalise(raw)
-        job?.cancel()
-        val box = Ui.vbox(this).apply { setPadding(dp(24), dp(80), dp(24), dp(48)) }
-        header(box, "Connecting…", url)
-        box.addView(ProgressBar(this))
-        setScreen(box)
-        job = lifecycleScope.launch {
-            try {
-                val health = Api.get("$url/api/health")
-                if (health.optString("app") != "lumen") throw Exception("That address isn't a Lumen server.")
-                prefs.server = url
-                prefs.serverName = health.optString("name", url)
-                // Already paired with this server and the token still works? Go straight in.
-                val tok = prefs.token
-                if (tok != null && runCatching { Api.get("$url/api/auth/status", tok).optBoolean("authed") }.getOrDefault(false)) { done(); return@launch }
-                val model = (Build.MODEL ?: "Android TV").trim()
-                val start = Api.post("$url/api/pair/start", JSONObject().put("name", model).put("platform", "android-tv"))
-                showPairing(url, start.getString("pairId"), start.getString("code"), start.optString("status") == "approved")
-            } catch (e: Exception) {
-                showError("Couldn't connect to $url", e.message ?: "Network error")
-            }
+        lifecycleScope.launch {
+            busy("Connecting…", url)
+            val h = runCatching { Api.get("$url/api/health") }.getOrNull()
+            if (h?.optString("app") != "lumen") { showError("That isn't a Lumen server", url) { findLumen(auto = false) }; return@launch }
+            signInToLumen(url, h.optString("name", url), false)
         }
     }
 
-    private fun showPairing(url: String, pairId: String, code: String, autoApproved: Boolean) {
-        val box = Ui.vbox(this).apply { setPadding(dp(24), dp(40), dp(24), dp(40)) }
-        if (!autoApproved) {
-            header(box, "Pair this TV", "On your phone or computer, open Lumen → Settings → Devices and enter this code, or scan the QR code.")
-            val row = Ui.hbox(this)
-            val codeBox = Ui.vbox(this, Gravity.CENTER).apply {
-                addView(Ui.text(this@SetupActivity, code.chunked(3).joinToString(" "), 64f, Ui.ACCENT, bold = true).apply { letterSpacing = 0.12f })
-                addView(Ui.gap(this@SetupActivity, 8))
-                addView(Ui.text(this@SetupActivity, "Code expires in 10 minutes", 15f, Ui.TEXT2))
-            }
-            row.addView(codeBox, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            qr("$url/#/pair?code=$code", dp(220))?.let { bmp ->
-                row.addView(ImageView(this).apply { setImageBitmap(bmp); setBackgroundColor(Color.WHITE); setPadding(dp(10), dp(10), dp(10), dp(10)) },
-                    LinearLayout.LayoutParams(dp(240), dp(240)))
-            }
-            box.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            box.addView(Ui.gap(this, 26))
-            box.addView(Ui.text(this, "Waiting for approval…", 17f, Ui.TEXT2))
-            box.addView(Ui.gap(this, 20))
-            box.addView(Ui.button(this, "Use a different server") { prefs.server = null; showSearch() }.also { it.requestFocus() })
+    /** Sign in to Lumen with the Plex account: the server checks it has access to its Plex server. */
+    private suspend fun signInToLumen(url: String, name: String, auto: Boolean) {
+        busy("Signing in to $name…", url.removePrefix("http://"))
+        try {
+            val r = Api.post("$url/api/auth/plex/token", JSONObject().put("token", prefs.plexToken).put("name", (Build.MODEL ?: "Android").trim())
+                .put("platform", if (AppState.isTv) "android-tv" else "android-phone"), timeoutMs = 20_000)
+            prefs.server = url; prefs.serverName = name; prefs.token = r.getString("token")
+            done()
+        } catch (e: Exception) {
+            val box = screen("Couldn't sign in to $name", e.message ?: "Network error")
+            val go = Ui.button(this, "Continue with Plex only", primary = true) { prefs.forgetServer(); done() }
+            box.addView(go)
+            box.addView(Ui.gap(this, 12))
+            box.addView(Ui.button(this, "Try again") { lifecycleScope.launch { signInToLumen(url, name, auto) } })
             setScreen(box)
-        }
-        job = lifecycleScope.launch {
-            while (isActive) {
-                val st = try { Api.get("$url/api/pair/status/$pairId") } catch (e: Exception) { null }
-                when (st?.optString("status")) {
-                    "approved" -> { prefs.token = st.getString("token"); done(); return@launch }
-                    "expired" -> { showError("The pairing code expired", "Start again to get a new code."); return@launch }
-                }
-                delay(2000)
-            }
+            go.requestFocus()
         }
     }
 
-    private fun showError(title: String, detail: String) {
-        val box = Ui.vbox(this).apply { setPadding(dp(24), dp(80), dp(24), dp(48)) }
-        header(box, title, detail)
-        val row = Ui.hbox(this)
-        val retry = Ui.button(this, "Try again", primary = true) { prefs.server?.let { connect(it) } ?: showSearch() }
-        row.addView(retry)
-        row.addView(Ui.gap(this, 0).apply { layoutParams = LinearLayout.LayoutParams(dp(14), 1) })
-        row.addView(Ui.button(this, "Choose server") { showSearch() })
-        box.addView(row)
+    private fun showError(title: String, detail: String, retry: () -> Unit) {
+        val box = screen(title, detail, 90)
+        val b = Ui.button(this, "Try again", primary = true) { retry() }
+        box.addView(b)
         setScreen(box)
-        retry.requestFocus()
+        b.requestFocus()
     }
 
     private fun done() {
-        startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        AppState.loaded = false
+        startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK))
         finish()
     }
 
@@ -205,7 +264,7 @@ class SetupActivity : ComponentActivity() {
     } catch (e: Exception) { null }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_BACK && !Prefs(this).isPaired) { finishAffinity(); return true }
+        if (keyCode == KeyEvent.KEYCODE_BACK && !(Plex.signedIn && Plex.hasServer)) { finishAffinity(); return true }
         return super.onKeyDown(keyCode, event)
     }
 }

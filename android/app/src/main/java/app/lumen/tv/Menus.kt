@@ -62,7 +62,7 @@ object Menus {
             }
         }
         if (inContinue || m.viewOffsetMs > 0) l += "Remove from Continue Watching" to {
-            AppScope.launch { runCatching { Net.post("/api/plex/continue/remove/${m.ratingKey}") }.onSuccess { refresh(); toast("Removed from Continue Watching") } }
+            AppScope.launch { runCatching { Plex.removeFromContinue(m.ratingKey) }.onSuccess { refresh(); toast("Removed from Continue Watching") } }
         }
         val title = if (m.isEpisode) m.grandparentTitle ?: m.title else m.title
         val sub = if (m.isEpisode) listOfNotNull(m.episodeLabel, m.title).joinToString(" · ") else m.metaLine()

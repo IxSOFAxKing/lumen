@@ -129,12 +129,16 @@ class PlayerActivity : ComponentActivity() {
         Net.init(this)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        val http = DefaultHttpDataSource.Factory()
+        val plain = DefaultHttpDataSource.Factory()
             .setUserAgent("LumenTV/${BuildConfig.VERSION_NAME}")
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(15_000)
-            .setReadTimeoutMs(90_000) // Plex/Lumen transcoders can take a while for the first segment
-            .setDefaultRequestProperties(mapOf("Authorization" to "Bearer ${Net.token}", "Cookie" to "lumen_device=${Net.token}"))
+            .setReadTimeoutMs(90_000) // Plex transcoders can take a while for the first segment
+        // Only requests to the Lumen server carry this device's Lumen token (Plex URLs carry their own).
+        val lumenHost = Uri.parse(Net.server).host
+        val http = androidx.media3.datasource.ResolvingDataSource.Factory(plain) { spec ->
+            if (Net.token.isNotEmpty() && spec.uri.host == lumenHost) spec.withAdditionalHeaders(mapOf("Authorization" to "Bearer ${Net.token}", "Cookie" to "lumen_device=${Net.token}")) else spec
+        }
         // Settings → Player / Audio: hardware decoding, Dolby Vision, stereo downmix.
         val hw = AppState.uiBool("hwDecoding", true)
         val noDv = AppState.uiBool("disableDolbyVision", false)
@@ -742,7 +746,7 @@ class PlayerActivity : ComponentActivity() {
             thumbJob = lifecycleScope.launch {
                 val img = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     runCatching {
-                        Net.http.newCall(okhttp3.Request.Builder().url("${Net.server}/api/plex/thumb/$part/${i * 10000L}").build()).execute().use { r ->
+                        Net.http.newCall(okhttp3.Request.Builder().url(Plex.thumbUrl(part.toString(), i * 10000L) ?: return@runCatching null).build()).execute().use { r ->
                             if (!r.isSuccessful) null else r.body?.bytes()?.let { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
                         }
                     }.getOrNull()
@@ -780,12 +784,17 @@ class PlayerActivity : ComponentActivity() {
             Toast.makeText(this, "These subtitles are burned into the video while transcoding, so they can't be shifted. Set Quality to Auto/Original to sync them.", Toast.LENGTH_LONG).show()
             return
         }
-        val base = d.subtitleUrl ?: src.subtitles.firstOrNull { it.selected }?.let { Net.url("/api/plex/subtitle/${it.id}") }
-        if (base == null) { Toast.makeText(this, "Choose a subtitle first (Audio & subtitles).", Toast.LENGTH_LONG).show(); return }
-        val u = Uri.parse(base).buildUpon().clearQuery().apply {
-            Uri.parse(base).queryParameterNames.filter { it != "offset" }.forEach { k -> appendQueryParameter(k, Uri.parse(base).getQueryParameter(k)) }
-            if (ms != 0) appendQueryParameter("offset", ms.toString())
-        }.build()
+        val subId = src.subtitles.firstOrNull { it.selected }?.id
+        if (subId == null && d.subtitleUrl == null) { Toast.makeText(this, "Choose a subtitle first (Audio & subtitles).", Toast.LENGTH_LONG).show(); return }
+        // The subtitle is fetched from Plex, shifted on this device and loaded next to the video.
+        lifecycleScope.launch {
+            val file = runCatching { if (subId != null) Plex.subtitleFile(subId, null, ms) else null }.getOrNull()
+            if (file == null) { Toast.makeText(this@PlayerActivity, "Couldn't load these subtitles to shift them.", Toast.LENGTH_LONG).show(); return@launch }
+            loadSyncedSubtitle(d, Uri.parse(file), ms)
+        }
+    }
+
+    private fun loadSyncedSubtitle(d: Desc, u: Uri, ms: Int) {
         st.subOffsetMs = ms
         val item = MediaItem.Builder().setUri(Uri.parse(d.url)).apply {
             when (d.type) { "hls" -> setMimeType(MimeTypes.APPLICATION_M3U8); "mpegts" -> setMimeType(MimeTypes.VIDEO_MP2T) }

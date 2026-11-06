@@ -35,6 +35,7 @@ object Net {
     fun init(ctx: Context) {
         if (::http.isInitialized) return
         prefs = Prefs(ctx)
+        Plex.init(ctx)
         http = OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(45, TimeUnit.SECONDS)
@@ -52,16 +53,12 @@ object Net {
     /** Absolute URL for a server path (or an already absolute URL). */
     fun url(path: String?): String? {
         if (path.isNullOrBlank() || path == "null") return null
-        if (path.startsWith("http://") || path.startsWith("https://")) return path
+        if (path.startsWith("http://") || path.startsWith("https://") || path.startsWith("file:") || path.startsWith("content:")) return path
         return server + (if (path.startsWith("/")) path else "/$path")
     }
 
-    /** Plex artwork through Lumen's resizing/caching image proxy. */
-    fun plexImg(path: String?, w: Int, h: Int): String? {
-        if (path.isNullOrBlank()) return null
-        if (path.startsWith("http")) return path
-        return "$server/api/plex/image?path=${Uri.encode(path)}&w=$w&h=$h"
-    }
+    /** Plex artwork, resized by the Plex server itself. */
+    fun plexImg(path: String?, w: Int, h: Int): String? = Plex.img(path, w, h)
 
     private val JSON = "application/json".toMediaType()
     private val cache = ConcurrentHashMap<String, Pair<Long, Any>>()

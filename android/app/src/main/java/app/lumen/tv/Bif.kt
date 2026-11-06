@@ -50,7 +50,7 @@ class Bif private constructor(private val file: File, private val intervalMs: Lo
             if (!file.exists() || file.length() < 64) {
                 val tmp = File(dir, "$partId.part")
                 val ok = runCatching {
-                    Net.http.newCall(Request.Builder().url("${Net.server}/api/plex/bif/$partId").build()).execute().use { res ->
+                    Net.http.newCall(Request.Builder().url(Plex.bifUrl(partId) ?: return@runCatching false).build()).execute().use { res ->
                         if (!res.isSuccessful) return@use false
                         tmp.outputStream().use { out -> res.body!!.byteStream().copyTo(out) }
                         true

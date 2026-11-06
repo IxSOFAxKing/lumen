@@ -14,7 +14,7 @@ import java.net.URL
 
 /** Finds Lumen servers on the local network by probing GET /api/health on every address of the TV's subnet. */
 object Discovery {
-    data class Server(val url: String, val name: String, val version: String, val authRequired: Boolean)
+    data class Server(val url: String, val name: String, val version: String, val authRequired: Boolean, val plexMachineId: String? = null)
 
     fun localIpv4(): String? = try {
         NetworkInterface.getNetworkInterfaces().toList()
@@ -44,7 +44,7 @@ object Discovery {
             if (c.responseCode != 200) null else {
                 val j = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
                 if (j.optString("app") != "lumen") null
-                else Server(base, j.optString("name", base), j.optString("version", ""), j.optBoolean("authRequired"))
+                else Server(base, j.optString("name", base), j.optString("version", ""), j.optBoolean("authRequired"), j.str("plexMachineId"))
             }
         } finally { c.disconnect() }
     } catch (e: Exception) { null }

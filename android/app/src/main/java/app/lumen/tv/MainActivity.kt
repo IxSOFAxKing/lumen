@@ -74,12 +74,15 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
         )
         Nav.appContext = applicationContext
-        if (!Net.prefs.isPaired) { startActivity(Intent(this, SetupActivity::class.java)); finish(); return }
+        // Plex sign-in is all the app needs; the Lumen server is optional.
+        if (!Plex.signedIn || !Plex.hasServer) { startActivity(Intent(this, SetupActivity::class.java)); finish(); return }
         Net.onUnauthorized = {
+            // The Lumen server signed this device out (removed in Settings → People / Devices): carry on with Plex alone.
             runOnUiThread {
                 if (Net.prefs.isPaired) {
                     Net.prefs.clearPairing()
-                    startActivity(Intent(this, SetupActivity::class.java).putExtra("server", Net.prefs.server))
+                    android.widget.Toast.makeText(this, "Signed out of the Lumen server. Plex still works; reconnect in Settings.", android.widget.Toast.LENGTH_LONG).show()
+                    AppState.loaded = false
                 }
             }
         }
@@ -138,14 +141,18 @@ fun Shell(onExit: () -> Unit) {
     LaunchedEffect(AppState.profileCheckTick) { if (AppState.profileCheckTick > 0) AppState.checkProfile() }
     if (!AppState.loaded || AppState.checkingProfile) { Box(Modifier.fillMaxSize().background(C.bg)) { Loading(Modifier.align(Alignment.Center)) }; return }
     AppState.askProfile?.let { pu -> WhoIsWatching(pu, onExit) { AppState.askProfile = null; Net.clearCache(); Nav.memory.clear(); AppState.resumeTick++ }; return }
-    if (AppState.loadError != null && AppState.providers.isEmpty() && !AppState.plexConfigured) {
+    if (!AppState.plexOnline && AppState.providers.isEmpty()) {
+        // Nothing to show: Plex can't be reached (and there's no Live TV from a Lumen server).
         Box(Modifier.fillMaxSize().background(C.bg), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Message("Can't reach your Lumen server", "${Net.prefs.serverName ?: ""} ${Net.server}")
+                Message("Can't reach your Plex server", AppState.plexError ?: Plex.serverName)
                 Row {
                     PillButton("Retry", primary = true) { AppState.loaded = false }
                     Spacer(Modifier.width(12.dp))
-                    PillButton("Change server") { Nav.appContext.startActivity(Intent(Nav.appContext, SetupActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    PillButton("Sign in again") {
+                        Plex.signOut(); Net.prefs.forgetServer()
+                        Nav.appContext.startActivity(Intent(Nav.appContext, SetupActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
                 }
             }
         }

@@ -36,13 +36,12 @@ data class Desc(
 data class Marker(val type: String, val start: Double, val end: Double)
 data class StreamOpt(val id: Int, val label: String, val selected: Boolean)
 
-/** Next more-compatible way to play after an error (same as the web player): direct → remux → transcode. */
+/** Next more-compatible way to play after an error: original file → Plex direct stream → Plex transcode. */
 fun nextMode(d: Desc): String? {
     val m = d.method
     return when {
         m.startsWith("direct") -> "remux"
-        m.startsWith("plex-") -> "builtin"
-        m.startsWith("remux") || m == "builtin-remux" -> "transcode"
+        m == "plex-copy" || m.startsWith("remux") || m == "builtin-remux" -> "transcode"
         else -> null
     }
 }
@@ -55,13 +54,13 @@ object Playback {
     suspend fun release(d: Desc?) {
         if (d == null) return
         d.sessionId?.let { runCatching { Net.delete("/api/stream/session/$it") } }
-        d.session?.let { runCatching { Net.post("/api/plex/stop", JSONObject().put("session", it)) } }
+        d.session?.let { Plex.stopTranscode(it) }
     }
 
     suspend fun ping(d: Desc?) {
         if (d == null) return
         d.sessionId?.let { runCatching { Net.post("/api/stream/session/$it/ping") } }
-        d.session?.let { runCatching { Net.post("/api/plex/ping", JSONObject().put("session", it)) } }
+        d.session?.let { Plex.pingTranscode(it) }
     }
 }
 
@@ -192,7 +191,7 @@ class PlexSource(override val ratingKey: String, private val queue: List<String>
         audioId?.let { body.put("audioStreamID", it) }
         subtitleId?.let { body.put("subtitleStreamID", it) }
         transcoder?.let { body.put("transcoder", it) }
-        val j = Net.post("/api/plex/play", body)
+        val j = Plex.play(body)
         last = j
         return Desc.from(j).also { current = it }
     }
@@ -206,7 +205,7 @@ class PlexSource(override val ratingKey: String, private val queue: List<String>
     }
 
     override suspend fun progress(pos: Double, dur: Double, state: String) {
-        runCatching { Net.post("/api/plex/timeline", JSONObject().put("ratingKey", ratingKey).put("state", state).put("time", pos).put("duration", dur).put("session", current?.session ?: JSONObject.NULL)) }
+        Plex.timeline(ratingKey, state, pos, dur, current?.session)
         if (!scrobbled && dur > 60) {
             val w = AppState.ui.opt("watchedAt")?.toString() ?: "90"
             val credits = markers.firstOrNull { it.type == "credits" }

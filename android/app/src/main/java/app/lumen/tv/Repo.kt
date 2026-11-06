@@ -34,10 +34,19 @@ object AppState {
     /** "Who's watching?": show the Plex Home user picker (or switch to the default user if asking is turned off). */
     suspend fun checkProfile(force: Boolean = false) {
         if (!plexOnline) return
-        val pu = runCatching { Net.obj("/api/plex/users") }.getOrNull() ?: return
+        val pu = runCatching { Plex.users() }.getOrNull() ?: return
         if (pu.optJSONArray("users").objects().size < 2) return
         if (force || Net.prefs.askProfile) askProfile = pu
-        else if (pu.optBoolean("defaultSet")) runCatching { Net.post("/api/plex/users/reset") }
+        else if (pu.optBoolean("defaultSet")) runCatching { Plex.resetUser() }
+    }
+
+    /** Switch Plex Home user on this device (and tell the Lumen server, which uses it for Discover). */
+    suspend fun switchUser(uuid: String, pin: String?, makeDefault: Boolean = false): JSONObject {
+        val u = Plex.switchUser(uuid, pin, makeDefault)
+        if (Net.prefs.isPaired) runCatching { Net.post("/api/plex/users/switch", JSONObject().put("uuid", u.optString("uuid"))) }
+        Net.clearCache(); Nav.memory.clear()
+        discoverOn = lumenDiscover && !Net.prefs.plexUserRestricted
+        return u
     }
     var loadError by mutableStateOf<String?>(null)
     /** Changes whenever the app comes back to the foreground (e.g. after the player), so rows refresh. */
@@ -49,28 +58,34 @@ object AppState {
 
     fun selectProvider(id: Int) { Net.prefs.providerId = id; providerId = id }
 
+    /** The Lumen server is connected (optional: Live TV, Discover and shared settings live there). */
+    val hasLumen: Boolean get() = Net.prefs.isPaired
+    /** What the Lumen server lets this account use. */
+    var perms by mutableStateOf(JSONObject())
+    private var lumenDiscover = false
+
     suspend fun refresh() = coroutineScope {
-        val settings = async { runCatching { Net.obj("/api/settings") }.getOrNull() }
-        val prov = async { runCatching { Net.arr("/api/iptv/providers") }.getOrNull() }
-        val plex = async { runCatching { Net.obj("/api/plex/status") }.getOrNull() }
-        val libs = async { runCatching { Net.arr("/api/plex/libraries", 60_000) }.getOrNull() }
-        val favs = async { runCatching { Net.arr("/api/iptv/fav-lists") }.getOrNull() }
+        val lumen = hasLumen
+        val settings = async { if (lumen) runCatching { Net.obj("/api/settings") }.getOrNull() else null }
+        val prov = async { if (lumen) runCatching { Net.arr("/api/iptv/providers") }.getOrNull() else null }
+        val favs = async { if (lumen) runCatching { Net.arr("/api/iptv/fav-lists") }.getOrNull() else null }
+        val disc = async { if (lumen) runCatching { Net.obj("/api/discover/config").optBoolean("configured") }.getOrDefault(false) else false }
+        val auth = async { if (lumen) runCatching { Net.obj("/api/auth/status") }.getOrNull() else null }
+        // Plex: find the server (the address can change between home and away).
+        plexConfigured = Plex.signedIn && Plex.hasServer
+        val online = plexConfigured && runCatching { Plex.connect() }.getOrDefault(false)
+        plexOnline = online
+        plexError = if (plexConfigured && !online) "Can't reach the Plex server \"${Plex.serverName}\"" else null
         providerId = Net.prefs.providerId
-        val disc = async { runCatching { Net.obj("/api/discover/config").optBoolean("configured") }.getOrDefault(false) }
         val s = settings.await()
-        if (s == null && prov.await() == null) {
-            loadError = "Can't reach your Lumen server at ${Net.server}"
-        } else loadError = null
-        s?.optJSONObject("ui")?.let { ui = it }
-        prov.await()?.let { a -> providers = a.objects().map { Provider.from(it) }.filter { it.enabled } }
-        plex.await()?.let {
-            plexConfigured = it.optBoolean("configured")
-            plexOnline = it.optBoolean("online")
-            plexError = it.str("error")
-        }
-        if (plexOnline) libs.await()?.let { a -> libraries = a.objects().map { Library.from(it) }.filter { it.type == "movie" || it.type == "show" } }
-        favs.await()?.let { a -> favLists = a.objects().map { Group("__fav:${it.optInt("id")}", it.optString("name"), it.optInt("count")) } }
-        discoverOn = disc.await()
+        loadError = if (lumen && s == null && prov.await() == null && !online) "Can't reach your Lumen server at ${Net.server}" else null
+        ui = s?.optJSONObject("ui") ?: runCatching { JSONObject(Net.prefs.localUi ?: "{}") }.getOrDefault(JSONObject())
+        providers = prov.await()?.objects()?.map { Provider.from(it) }?.filter { it.enabled } ?: emptyList()
+        if (online) runCatching { Plex.libraries() }.getOrNull()?.let { a -> libraries = a.objects().map { Library.from(it) }.filter { it.type == "movie" || it.type == "show" } }
+        favLists = favs.await()?.objects()?.map { Group("__fav:${it.optInt("id")}", it.optString("name"), it.optInt("count")) } ?: emptyList()
+        auth.await()?.optJSONObject("perms")?.let { perms = it }
+        lumenDiscover = disc.await()
+        discoverOn = lumenDiscover && !Net.prefs.plexUserRestricted
         loaded = true
     }
 
@@ -84,7 +99,7 @@ object AppState {
         val next = JSONObject(ui.toString())
         patch.keys().forEach { k -> next.put(k, patch.get(k)) }
         ui = next
-        runCatching { Net.put("/api/settings/ui", patch) }
+        if (hasLumen) runCatching { Net.put("/api/settings/ui", patch) } else Net.prefs.localUi = next.toString()
     }
 
     /** Ordering helper identical to the web app's applyOrder: saved order first, new items after their default predecessor. */
@@ -126,23 +141,21 @@ fun homeSections(includeHidden: Boolean = false): List<HomeSection> {
 }
 
 object Repo {
-    suspend fun plexHome(): JSONObject = Net.obj("/api/plex/home", 30_000)
-    suspend fun hubsFor(lib: String): List<Hub> = Net.arr("/api/plex/library/$lib/hubs", 60_000).objects().map { Hub.from(it) }.filter { it.items.isNotEmpty() }
-    suspend fun meta(key: String): PlexItem = PlexItem.from(Net.obj("/api/plex/meta/${Uri.encode(key)}"))
-    suspend fun children(key: String): List<PlexItem> = Net.arr("/api/plex/meta/${Uri.encode(key)}/children", 20_000).objects().map { PlexItem.from(it) }
-    suspend fun leaves(key: String): List<PlexItem> = Net.arr("/api/plex/meta/${Uri.encode(key)}/leaves", 20_000).objects().map { PlexItem.from(it) }
-    suspend fun related(key: String): List<Hub> = Net.arr("/api/plex/meta/${Uri.encode(key)}/related", 600_000).objects().map { Hub.from(it) }.filter { it.items.isNotEmpty() }
-    suspend fun collection(key: String): List<PlexItem> = Net.arr("/api/plex/collection/${Uri.encode(key)}/items", 120_000).objects().map { PlexItem.from(it) }
-    suspend fun playlist(key: String): List<PlexItem> = Net.obj("/api/plex/playlist/${Uri.encode(key)}", 60_000).optJSONArray("items").objects().map { PlexItem.from(it) }
+    // Plex: straight from the Plex server (see PlexDirect.kt).
+    suspend fun plexHome(): JSONObject = Plex.home()
+    suspend fun hubsFor(lib: String): List<Hub> = Plex.libraryHubs(lib).objects().map { Hub.from(it) }.filter { it.items.isNotEmpty() }
+    suspend fun meta(key: String): PlexItem = PlexItem.from(Plex.meta(key))
+    suspend fun children(key: String): List<PlexItem> = Plex.children(key).objects().map { PlexItem.from(it) }
+    suspend fun leaves(key: String): List<PlexItem> = Plex.leaves(key).objects().map { PlexItem.from(it) }
+    suspend fun related(key: String): List<Hub> = Plex.related(key).objects().map { Hub.from(it) }.filter { it.items.isNotEmpty() }
+    suspend fun collection(key: String): List<PlexItem> = Plex.collection(key).objects().map { PlexItem.from(it) }
+    suspend fun playlist(key: String): List<PlexItem> = Plex.playlist(key).optJSONArray("items").objects().map { PlexItem.from(it) }
     suspend fun libraryItems(lib: String, sort: String, start: Int, size: Int, unwatched: Boolean = false, genre: String? = null): Pair<List<PlexItem>, Int> {
-        val q = StringBuilder("/api/plex/library/$lib/items?sort=${Uri.encode(sort)}&start=$start&size=$size")
-        if (unwatched) q.append("&unwatched=1")
-        if (genre != null) q.append("&genre=${Uri.encode(genre)}")
-        val j = Net.obj(q.toString(), 60_000)
+        val j = Plex.libraryItems(lib, sort, start, size, unwatched, genre)
         return j.optJSONArray("items").objects().map { PlexItem.from(it) } to j.optInt("total")
     }
-    suspend fun plexSearch(q: String): List<Hub> = Net.arr("/api/plex/search?q=${Uri.encode(q)}").objects().map { Hub.from(it) }.filter { it.items.isNotEmpty() }
-    suspend fun setWatched(key: String, watched: Boolean) { Net.post("/api/plex/${if (watched) "watched" else "unwatched"}/${Uri.encode(key)}") }
+    suspend fun plexSearch(q: String): List<Hub> = Plex.search(q).objects().map { Hub.from(it) }.filter { it.items.isNotEmpty() }
+    suspend fun setWatched(key: String, watched: Boolean) = Plex.setWatched(key, watched)
 
     // ---------- IPTV ----------
     fun channels(a: JSONArray, pid: Int? = null) = a.objects().map { Channel.from(it, pid) }

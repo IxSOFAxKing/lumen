@@ -66,7 +66,7 @@ fun SettingsScreen() {
     var picker by remember { mutableStateOf<Picker?>(null) }
     var pinFor by remember { mutableStateOf<Pair<JSONObject, Boolean>?>(null) }
     var plexUsers by remember { mutableStateOf<JSONObject?>(null) }
-    LaunchedEffect(AppState.plexOnline, tick) { if (AppState.plexOnline) plexUsers = runCatching { Net.obj("/api/plex/users") }.getOrNull() }
+    LaunchedEffect(AppState.plexOnline, tick) { if (AppState.plexOnline) plexUsers = runCatching { Plex.users() }.getOrNull() }
     /** OK on a setting opens a menu with every choice. */
     fun cycle(key: String, opts: List<Opt>, def: Any, title: String = "") {
         val cur = AppState.ui.opt(key)?.toString() ?: def.toString()
@@ -74,14 +74,13 @@ fun SettingsScreen() {
     }
     fun switchUser(u: JSONObject, makeDefault: Boolean, pin: String? = null) {
         scope.launch {
-            runCatching { Net.post("/api/plex/users/switch", JSONObject().put("uuid", u.optString("uuid")).put("makeDefault", makeDefault).apply { if (pin != null) put("pin", pin) }) }
+            runCatching { AppState.switchUser(u.optString("uuid"), pin, makeDefault) }
                 .onSuccess {
-                    android.widget.Toast.makeText(ctx, if (makeDefault) "${u.optString("title")} is now the default for all apps" else "Watching as ${u.optString("title")}", android.widget.Toast.LENGTH_SHORT).show()
-                    Net.clearCache(); Nav.memory.clear(); AppState.discoverOn = Discover.configured(); AppState.resumeTick++; tick++
+                    android.widget.Toast.makeText(ctx, if (makeDefault) "${u.optString("title")} is now the default on this device" else "Watching as ${u.optString("title")}", android.widget.Toast.LENGTH_SHORT).show()
+                    AppState.resumeTick++; tick++
                 }
                 .onFailure {
-                    // Only if Plex wouldn't give Lumen this user's token.
-                    if (it is Net.HttpError && it.code == 403 && pin == null) pinFor = u to makeDefault
+                    if (it is Plex.PlexError && it.code == 403 && pin == null) pinFor = u to makeDefault
                     else android.widget.Toast.makeText(ctx, it.message, android.widget.Toast.LENGTH_LONG).show()
                 }
         }
@@ -151,10 +150,10 @@ fun SettingsScreen() {
             item { Toggle("Ask \"Who's watching?\" when the app opens", Net.prefs.askProfile) { Net.prefs.askProfile = !Net.prefs.askProfile; tick++ } }
             item {
                 val def = users.firstOrNull { it.optString("uuid") == pu?.optString("default") }
-                SettingRow("Default Plex user (all apps)", if (pu?.optBoolean("defaultSet") == true) def?.optString("title") ?: "" else "Ask when the app opens", hint = "Used by every app and TV that hasn't picked a user") {
+                SettingRow("Default Plex user", if (pu?.optBoolean("defaultSet") == true) def?.optString("title") ?: "" else "Ask when the app opens", hint = "Used on this device when you don't pick one") {
                     val opts = listOf(Opt("", "No default — ask who's watching")) + users.map { Opt(it.optString("uuid"), it.optString("title")) }
-                    picker = Picker("Default user for all apps", opts, if (pu?.optBoolean("defaultSet") == true) pu.optString("default") else "") { o ->
-                        if (o.value == "") scope.launch { runCatching { Net.post("/api/plex/users/default", JSONObject().put("uuid", JSONObject.NULL)) }; tick++ }
+                    picker = Picker("Default user", opts, if (pu?.optBoolean("defaultSet") == true) pu.optString("default") else "") { o ->
+                        if (o.value == "") { Net.prefs.plexDefaultUser = null; tick++ }
                         else users.firstOrNull { it.optString("uuid") == o.value }?.let { switchUser(it, true) }
                     }
                 }
@@ -220,18 +219,31 @@ fun SettingsScreen() {
         item { Toggle("Channel logos", AppState.uiBool("chShowLogos", true)) { save("chShowLogos", !AppState.uiBool("chShowLogos", true)) } }
         item { Toggle("Programme progress bars", AppState.uiBool("chShowProgress", true)) { save("chShowProgress", !AppState.uiBool("chShowProgress", true)) } }
 
-        item { Section("Server") }
-        item { SettingRow("Connected to", "${Net.prefs.serverName ?: ""}  ${Net.server.removePrefix("http://")}") {} }
+        item { Section("Plex") }
+        item { SettingRow("Plex server", if (AppState.plexOnline) "${Plex.serverName}  ·  ${if (Plex.isLocal) "home network" else "remote"}" else "${Plex.serverName}  ·  not reachable") { scope.launch { Plex.clearCache(); AppState.refresh(); tick++ } } }
         item {
-            SettingRow("Server settings", "Plex, IPTV providers, transcoding…", hint = "Opens the full Lumen settings") {
-                ctx.startActivity(Intent(ctx, WebActivity::class.java).putExtra("path", "/#/settings"))
+            SettingRow("Sign out of Plex", "", hint = "Sign in again, or with a different Plex account") {
+                Plex.signOut(); Net.prefs.forgetServer()
+                ctx.startActivity(Intent(ctx, SetupActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
             }
         }
-        item {
-            SettingRow("Reload from server", "") { scope.launch { Net.clearCache(); AppState.refresh(); tick++ } }
-        }
-        item {
-            SettingRow("Change server or pair again", "") { ctx.startActivity(Intent(ctx, SetupActivity::class.java)) }
+
+        item { Section("Lumen server") }
+        if (AppState.hasLumen) {
+            item { SettingRow("Connected to", "${Net.prefs.serverName ?: ""}  ${Net.server.removePrefix("http://")}", hint = "Live TV, Discover and your settings come from here") {} }
+            if (AppState.perms.optBoolean("admin", true)) item {
+                SettingRow("Server settings", "IPTV providers, Overseerr, people…", hint = "Opens the full Lumen settings") {
+                    ctx.startActivity(Intent(ctx, WebActivity::class.java).putExtra("path", "/#/settings"))
+                }
+            }
+            item { SettingRow("Reload from server", "") { scope.launch { Net.clearCache(); Plex.clearCache(); AppState.refresh(); tick++ } } }
+            item { SettingRow("Disconnect from this server", "", hint = "The app keeps working with Plex only") { Net.prefs.forgetServer(); scope.launch { AppState.refresh(); tick++ } } }
+        } else {
+            item {
+                SettingRow("Not connected", "Find server", hint = "Connect a Lumen server for Live TV, Discover and shared settings") {
+                    ctx.startActivity(Intent(ctx, SetupActivity::class.java).putExtra("findLumen", true))
+                }
+            }
         }
         item {
             SettingRow("Check for updates", "Version ${BuildConfig.VERSION_NAME}", hint = "Downloads and installs the newest Lumen app") {
