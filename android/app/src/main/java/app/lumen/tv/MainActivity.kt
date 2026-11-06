@@ -99,7 +99,16 @@ class MainActivity : ComponentActivity() {
      * next row, which made lists hang. Repeats are paced to one every 90 ms (single presses are never delayed).
      */
     private var lastRepeat = 0L
+    private var backLong = false
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        // Hold Back in Live TV / the Guide: return to full screen on the channel that's playing in the preview.
+        if (event.keyCode == android.view.KeyEvent.KEYCODE_BACK) {
+            if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount > 0) {
+                if (!backLong && (Nav.current == Screen.Live || Nav.current == Screen.Guide) && Preview.channel != null) { backLong = true; Nav.resumeLive() }
+                if (backLong) return true
+            }
+            if (event.action == android.view.KeyEvent.ACTION_UP && backLong) { backLong = false; return true }
+        }
         if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount > 0 && event.keyCode in DPAD_KEYS) {
             val now = android.os.SystemClock.uptimeMillis()
             if (now - lastRepeat < 90) return true

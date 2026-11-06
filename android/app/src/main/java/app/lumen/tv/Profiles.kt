@@ -78,7 +78,7 @@ fun WhoIsWatching(pu: JSONObject, onExit: () -> Unit, onDone: () -> Unit) {
                 }
             }
             Spacer(Modifier.height(34.dp))
-            T(if (busy) "Switching…" else "Tip: set a default user in Settings to skip this screen.", 12.sp, C.text3)
+            T(if (busy) "Switching…" else "", 12.sp, C.text3)
         }
     }
     pinFor?.let { u -> PinDialog(u.optString("title"), onDismiss = { pinFor = null }) { pin -> pinFor = null; pick(u, pin) } }

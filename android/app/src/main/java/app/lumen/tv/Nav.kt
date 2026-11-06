@@ -91,6 +91,14 @@ object Nav {
         startPlayer(JSONObject().put("kind", "live").put("providerId", ch.providerId).put("channelId", ch.id))
     }
 
+    /** Back to full screen on the channel playing in the Live TV / Guide preview (same channel list as before). */
+    fun resumeLive(): Boolean {
+        val ch = Preview.channel ?: return false
+        val list = Playback.zapList.takeIf { l -> l.any { it.id == ch.id && it.providerId == ch.providerId } } ?: listOf(ch)
+        playLive(ch, list, Playback.zapTitle)
+        return true
+    }
+
     fun playCatchup(ch: Channel, p: Programme) {
         startPlayer(JSONObject().put("kind", "catchup").put("providerId", ch.providerId).put("channelId", ch.id)
             .put("start", p.start).put("stop", p.stop).put("title", p.title).put("channelName", ch.name))
