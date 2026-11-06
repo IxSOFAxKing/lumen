@@ -1012,11 +1012,18 @@ class PlayerActivity : ComponentActivity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val code = event.keyCode
         if (code == KeyEvent.KEYCODE_VOLUME_UP || code == KeyEvent.KEYCODE_VOLUME_DOWN || code == KeyEvent.KEYCODE_VOLUME_MUTE || code == KeyEvent.KEYCODE_HOME) return super.dispatchKeyEvent(event)
+        // Back still held from the Live TV screen (held Back opens the player): ignore it until it's let go.
+        if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) backDownSeen = true
+            if (!backDownSeen) return true
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount > 0) return true
+        }
         if (event.action == KeyEvent.ACTION_UP) return true
         if (event.action != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event)
         return onKey(code, event.repeatCount) || super.dispatchKeyEvent(event)
     }
 
+    private var backDownSeen = false
     private fun isOk(code: Int) = code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_NUMPAD_ENTER
 
     private fun onKey(code: Int, repeat: Int): Boolean {

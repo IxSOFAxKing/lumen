@@ -95,6 +95,7 @@ object Nav {
     fun resumeLive(): Boolean {
         val ch = Preview.channel ?: return false
         val list = Playback.zapList.takeIf { l -> l.any { it.id == ch.id && it.providerId == ch.providerId } } ?: listOf(ch)
+        noAnimation = true
         playLive(ch, list, Playback.zapTitle)
         return true
     }
@@ -108,7 +109,11 @@ object Nav {
         startPlayer(JSONObject().put("kind", "recording").put("id", id).put("title", title).put("subtitle", sub))
     }
 
+    private var noAnimation = false
     private fun startPlayer(req: JSONObject) {
-        appContext.startActivity(Intent(appContext, PlayerActivity::class.java).putExtra("req", req.toString()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        val i = Intent(appContext, PlayerActivity::class.java).putExtra("req", req.toString()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        // Back to full screen from the preview: straight to the picture, without the system's zoom.
+        if (noAnimation) { i.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION); noAnimation = false }
+        appContext.startActivity(i)
     }
 }

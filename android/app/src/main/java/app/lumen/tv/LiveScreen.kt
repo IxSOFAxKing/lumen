@@ -88,15 +88,23 @@ fun LiveScreen() {
     fun groupFr(id: String, index: Int) = if (index == 0) firstGroupFr else groupFrs.getOrPut(id) { FocusRequester() }
     InitialFocus(if (LocalPortrait.current) firstChFr else firstGroupFr)
     val chState = rememberLazyListState()
+    val groupsState = rememberLazyListState()
 
     Row(Modifier.fillMaxSize().padding(top = 20.dp)) {
         // ---- groups ----
         val portrait = LocalPortrait.current
         if (!portrait) Column(Modifier.width(if (groupsFocused) 200.dp else 150.dp).fillMaxHeight()
             .focusProperties {
-                enter = {
+                enter = { dir ->
+                    // Back from the channels (◀): the group you're in. From the side menu: the top of the list.
                     val idx = groups?.indexOfFirst { it.id == group } ?: -1
-                    if (idx >= 0 && group in attachedGroups) groupFr(group, idx) else FocusRequester.Default
+                    val firstId = groups?.firstOrNull()?.id
+                    when {
+                        dir == androidx.compose.ui.focus.FocusDirection.Left && idx >= 0 && group in attachedGroups -> groupFr(group, idx)
+                        firstId != null && firstId in attachedGroups && groupsState.firstVisibleItemIndex == 0 -> firstGroupFr
+                        firstId != null -> { scope.launch { groupsState.scrollToItem(0); delay(40); runCatching { firstGroupFr.requestFocus() } }; FocusRequester.Cancel }
+                        else -> FocusRequester.Default
+                    }
                 }
             }
             .focusGroup()
@@ -113,7 +121,7 @@ fun LiveScreen() {
                 }
             }
             val gl = groups
-            if (gl == null) Loading() else LazyColumn(contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 60.dp)) {
+            if (gl == null) Loading() else LazyColumn(state = groupsState, contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 60.dp)) {
                 itemsIndexed(gl, key = { _, g -> g.id }) { gi, g ->
                     androidx.compose.runtime.DisposableEffect(g.id) { attachedGroups += g.id; onDispose { attachedGroups -= g.id } }
                     Focusable(
