@@ -1,6 +1,7 @@
 package app.lumen.tv
 
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.clickable
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -318,11 +319,11 @@ private fun AlertBanner(modifier: Modifier) {
         Row(
             Modifier.padding(top = if (LocalPortrait.current) topSafe() + 8.dp else 20.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
                 .background(C.bg2.copy(alpha = 0.97f))
-                .clickable(interactionSource = androidx.compose.foundation.interaction.MutableInteractionSource(), indication = null) {
+                .then(Modifier.clickable(interactionSource = androidx.compose.foundation.interaction.MutableInteractionSource(), indication = null) {
                     val key = a.str("ratingKey") ?: return@clickable
                     AppState.alert = null
                     AppScope.launch { runCatching { Repo.meta(key) }.getOrNull()?.let { Nav.openDetails(it) } }
-                }
+                })
                 .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
