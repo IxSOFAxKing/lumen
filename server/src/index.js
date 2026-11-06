@@ -21,6 +21,9 @@ import { initRecorder, stopAllRecordings } from './services/recorder.js';
 import { serveCachedImage } from './services/imgcache.js';
 import { exportAll, importAll } from './services/backup.js';
 import { verifyImg } from './services/proxy.js';
+import { captureLogs, health } from './services/health.js';
+
+captureLogs(); // recent warnings/errors for Settings → System → Health
 
 const app = express();
 app.set('trust proxy', true);
@@ -97,6 +100,7 @@ app.post('/api/settings/import', admin, (req, res, next) => {
   catch (e) { next(e); }
 });
 app.get('/api/system/hardware', admin, async (req, res, next) => { try { res.json(await detectHardware()); } catch (e) { next(e); } });
+app.get('/api/system/health', admin, async (req, res, next) => { try { res.json(await health()); } catch (e) { next(e); } });
 app.get('/api/system/sessions', admin, (req, res) => res.json(listSessions()));
 app.delete('/api/system/sessions/:id', admin, (req, res) => res.json({ stopped: stopSession(req.params.id) }));
 

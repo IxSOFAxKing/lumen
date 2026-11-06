@@ -160,4 +160,41 @@ r.get('/requests', ah(async (req, res) => {
   res.json({ results: items });
 }));
 
+// ---------- "Now available" alerts ----------
+// Every few minutes Lumen checks Overseerr's requests; when a requested title becomes available it's added here,
+// and the apps show "<title> is now available" (each app remembers which alerts it already showed).
+const ALERTS_KEY = 'discoverAlerts', SEEN_KEY = 'discoverAlertsSeen';
+async function checkAvailable() {
+  const c = conf();
+  if (!c.url || !c.apiKey) return;
+  const j = await os('/request', { params: { take: 100, skip: 0, sort: 'modified', filter: 'all' } });
+  const seen = getSetting(SEEN_KEY, null);
+  const first = !seen; // first run: remember what's already available without alerting
+  const known = new Set(seen || []);
+  const alerts = getSetting(ALERTS_KEY, []) || [];
+  for (const q of j?.results || []) {
+    const media = q.media || {};
+    if (media.status !== 5 || !media.tmdbId) continue;
+    const key = `${media.mediaType || q.type}:${media.tmdbId}`;
+    if (known.has(key)) continue;
+    known.add(key);
+    if (first) continue;
+    const type = media.mediaType || q.type;
+    const d = await os(`/${type}/${media.tmdbId}`).catch(() => null);
+    const s = d ? shape({ ...d, mediaType: type }) : null;
+    alerts.unshift({ id: key, at: Date.now(), type, tmdbId: media.tmdbId, title: s?.title || 'A requested title', year: s?.year || null,
+      poster: s?.poster || null, ratingKey: media.ratingKey || null, requestedBy: q.requestedBy?.displayName || null });
+  }
+  setSetting(SEEN_KEY, [...known].slice(-2000));
+  setSetting(ALERTS_KEY, alerts.slice(0, 50));
+}
+setTimeout(() => checkAvailable().catch(e => console.warn(`[discover] availability check: ${e.message}`)), 30000).unref?.();
+setInterval(() => checkAvailable().catch(e => console.warn(`[discover] availability check: ${e.message}`)), 5 * 60000).unref?.();
+
+/** Alerts newer than ?since= (ms). */
+r.get('/alerts', (req, res) => {
+  const since = Number(req.query.since) || 0;
+  res.json({ alerts: (getSetting(ALERTS_KEY, []) || []).filter(a => a.at > since), now: Date.now() });
+});
+
 export default r;

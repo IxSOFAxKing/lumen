@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "node --no-warnings=ExperimentalWarning src/index.js",
-    "dev": "node --no-warnings=ExperimentalWarning --watch src/index.js"
+    "dev": "node --no-warnings=ExperimentalWarning --watch src/index.js",
+    "test": "node --no-warnings --test test/*.test.js"
   },
   "dependencies": {
     "compression": "^1.8.2",

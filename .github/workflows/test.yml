@@ -1,0 +1,26 @@
+name: Server tests
+
+on:
+  push:
+    branches: [main, tv-native]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install
+        working-directory: server
+        run: npm ci
+      - name: Sign-in and permission tests
+        working-directory: server
+        run: npm test

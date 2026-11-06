@@ -373,6 +373,36 @@ async function discoverTab(el) {
 async function systemTab(el) {
   const auth = await api.get('/api/auth/status');
   const sess = h('div');
+  const healthBox = h('div', {}, spinner());
+  el.append(h('div', { class: 'card-box', style: { marginBottom: '18px' } },
+    h('div', { class: 'row', style: { marginBottom: '8px' } }, h('h3', { class: 'grow', style: { margin: 0 } }, 'Health'), btn('Check again', () => drawHealth(), { cls: 'sm' })), healthBox));
+  const drawHealth = async () => {
+    healthBox.replaceChildren(spinner());
+    let d; try { d = await api.get('/api/system/health'); } catch (e) { healthBox.replaceChildren(h('div', { class: 'dim' }, e.message)); return; }
+    const dot = ok => h('span', { style: { display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', marginRight: '8px', background: ok === null ? 'var(--text-3, #777)' : ok ? '#3ccf8e' : '#ff5a6a' } });
+    const ago = s => { if (!s) return 'never'; const m = Math.round((Date.now() / 1000 - s) / 60); return m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`; };
+    const row = (ok, name, detail, extra) => h('div', { class: 'prov', style: { marginBottom: '6px', alignItems: 'flex-start' } },
+      h('div', { class: 'grow' }, h('div', {}, dot(ok), h('b', {}, name)), h('div', { class: 'dim small', style: { marginLeft: '18px' } }, detail), extra || null));
+    const svc = (name, x, what) => !x.configured ? row(null, name, 'Not connected')
+      : row(x.ok, name, x.ok ? `${what || ''}${x.version ? ` ${x.version}` : ''} · answered in ${x.ms} ms` : `Not answering: ${x.error}`);
+    const list = [
+      svc('Plex', d.plex, d.plex.name ? `"${d.plex.name}"` : ''),
+      svc('Overseerr', d.overseerr, ''),
+      ...d.providers.map(p => row(p.enabled ? (p.reachable?.ok !== false && !p.warnings.some(w => /expired|status/i.test(w))) : null, `IPTV · ${p.name}`,
+        [p.enabled ? (p.reachable?.ok ? `Reachable (${p.reachable.ms} ms)` : `Not reachable: ${p.reachable?.error || ''}`) : 'Disabled',
+          `${p.channels} channels`, `playlist updated ${ago(p.lastSync)}`, `guide updated ${ago(p.lastEpgSync)}`,
+          p.guideUntil ? `guide until ${fmtDateTime(p.guideUntil)}` : 'no guide data',
+          p.expires ? `subscription until ${new Date(p.expires * 1000).toLocaleDateString()}` : null,
+          p.maxConnections ? `${p.activeConnections ?? '?'} / ${p.maxConnections} streams in use` : null].filter(Boolean).join(' · '),
+        p.warnings.length ? h('div', { class: 'small', style: { marginLeft: '18px', color: 'var(--err)' } }, p.warnings.join(' · ')) : null)),
+    ];
+    const logs = d.logs.length ? h('details', { style: { marginTop: '10px' } }, h('summary', { class: 'muted small' }, `Recent warnings and errors (${d.logs.length})`),
+      h('div', { style: { maxHeight: '260px', overflow: 'auto', fontFamily: 'monospace', fontSize: '12px', marginTop: '6px' } },
+        d.logs.map(l => h('div', { style: { color: l.level === 'error' ? 'var(--err)' : 'var(--text-2)', padding: '2px 0' } }, `${new Date(l.t).toLocaleString()}  ${l.msg}`))))
+      : h('div', { class: 'dim small', style: { marginTop: '8px' } }, 'No warnings or errors since Lumen started.');
+    healthBox.replaceChildren(...list, h('div', { class: 'dim small', style: { marginTop: '6px' } }, `Up ${Math.round(d.uptime / 3600)} h · ${d.transcodes} transcoding now · Node ${d.node}`), logs);
+  };
+  drawHealth();
   el.append(h('div', { class: 'card-box' }, h('h3', { style: { marginTop: 0 } }, 'Active transcoding sessions'), sess),
 
     h('div', { class: 'card-box', style: { marginTop: '18px' } }, h('h3', { style: { marginTop: 0 } }, 'Security'),
