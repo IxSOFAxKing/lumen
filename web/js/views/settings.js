@@ -765,8 +765,8 @@ async function devicesTab(el, route) {
   };
   code.addEventListener('keydown', e => { if (e.key === 'Enter') approve(); });
   const pendingBox = h('div'), listBox = h('div');
-  el.append(h('div', { class: 'card-box', style: { marginBottom: '18px' } }, h('h3', { style: { marginTop: 0 } }, 'Connect a TV or app'),
-    h('p', { class: 'muted small', style: { marginTop: 0 } }, 'Open Lumen on the TV, pick this server, and enter the code it shows (or scan its QR code with your phone).'),
+  el.append(h('div', { class: 'card-box', style: { marginBottom: '18px' } }, h('h3', { style: { marginTop: 0 } }, 'Older app versions: pairing code'),
+    h('p', { class: 'muted small', style: { marginTop: 0 } }, 'The Lumen app signs in with Plex and finds this server by itself — no code needed. Only older app versions show a pairing code; enter it here (or update the app).'),
     h('div', { class: 'row wrap' }, code, btn('Connect device', () => approve(), { cls: 'primary', iconName: 'check' })), pendingBox));
   el.append(h('div', { class: 'card-box', style: { marginBottom: '18px' } }, h('h3', { style: { marginTop: 0 } }, 'Connected devices'), listBox));
   const host = `${location.protocol}//${location.host}`;
@@ -774,7 +774,7 @@ async function devicesTab(el, route) {
     h('ol', { class: 'muted', style: { lineHeight: 1.8, paddingLeft: '20px', margin: 0 } },
       h('li', {}, 'On the TV, install ', h('b', {}, 'Downloader'), ' (by AFTVnews) from the Play Store / Amazon Appstore.'),
       h('li', {}, 'In Downloader, enter ', h('code', {}, `${host}/tv.apk`), ' and install.'),
-      h('li', {}, 'Open Lumen on the TV — it finds this server automatically — and connect it with the code above.')),
+      h('li', {}, 'Open Lumen on the TV and sign in with Plex (enter the code at plex.tv/link). It finds this server by itself.')),
     h('p', { class: 'dim small' }, 'Updates: install the latest APK the same way. Your settings live on this server, so nothing is lost; with a signing key set up (see docs/ANDROID_TV.md) updates install over the old version and keep the pairing too.')));
 
   async function draw() {
