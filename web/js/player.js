@@ -139,9 +139,10 @@ class Player {
   // ---------- Loading ----------
   load(desc, meta = this.meta) {
     this.engine?.destroy();
-    this.audioCtx?.close().catch(() => {});
+    // The audio processor stays: the video element remains connected to it for the whole session.
     if (this.desc && this.desc !== desc) releaseDesc(this.desc);
     this.desc = desc; this.meta = meta;
+    if (this.gain || this.audioCtx) this.applyBoost(); // Live TV / Plex have their own volume offsets
     if (this.inputThisItem) this.autoCount = 0; // you did something during the last episode
     this.inputThisItem = false;
     this.upNextDismissed = false; clearInterval(this.upNextTimer); this.autoSkipped = new Set();
@@ -575,18 +576,32 @@ class Player {
     const pct = Math.max(100, Number(ui.maxVolume) || 100);
     const offsetDb = Number(this.meta.live ? ui.liveVolumeOffset : ui.plexVolumeOffset) || 0;
     const gain = (pct / 100) * Math.pow(10, offsetDb / 20);
+    this.wantGain = gain;
     if (this.gain) { this.gain.gain.value = gain; return; }
-    if (Math.abs(gain - 1) < 0.001) return;
+    if (Math.abs(gain - 1) < 0.001 || this.audioCtx) return;
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const src = ctx.createMediaElementSource(this.video);
-      this.gain = ctx.createGain(); this.gain.gain.value = gain;
-      // A limiter after the boost so loud scenes don't distort.
-      const limiter = ctx.createDynamicsCompressor();
-      limiter.threshold.value = -1; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.003; limiter.release.value = 0.25;
-      src.connect(this.gain).connect(limiter).connect(ctx.destination);
       this.audioCtx = ctx;
-      this.video.addEventListener('play', () => ctx.resume().catch(() => {}));
+      // The browser only lets the audio processor run after a click or key press. Until it runs, the video must NOT
+      // be routed through it (the picture would freeze waiting for sound), so it plays normally and the volume
+      // change starts with your next click or key press.
+      const connect = () => {
+        if (this.gain || ctx.state !== 'running') return;
+        const src = ctx.createMediaElementSource(this.video);
+        this.gain = ctx.createGain(); this.gain.gain.value = this.wantGain;
+        // A limiter after the boost so loud scenes don't distort.
+        const limiter = ctx.createDynamicsCompressor();
+        limiter.threshold.value = -1; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.003; limiter.release.value = 0.25;
+        src.connect(this.gain).connect(limiter).connect(ctx.destination);
+        this.video.addEventListener('play', () => ctx.resume().catch(() => {}));
+      };
+      if (ctx.state === 'running') connect();
+      else {
+        const tryStart = () => ctx.resume().then(() => { if (ctx.state === 'running') { connect(); off(); } }).catch(() => {});
+        const off = () => { for (const ev of ['pointerdown', 'keydown']) document.removeEventListener(ev, tryStart, true); };
+        for (const ev of ['pointerdown', 'keydown']) document.addEventListener(ev, tryStart, true);
+        this.offAudioWait = off;
+      }
     } catch { /* not available */ }
   }
 
@@ -769,6 +784,8 @@ class Player {
     document.removeEventListener('keydown', this.onKey);
     for (const ev of ['keydown', 'pointerdown', 'wheel']) document.removeEventListener(ev, this.onInput, true);
     clearInterval(this.stallTimer);
+    this.offAudioWait?.();
+    this.audioCtx?.close().catch(() => {}); this.audioCtx = null; this.gain = null;
     clearTimeout(this.stillTimer);
     document.removeEventListener('fullscreenchange', this.onFs);
     window.removeEventListener('pagehide', this.onUnload);
