@@ -34,8 +34,6 @@ export function openPlayer(desc, meta = {}) {
 class Player {
   constructor(desc, meta) {
     this.desc = desc; this.meta = meta;
-    if (this.inputThisItem) this.autoCount = 0; // you did something during the last episode
-    this.inputThisItem = false;
     this.root = document.getElementById('player-root');
     this.video = h('video', { playsinline: true, autoplay: true, crossorigin: 'use-credentials' });
     this.video.volume = Number(localStorage.getItem('lumen.volume') ?? 1);
@@ -144,6 +142,8 @@ class Player {
     this.audioCtx?.close().catch(() => {});
     if (this.desc && this.desc !== desc) releaseDesc(this.desc);
     this.desc = desc; this.meta = meta;
+    if (this.inputThisItem) this.autoCount = 0; // you did something during the last episode
+    this.inputThisItem = false;
     this.upNextDismissed = false; clearInterval(this.upNextTimer); this.autoSkipped = new Set();
     this.upNextEl?.remove(); this.upNextEl = null; this.skipEl?.remove(); this.skipEl = null; this.skipFor = null;
     this.closeMenu?.();
