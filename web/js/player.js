@@ -165,6 +165,17 @@ class Player {
     this.engine = attachEngine(this.video, desc, {
       onFatal: (reason) => this.fatal(reason),
     });
+    // Watchdog: the stream downloads but the picture never moves (e.g. a video format this browser can't decode).
+    // After 20 s of that, try the next, more compatible way to play.
+    clearInterval(this.stallTimer);
+    let lastT = -1, stuckSince = Date.now();
+    this.stallTimer = setInterval(() => {
+      const v = this.video;
+      if (v.paused || this.stillEl) { stuckSince = Date.now(); return; }
+      if (v.currentTime !== lastT) { lastT = v.currentTime; stuckSince = Date.now(); return; }
+      const ahead = v.buffered.length ? v.buffered.end(v.buffered.length - 1) - v.currentTime : 0;
+      if (Date.now() - stuckSince > 20000 && ahead > 4) { stuckSince = Date.now(); this.fatal('the video downloads but does not play in this browser'); }
+    }, 2000);
     if (desc.subtitleUrl) {
       this.video.append(h('track', { kind: 'subtitles', src: desc.subtitleUrl, default: true, label: 'Subtitles' }));
       setTimeout(() => { for (const t of this.video.textTracks) t.mode = 'showing'; }, 300);
@@ -757,6 +768,7 @@ class Player {
     clearTimeout(this.hideT); clearTimeout(this.zapT); clearTimeout(this.bannerT);
     document.removeEventListener('keydown', this.onKey);
     for (const ev of ['keydown', 'pointerdown', 'wheel']) document.removeEventListener(ev, this.onInput, true);
+    clearInterval(this.stallTimer);
     clearTimeout(this.stillTimer);
     document.removeEventListener('fullscreenchange', this.onFs);
     window.removeEventListener('pagehide', this.onUnload);
