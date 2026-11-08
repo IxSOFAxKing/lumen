@@ -227,6 +227,7 @@ object Plex {
         val cw = contJ.await()?.optJSONArray("Hub").objects().firstOrNull()
         if (cw != null && hubs.none { it.optString("hubIdentifier") == cw.optString("hubIdentifier") || it.optString("hubIdentifier") == "home.continue" }) hubs = listOf(cw) + hubs
         hubs = hubs.filter { !Regex("recentlyadded|recently_added|home\\.movies\\.recent|home\\.television\\.recent", RegexOption.IGNORE_CASE).containsMatchIn(it.optString("hubIdentifier")) }
+        hubs = alternate(hubs)
         val recentMovies = lists.filter { it.first == "movie" }.flatMap { it.second }.sortedByDescending { it.optLong("addedAt") }.take(30)
         val recentShows = lists.filter { it.first == "show" }.flatMap { it.second }.sortedByDescending { if (it.has("updatedAt")) it.optLong("updatedAt") else it.optLong("addedAt") }.take(30)
         val featured = mutableListOf<JSONObject>()
@@ -243,6 +244,18 @@ object Plex {
     private fun homeFile() = File(ctx.filesDir, "home-${prefs.plexUserUuid ?: "me"}.json")
     fun diskHome(): JSONObject? = runCatching { homeFile().takeIf { it.exists() }?.readText()?.let { JSONObject(it) } }.getOrNull()
     fun saveHome(j: JSONObject) { runCatching { homeFile().writeText(j.toString()) } }
+
+    /** Home rows alternate: a movie row, then a TV row, then a movie row… (other rows like Continue Watching stay first). */
+    private fun alternate(hubs: List<JSONObject>): List<JSONObject> {
+        fun kind(h: JSONObject) = when (h.optString("type")) { "movie" -> 'm'; "show", "season", "episode" -> 's'; else -> 'o' }
+        val first = hubs.indexOfFirst { kind(it) != 'o' }
+        if (first < 0) return hubs
+        val rest = hubs.drop(first)
+        val m = rest.filter { kind(it) == 'm' }; val s = rest.filter { kind(it) == 's' }
+        val out = hubs.take(first).toMutableList()
+        for (i in 0 until maxOf(m.size, s.size)) { m.getOrNull(i)?.let { out += it }; s.getOrNull(i)?.let { out += it } }
+        return out + rest.filter { kind(it) == 'o' }
+    }
 
     suspend fun libraryHubs(id: String): JSONArray = coroutineScope {
         val hubsJ = async { get("/hubs/sections/$id", mapOf("count" to 20, "includeEmptyHubs" to 0), 60_000) }

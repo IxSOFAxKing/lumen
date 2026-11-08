@@ -184,8 +184,21 @@ r.get('/home', ah(async (req, res) => {
   }
   // Drop Plex's own "recently added" hubs: the rows above replace them.
   list = list.filter(h => !/recentlyadded|recently_added|home\.movies\.recent|home\.television\.recent/i.test(h.hubIdentifier || ''));
+  list = alternateHubs(list);
   res.json({ hubs: list, playlists: MC(playlists).Metadata || [], featured, recentMovies, recentShows });
 }));
+
+/** Home rows alternate: a movie row, then a TV row, then a movie row… (other rows like Continue Watching stay first). */
+function alternateHubs(hubs) {
+  const kind = h => h.type === 'movie' ? 'm' : ['show', 'season', 'episode'].includes(h.type) ? 's' : 'o';
+  const firstTyped = hubs.findIndex(h => kind(h) !== 'o');
+  if (firstTyped < 0) return hubs;
+  const lead = hubs.slice(0, firstTyped), rest = hubs.slice(firstTyped);
+  const m = rest.filter(h => kind(h) === 'm'), s = rest.filter(h => kind(h) === 's'), o = rest.filter(h => kind(h) === 'o');
+  const out = [...lead];
+  for (let i = 0; i < Math.max(m.length, s.length); i++) { if (m[i]) out.push(m[i]); if (s[i]) out.push(s[i]); }
+  return [...out, ...o];
+}
 
 r.get('/libraries', ah(async (req, res) => {
   res.json(MC(await plex.plexCached('/library/sections', {}, 300000)).Directory || []);
