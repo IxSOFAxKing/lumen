@@ -67,19 +67,29 @@ fun LiveScreen() {
     LaunchedEffect(prov.id) {
         runCatching { Repo.groups(prov.id) }.onSuccess { g -> groups = g; mem.data["groups"] = g; if (g.none { it.id == group }) group = "__all" }
     }
+    val chState = rememberLazyListState()
+    var focusFirstChannel by remember { mutableStateOf(false) }
+    val firstChFr = remember { FocusRequester() }
     LaunchedEffect(group, prov.id, AppState.resumeTick) {
         loadingGroup = group
         // Short pause so scrolling through groups doesn't fire a request for each one.
         delay(if (channels == null) 0 else 250)
         val g = group
-        runCatching { Repo.channelsIn(prov.id, g) }.onSuccess { if (g == group) { channels = it; mem.data["channels"] = it; mem.data["group"] = g; Net.prefs.liveGroup = g } }
+        val newGroup = mem.data["group"] != g
+        runCatching { Repo.channelsIn(prov.id, g) }.onSuccess {
+            if (g == group) {
+                channels = it; mem.data["channels"] = it; mem.data["group"] = g; Net.prefs.liveGroup = g
+                // A different group always opens at the top of its channel list.
+                if (newGroup) { runCatching { chState.scrollToItem(0) } }
+                if (focusFirstChannel) { focusFirstChannel = false; delay(60); runCatching { firstChFr.requestFocus() } }
+            }
+        }
             .onFailure { if (g == group) channels = emptyList() }
         loadingGroup = null
     }
     val groupName = groups?.firstOrNull { it.id == group }?.name?.removePrefix("★  ") ?: "Channels"
     // Leaving Live TV for another section closes the preview.
     androidx.compose.runtime.DisposableEffect(Unit) { onDispose { Preview.channel = null } }
-    val firstChFr = remember { FocusRequester() }
     // Focus targets for the group list: opening Live TV starts on the first group; coming back from the
     // channels (◀) lands on the group you're in.
     val firstGroupFr = remember { FocusRequester() }
@@ -87,7 +97,6 @@ fun LiveScreen() {
     val attachedGroups = remember { HashSet<String>() }
     fun groupFr(id: String, index: Int) = if (index == 0) firstGroupFr else groupFrs.getOrPut(id) { FocusRequester() }
     InitialFocus(if (LocalPortrait.current) firstChFr else firstGroupFr)
-    val chState = rememberLazyListState()
     val groupsState = rememberLazyListState()
 
     Row(Modifier.fillMaxSize().padding(top = 20.dp)) {
@@ -125,7 +134,11 @@ fun LiveScreen() {
                 itemsIndexed(gl, key = { _, g -> g.id }) { gi, g ->
                     androidx.compose.runtime.DisposableEffect(g.id) { attachedGroups += g.id; onDispose { attachedGroups -= g.id } }
                     Focusable(
-                        onClick = { group = g.id; scope.launch { delay(50); runCatching { firstChFr.requestFocus() } } },
+                        onClick = {
+                            // OK on a group: into its channels, at the top (once they've loaded).
+                            if (group == g.id && channels != null && loadingGroup == null) scope.launch { runCatching { chState.scrollToItem(0) }; delay(50); runCatching { firstChFr.requestFocus() } }
+                            else { group = g.id; focusFirstChannel = true }
+                        },
                         onFocus = { group = g.id }, focusRequester = groupFr(g.id, gi),
                         memKey = "group/${g.id}", shape = RoundedCornerShape(8.dp), focusedScale = 1f, outline = false,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),

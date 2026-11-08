@@ -102,13 +102,14 @@ export default async function live(el, route) {
 
   // ---- channels ----
   let loadToken = 0;
-  async function loadChannels() {
+  async function loadChannels(keepScroll = false) {
     const my = ++loadToken;
     listCol.replaceChildren(spinner());
     const list = await api.cached(`/api/iptv/providers/${pid}/channels${qs({ category: q ? '__all' : cat, q })}`, 30000);
     if (my !== loadToken) return; // a newer group/search was selected meanwhile
     channels = list;
     renderList();
+    if (!keepScroll) listCol.scrollTop = 0; // every group opens at the top of its channel list
   }
   const isFavView = () => cat === '__fav' || cat.startsWith('__fav:');
   const currentListId = () => (cat.startsWith('__fav:') ? Number(cat.slice(6)) : favLists[0]?.id);
@@ -253,7 +254,7 @@ export default async function live(el, route) {
       h('label', { class: 'field' }, 'Channel number', num, h('span', { class: 'dim small' }, 'Used for number entry on the remote and for sorting. Leave empty for the provider\'s number.'))),
     actions: [{ label: 'Cancel' }, { label: 'Save', primary: true, onClick: async () => {
       await api.put(`/api/iptv/channels/${pid}/${encodeURIComponent(c.id)}`, { name: name.value, num: num.value });
-      toast('Channel updated', { type: 'ok' }); await loadChannels();
+      toast('Channel updated', { type: 'ok' }); await loadChannels(true);
     } }] });
   }
 
