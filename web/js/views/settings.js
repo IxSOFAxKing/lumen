@@ -142,6 +142,18 @@ async function iptvTab(el) {
       render();
     } }), h('span', {}, h('b', {}, 'Show IPTV Movies & Series (VOD)'), h('div', { class: 'dim small' }, 'Turn off to use IPTV for live TV only. Hides them everywhere and stops downloading them.')));
   el.append(h('div', { class: 'card-box', style: { marginBottom: '16px', padding: '14px 18px' } }, vodSwitch));
+  // How often channel lists and the TV guide are downloaded again (all providers).
+  const saveIptv = async patch => { Object.assign(iptvConf, await api.put('/api/settings/iptv', patch)); toast('Saved', { type: 'ok', timeout: 1200 }); };
+  const hoursField = (label, key, opts, hint) => h('div', { class: 'field' }, h('div', { style: { marginBottom: '6px', color: 'var(--text-2)', fontSize: '13px' } }, label),
+    h('div', { class: 'chips' }, ...opts.map(([v, l]) => h('button', { class: `chip ${Number(iptvConf[key]) === v ? 'active' : ''}`, onClick: async e => {
+      e.currentTarget.parentElement.querySelectorAll('.chip').forEach(c => c.classList.remove('active')); e.currentTarget.classList.add('active'); await saveIptv({ [key]: v });
+    } }, l))), hint ? h('div', { class: 'dim small', style: { marginTop: '4px' } }, hint) : null);
+  el.append(h('div', { class: 'card-box', style: { marginBottom: '16px', padding: '14px 18px' } },
+    h('h3', { style: { marginTop: 0 } }, 'Automatic updates'),
+    h('div', { class: 'set-grid' },
+      hoursField('Update channel lists every', 'playlistRefreshHours', [[3, '3 h'], [6, '6 h'], [12, '12 h'], [24, '24 h'], [48, '2 days']], 'New, renamed and removed channels (and movies & series).'),
+      hoursField('Update the TV guide every', 'epgRefreshHours', [[3, '3 h'], [6, '6 h'], [12, '12 h'], [24, '24 h']], 'Programme information.')),
+    h('div', { class: 'dim small' }, 'Use Sync on a provider below to update it right now.')));
   el.append(h('div', { class: 'row', style: { marginBottom: '14px' } }, h('div', { class: 'grow muted' }, 'Add Xtream Codes logins or M3U playlists. Channels, VOD, series and EPG are synced automatically.'),
     btn('Add provider', () => providerForm(null, render), { cls: 'primary', iconName: 'plus' })), list);
   async function render() {
@@ -316,8 +328,6 @@ async function playbackTab(el) {
     h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: ui.zapWrap !== false, onChange: e => saveUiPB({ zapWrap: e.target.checked }) }), 'Channel up/down wraps around from the last channel to the first')),
   !iptv ? null : h('div', { class: 'card-box', style: { marginTop: '18px' } }, h('h3', { style: { marginTop: 0 } }, 'IPTV'),
     h('div', { class: 'set-grid' },
-      field('Playlist refresh (hours)', num(iptv, 'playlistRefreshHours', saveIptv, 1, 168)),
-      field('EPG refresh (hours)', num(iptv, 'epgRefreshHours', saveIptv, 1, 168)),
       field('Keep past EPG (hours)', num(iptv, 'epgPastHours', saveIptv, 0, 336), 'Needed for catch-up browsing in the guide.'),
       field('Load future EPG (days)', num(iptv, 'epgFutureDays', saveIptv, 1, 14)),
       field('Catch-up time offset (minutes)', num(iptv, 'timeshiftOffsetMinutes', saveIptv, -720, 720), 'Adjust if catch-up starts at the wrong time (provider timezone).'),
