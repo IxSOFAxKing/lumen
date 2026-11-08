@@ -294,6 +294,15 @@ export default async function live(el, route) {
     preview?.destroy(); preview = null;
     releaseDesc(previewDesc); previewDesc = null;
   }
+  /** Watch: the preview that's already playing goes full screen (no second stream: providers often allow only one). */
+  function watch(c = selected) {
+    if (!c) return;
+    if (c === selected && preview && ui().showPreview !== false) {
+      pvBox.requestFullscreen?.().then(() => pvVideo.play().catch(() => {})).catch(() => fullscreen(c));
+      return;
+    }
+    fullscreen(c);
+  }
   function fullscreen(c = selected) {
     if (!c) return;
     stopPreview();
@@ -307,7 +316,7 @@ export default async function live(el, route) {
     info.replaceChildren(
       h('div', { class: 'row', style: { marginBottom: '10px' } }, logo(c.logo, c.name), h('div', { class: 'grow' }, h('h2', { class: 'ellipsis' }, c.name), h('div', { class: 'dim small' }, `Channel ${c.num ?? ''}${c.archive ? ` · Catch-up ${c.archive_days || ''} days` : ''}`))),
       h('div', { class: 'row wrap', style: { marginBottom: '14px' } },
-        btn('Watch', () => fullscreen(c), { cls: 'primary', iconName: 'play' }),
+        btn('Watch', () => watch(c), { cls: 'primary', iconName: 'play' }),
         btn('Favourite', () => toggleFav(c), { iconName: c.fav ? 'starf' : 'star' }),
         c.now ? btn('Record', () => record(c, nowS(), c.now.stop, c.now.title), { iconName: 'rec' }) : null,
         btn('', () => chMenu(c), { iconName: 'list', cls: 'icon', title: 'More' })),
@@ -323,7 +332,7 @@ export default async function live(el, route) {
       const day = fmtDay(p.start);
       if (day !== lastDay) { rows.push(h('div', { class: 'dim small', style: { marginTop: '10px', fontWeight: 700 } }, day)); lastDay = day; }
       const isNow = p.start <= t && p.stop > t, past = p.stop <= t;
-      rows.push(h('div', { class: `it ${isNow ? 'now' : ''} ${past ? 'past' : ''}`, tabindex: 0, onClick: () => programmeModal(pid, c, p, { onWatch: () => fullscreen(c) }) },
+      rows.push(h('div', { class: `it ${isNow ? 'now' : ''} ${past ? 'past' : ''}`, tabindex: 0, onClick: () => programmeModal(pid, c, p, { onWatch: () => watch(c) }) },
         h('div', { class: 'tm' }, `${fmtTime(p.start)} – ${fmtTime(p.stop)}`),
         h('div', { class: 'grow' }, h('div', { style: { fontWeight: 600 } }, p.title, past && c.archive ? h('span', { class: 'badge', style: { marginLeft: '6px' } }, '⟲ Catch-up') : null),
           isNow && p.descr ? h('div', { class: 'small muted' }, p.descr) : null)));

@@ -518,9 +518,12 @@ async function appearanceTab(el) {
   };
   const check = (key, label, hint, extra = {}) => h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!u[key], onChange: e => save({ [key]: e.target.checked }, extra) }),
     h('span', {}, label, hint ? h('div', { class: 'dim small' }, hint) : null));
-  const range = (key, min, max, step, fmt = v => v) => {
+  // live = false: the value is applied when you let go (the interface scale would otherwise resize the slider under the mouse).
+  const range = (key, min, max, step, fmt = v => v, live = true) => {
     const val = h('span', { class: 'val' }, fmt(u[key]));
-    return h('div', { class: 'range-row' }, h('input', { type: 'range', min, max, step, value: u[key], onInput: e => { val.textContent = fmt(Number(e.target.value)); save({ [key]: Number(e.target.value) }); } }), val);
+    const apply = e => save({ [key]: Number(e.target.value) });
+    return h('div', { class: 'range-row' }, h('input', { type: 'range', min, max, step, value: u[key],
+      onInput: e => { val.textContent = fmt(Number(e.target.value)); if (live) apply(e); }, onChange: e => { if (!live) apply(e); } }), val);
   };
 
   // --- TV mode (per device) ---
@@ -543,7 +546,7 @@ async function appearanceTab(el) {
 
   // --- Size & layout ---
   el.append(card('Size & layout',
-    field('Interface scale', range('uiScale', 75, 140, 5, v => `${v}%`), 'Makes everything bigger or smaller, handy on TVs and small laptops.'),
+    field('Interface scale', range('uiScale', 75, 140, 5, v => `${v}%`, false), 'Makes everything bigger or smaller, handy on TVs and small laptops.'),
     field('Poster size', chips([['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']], 'cardSize')),
     field('Sidebar style', chips([['rail', 'Compact (icons + labels)'], ['wide', 'Wide (labels beside icons)'], ['icons', 'Icons only']], 'navStyle', { nav: true })),
     field('Ratings shown', chips([['audience', 'Audience'], ['critic', 'Critics'], ['both', 'Both'], ['none', 'None']], 'ratingDisplay'), 'Used on detail pages, the featured banner and list views (Rotten Tomatoes scores when your Plex agent provides them).'),
@@ -631,6 +634,8 @@ async function appearanceTab(el) {
       field('Auto skip delay', chips([[0, 'Immediately'], [3, '3s'], [5, '5s'], [10, '10s']], 'autoSkipDelay')),
       field('Rewind on resume', chips([[0, 'Off'], [5, '5s'], [10, '10s'], [15, '15s'], [30, '30s']], 'rewindOnResume')),
       field('Default sleep timer', chips([[0, 'Off'], [30, '30 min'], [60, '1 h'], [90, '90 min'], [120, '2 h']], 'defaultSleep')),
+      field('Are you still watching? — after episodes in a row', chips([[0, 'Never'], [2, '2'], [3, '3'], [4, '4'], [6, '6']], 'stillWatchingEpisodes')),
+      field('Are you still watching? — after no input for', chips([[0, 'Never'], [2, '2 h'], [3, '3 h'], [4, '4 h'], [6, '6 h']], 'stillWatchingHours')),
       field('Maximum volume', chips([[100, '100%'], [125, '125%'], [150, '150%'], [200, '200%']], 'maxVolume')),
       field('Live TV volume offset', chips(VOL_OFFSET, 'liveVolumeOffset')),
       field('Plex volume offset', chips(VOL_OFFSET, 'plexVolumeOffset'))),

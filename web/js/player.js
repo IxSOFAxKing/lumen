@@ -34,6 +34,8 @@ export function openPlayer(desc, meta = {}) {
 class Player {
   constructor(desc, meta) {
     this.desc = desc; this.meta = meta;
+    if (this.inputThisItem) this.autoCount = 0; // you did something during the last episode
+    this.inputThisItem = false;
     this.root = document.getElementById('player-root');
     this.video = h('video', { playsinline: true, autoplay: true, crossorigin: 'use-credentials' });
     this.video.volume = Number(localStorage.getItem('lumen.volume') ?? 1);
@@ -49,6 +51,14 @@ class Player {
     const ds = Number(window.lumenSettings?.ui?.defaultSleep) || 0;
     if (ds && !meta.live) this.sleepAt = Date.now() + ds * 60000; // Settings → Player → Default sleep timer
     this.timers.push(setInterval(() => { if (this.sleepAt && Date.now() >= this.sleepAt) { toast('Sleep timer: playback stopped'); this.close(); } }, 5000));
+    // "Are you still watching?" after hours without touching anything (Settings → Player).
+    this.lastInput = Date.now(); this.autoCount = 0;
+    this.timers.push(setInterval(() => {
+      const hrs = Number(window.lumenSettings?.ui?.stillWatchingHours ?? 4);
+      if (hrs > 0 && !this.stillEl && !this.video.paused && Date.now() - this.lastInput > hrs * 3600e3) this.askStillWatching();
+    }, 30000));
+    this.onInput = () => { this.lastInput = Date.now(); this.inputThisItem = true; };
+    for (const ev of ['keydown', 'pointerdown', 'wheel']) document.addEventListener(ev, this.onInput, true);
     this.applyBoost();
     this.onKey = this.onKey.bind(this);
     document.addEventListener('keydown', this.onKey);
@@ -276,7 +286,7 @@ class Player {
         this.autoSkipped.add(m);
         if (m.type === 'intro') { toast('Skipped intro'); this.seek(m.end); return; }
         if (m.type === 'credits') {
-          if (this.meta.next && pu.autoplayNext !== false) { this.meta.next.run(); return; }
+          if (this.meta.next && pu.autoplayNext !== false) { this.autoNext(); return; }
           if (!this.meta.next) { toast('Skipped credits'); this.seek(d - 1); return; }
         }
       }
@@ -300,14 +310,46 @@ class Player {
         h('div', { class: 'row' }, h('button', { class: 'btn primary sm', onClick: e => { e.stopPropagation(); this.meta.next.run(); } }, 'Play now', cnt),
           h('button', { class: 'btn sm', onClick: e => { e.stopPropagation(); this.upNextDismissed = true; clearInterval(this.upNextTimer); this.upNextEl.remove(); this.upNextEl = null; } }, 'Cancel')));
       this.el.append(this.upNextEl);
-      if (auto) this.upNextTimer = setInterval(() => { if (this.video.paused) return; left--; cnt.textContent = ` (${left})`; if (left <= 0) { clearInterval(this.upNextTimer); this.meta.next?.run(); } }, 1000);
+      if (auto) this.upNextTimer = setInterval(() => { if (this.video.paused) return; left--; cnt.textContent = ` (${left})`; if (left <= 0) { clearInterval(this.upNextTimer); this.autoNext(); } }, 1000);
     } else if (!nearEnd && this.upNextEl) { clearInterval(this.upNextTimer); this.upNextEl.remove(); this.upNextEl = null; }
   }
   ended() {
     if (this.meta.live) return;
     this.report('stopped');
     if (this.desc.restartOnSeek && this.dur() - this.pos() > 15) return; // event playlist caught up; not truly ended
-    if (this.meta.next && (window.lumenSettings?.ui?.autoplayNext !== false)) this.meta.next.run();
+    if (this.meta.next && (window.lumenSettings?.ui?.autoplayNext !== false)) this.autoNext();
+  }
+
+  /** The next episode starts by itself, unless several have in a row without you touching anything. */
+  autoNext() {
+    if (!this.meta.next) return;
+    if (this.inputThisItem) this.autoCount = 0;
+    this.autoCount++;
+    const n = Number(window.lumenSettings?.ui?.stillWatchingEpisodes ?? 3);
+    if (n > 0 && this.autoCount > n) { this.askStillWatching(() => this.meta.next?.run()); return; }
+    this.meta.next.run();
+  }
+
+  /** "Are you still watching?" — Continue keeps going; with no answer for a minute playback stops. */
+  askStillWatching(onContinue) {
+    if (this.stillEl) return;
+    const live = this.meta.live;
+    if (!live || onContinue) this.video.pause();
+    const done = (cont) => {
+      clearTimeout(this.stillTimer); this.stillEl?.remove(); this.stillEl = null;
+      this.lastInput = Date.now(); this.autoCount = 0;
+      if (!cont) { this.close(); return; }
+      if (onContinue) onContinue(); else this.video.play().catch(() => {});
+    };
+    const ok = h('button', { class: 'btn primary', onClick: e => { e.stopPropagation(); done(true); } }, 'Continue watching');
+    this.stillEl = h('div', { class: 'p-still' }, h('div', { class: 'card-box' },
+      h('h2', { style: { margin: '0 0 6px' } }, 'Are you still watching?'),
+      h('div', { class: 'muted', style: { marginBottom: '16px' } }, this.meta.title || ''),
+      h('div', { class: 'row', style: { justifyContent: 'center', gap: '10px' } }, ok, h('button', { class: 'btn', onClick: e => { e.stopPropagation(); done(false); } }, 'Stop'))));
+    this.el.append(this.stillEl);
+    setTimeout(() => ok.focus(), 50);
+    // No answer: live TV stops (frees the connection); anything else stays paused here.
+    this.stillTimer = setTimeout(() => { if (live) done(false); }, 60000);
   }
 
   // ---------- Live recording (the red REC button) ----------
@@ -714,6 +756,8 @@ class Player {
     clearInterval(this.upNextTimer);
     clearTimeout(this.hideT); clearTimeout(this.zapT); clearTimeout(this.bannerT);
     document.removeEventListener('keydown', this.onKey);
+    for (const ev of ['keydown', 'pointerdown', 'wheel']) document.removeEventListener(ev, this.onInput, true);
+    clearTimeout(this.stillTimer);
     document.removeEventListener('fullscreenchange', this.onFs);
     window.removeEventListener('pagehide', this.onUnload);
     window.removeEventListener('popstate', this.onPop);

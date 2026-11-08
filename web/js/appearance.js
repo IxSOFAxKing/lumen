@@ -74,7 +74,12 @@ export function applyAppearance(u = ui()) {
   root.style.setProperty('--accent-ink', luminance(rgb) > 0.35 ? '#15100a' : '#ffffff');
   // Scale & sizes
   const app = document.getElementById('app');
-  if (app) app.style.zoom = String((Number(u.uiScale) || 100) / 100);
+  if (app) {
+    // Zooming #app also zooms its 100vh height: shrink it back so the whole app (sidebar bottom included) fits the window.
+    const z = (Number(u.uiScale) || 100) / 100;
+    app.style.zoom = String(z);
+    app.style.height = z === 1 ? '' : `calc(100dvh / ${z})`;
+  }
   const card = { small: [118, 210], medium: [150, 260], large: [190, 330] }[u.cardSize] || [150, 260];
   root.style.setProperty('--card-w', `${card[0]}px`);
   root.style.setProperty('--card-wide-w', `${card[1]}px`);

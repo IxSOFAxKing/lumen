@@ -53,7 +53,7 @@ export const DEFAULTS = {
     clock: 'off',
     autoSkipIntro: false, autoSkipCredits: false,
     skipIntroMode: 'button', skipCreditsMode: 'button', autoSkipDelay: 0, forceFallbackMarkers: false, chapterMarks: true,
-    rewindOnResume: 0, defaultSleep: 0, maxVolume: 100, liveVolumeOffset: 0, plexVolumeOffset: 0,
+    rewindOnResume: 0, defaultSleep: 0, stillWatchingEpisodes: 3, stillWatchingHours: 4, maxVolume: 100, liveVolumeOffset: 0, plexVolumeOffset: 0,
     seekBack: 10, seekForward: 30,
     subtitleSize: 100, subtitleColor: '#ffffff', subtitleBg: 60,
     // TV Guide

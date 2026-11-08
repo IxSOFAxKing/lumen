@@ -81,6 +81,8 @@ interface PlayerActions {
     fun pinch(zoomIn: Boolean)
     /** Phones: double-tap the left / right half to skip back / forward. */
     fun doubleTap(left: Boolean) {}
+    /** "Are you still watching?": true = continue, false = stop. */
+    fun stillAnswer(cont: Boolean) {}
 }
 var playerActions: PlayerActions? = null
 
@@ -166,6 +168,21 @@ fun PlayerOverlay(st: PlayerState, view: PlayerView) {
         st.message?.let { msg ->
             Box(Modifier.align(Alignment.TopCenter).padding(top = 28.dp).clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.75f)).padding(horizontal = 18.dp, vertical = 8.dp)) {
                 T(msg, 13.sp, weight = FontWeight.Medium)
+            }
+        }
+        if (st.still) {
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)), contentAlignment = Alignment.Center) {
+                Column(Modifier.width(460.dp).clip(RoundedCornerShape(14.dp)).background(C.bg2.copy(alpha = 0.96f)).padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    T("Are you still watching?", 22.sp, weight = FontWeight.Bold)
+                    Spacer(Modifier.height(6.dp))
+                    T(st.title, 14.sp, C.text2, maxLines = 2)
+                    Spacer(Modifier.height(20.dp))
+                    Row {
+                        Box(Modifier.clip(RoundedCornerShape(50)).background(Color.White).tap { playerActions?.stillAnswer(true) }.padding(horizontal = 20.dp, vertical = 10.dp)) { T(if (AppState.isTv) "OK  Continue watching" else "Continue watching", 14.sp, Color.Black, FontWeight.Bold) }
+                        Spacer(Modifier.width(10.dp))
+                        Box(Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.15f)).tap { playerActions?.stillAnswer(false) }.padding(horizontal = 20.dp, vertical = 10.dp)) { T(if (AppState.isTv) "BACK  Stop" else "Stop", 14.sp, weight = FontWeight.SemiBold) }
+                    }
+                }
             }
         }
         st.error?.let { e ->

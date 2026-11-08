@@ -70,6 +70,8 @@ class PlayerState {
     var panel by mutableStateOf<Panel?>(null)
     var skip by mutableStateOf<Marker?>(null)
     var upNext by mutableStateOf<Int?>(null)
+    /** "Are you still watching?" is showing. */
+    var still by mutableStateOf(false)
     var upNextLabel by mutableStateOf("")
     var chList by mutableStateOf(false)
     var chIndex by mutableIntStateOf(0)
@@ -182,7 +184,9 @@ class PlayerActivity : ComponentActivity() {
         setContent { LumenTheme(Net.prefs.uiScale) { PlayerOverlay(st, view) } }
         PlayerBus.player = WeakReference(this)
         playerActions = object : PlayerActions {
+            override fun stillAnswer(cont: Boolean) = answerStill(cont)
             override fun tap() {
+                userInput()
                 when {
                     st.panel != null -> st.panel = null
                     st.chList -> st.chList = false
@@ -214,6 +218,7 @@ class PlayerActivity : ComponentActivity() {
             override fun volume(delta: Float) = gestureVolume(delta)
             override fun pinch(zoomIn: Boolean) = gesturePinch(zoomIn)
             override fun doubleTap(left: Boolean) {
+                userInput()
                 if (st.live) { tap(); return }
                 val by = if (left) -seekBack() else seekFwd()
                 seekAbs(st.pos + by)
@@ -271,6 +276,8 @@ class PlayerActivity : ComponentActivity() {
         }
         if (old !== src) {
             fallbacks = 0; upNextDismissed = false; skippedMarkers.clear(); st.upNext = null; st.skip = null
+            if (inputThisItem) autoCount = 0
+            inputThisItem = false
         }
         source = src
         if (boostLive != src.isLive) applyVolumeBoost(exo.audioSessionId)
@@ -393,7 +400,46 @@ class PlayerActivity : ComponentActivity() {
         if (src.isLive) { start(src, 0.0); return }
         report("stopped")
         if (src is WebSource) { PlayerBus.ended(); if (!src.hasNext) finish(); return }
-        if (src.hasNext && AppState.uiBool("autoplayNext", true)) playNext() else finish()
+        if (src.hasNext && AppState.uiBool("autoplayNext", true)) autoNext() else finish()
+    }
+
+    // ---------- "Are you still watching?" (Settings → Player) ----------
+    private var lastInput = System.currentTimeMillis()
+    private var inputThisItem = false
+    private var autoCount = 0
+    private var stillContinue: (() -> Unit)? = null
+    private var stillSince = 0L
+    private fun userInput() { lastInput = System.currentTimeMillis(); inputThisItem = true }
+    /** The next episode starts by itself, unless several already have in a row without anyone touching the remote. */
+    private fun autoNext() {
+        if (inputThisItem) autoCount = 0
+        autoCount++
+        val n = AppState.uiNum("stillWatchingEpisodes", 3.0).toInt()
+        if (n > 0 && autoCount > n) askStill { playNext() } else playNext()
+    }
+    private fun askStill(onContinue: (() -> Unit)? = null) {
+        if (st.still) return
+        if (!st.live || onContinue != null) exo.pause()
+        stillContinue = onContinue; stillSince = System.currentTimeMillis()
+        st.upNext = null; st.controls = false; st.panel = null
+        st.still = true
+    }
+    private fun answerStill(cont: Boolean) {
+        if (!st.still) return
+        st.still = false
+        lastInput = System.currentTimeMillis(); autoCount = 0
+        val c = stillContinue; stillContinue = null
+        if (!cont) { finish(); return }
+        if (c != null) c() else exo.play()
+    }
+    private fun checkStill(now: Long) {
+        if (st.still) {
+            // No answer within a minute: live TV stops (frees the provider connection); anything else stays paused.
+            if (st.live && now - stillSince > 60_000) answerStill(false)
+            return
+        }
+        val hrs = AppState.uiNum("stillWatchingHours", 4.0)
+        if (hrs > 0 && exo.isPlaying && now - lastInput > hrs * 3_600_000) askStill()
     }
 
     private fun playNext() {
@@ -418,6 +464,7 @@ class PlayerActivity : ComponentActivity() {
     // ------------------------------------------------------------------ tick (4× a second)
     private fun tick() {
         val now = System.currentTimeMillis()
+        checkStill(now)
         val src = source
         if (desc != null) {
             st.pos = absPos()
@@ -555,7 +602,7 @@ class PlayerActivity : ComponentActivity() {
             val left = st.upNext
             if (left != null && exo.isPlaying && now - upNextTick >= 1000) {
                 upNextTick = now
-                if (left <= 1) playNext() else st.upNext = left - 1
+                if (left <= 1) autoNext() else st.upNext = left - 1
             }
         }
     }
@@ -563,7 +610,7 @@ class PlayerActivity : ComponentActivity() {
     private fun skip(m: Marker) {
         val src = source ?: return
         st.skip = null
-        if (m.type == "credits" && src.hasNext) { playNext(); return }
+        if (m.type == "credits" && src.hasNext) { autoNext(); return }
         seekAbs(m.end)
     }
 
@@ -1026,6 +1073,11 @@ class PlayerActivity : ComponentActivity() {
             if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) backDownSeen = true
             if (!backDownSeen) return true
             if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount > 0) return true
+        }
+        if (event.action == KeyEvent.ACTION_DOWN) userInput()
+        if (st.still) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) answerStill(!(code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE))
+            return true
         }
         if (event.action == KeyEvent.ACTION_UP) return true
         if (event.action != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event)

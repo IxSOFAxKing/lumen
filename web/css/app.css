@@ -519,3 +519,7 @@ body.tv-mode .card-more { display: none; }
 .pv-ctrls .pbtn { width: 34px; height: 34px; }
 .pv-ctrls input[type=range] { width: 90px; }
 .pv-ctrls .pv-live { margin-left: 4px; font-size: 11px; font-weight: 800; background: #e5343f; color: #fff; padding: 1px 6px; border-radius: 3px; }
+
+/* "Are you still watching?" */
+.p-still { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.6); z-index: 30; }
+.p-still .card-box { text-align: center; min-width: 320px; padding: 26px 30px; }

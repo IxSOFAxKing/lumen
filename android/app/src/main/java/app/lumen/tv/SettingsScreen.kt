@@ -193,6 +193,8 @@ fun SettingsScreen() {
 
         item { Section("Auto-play & skip") }
         item { Toggle("Auto-play next episode", AppState.uiBool("autoplayNext", true)) { save("autoplayNext", !AppState.uiBool("autoplayNext", true)) } }
+        item { SettingRow("Are you still watching? (episodes)", label("stillWatchingEpisodes", STILL_EPS, 3), hint = "Ask after this many episodes play in a row without touching the remote") { cycle("stillWatchingEpisodes", STILL_EPS, 3, "Ask after episodes in a row") } }
+        item { SettingRow("Are you still watching? (idle)", label("stillWatchingHours", STILL_HRS, 4), hint = "Ask after this long without touching the remote (also Live TV)") { cycle("stillWatchingHours", STILL_HRS, 4, "Ask after no input for") } }
         item { SettingRow("Play next countdown", label("autoplayCountdown", COUNTDOWN, 10)) { cycle("autoplayCountdown", COUNTDOWN, 10, "Play next countdown") } }
         item { SettingRow("Skip intro", label("skipIntroMode", SKIP_MODES, if (AppState.uiBool("autoSkipIntro", false)) "auto" else "button")) { cycle("skipIntroMode", SKIP_MODES, if (AppState.uiBool("autoSkipIntro", false)) "auto" else "button", "Skip intro") } }
         item { SettingRow("Skip credits", label("skipCreditsMode", SKIP_MODES, if (AppState.uiBool("autoSkipCredits", false)) "auto" else "button")) { cycle("skipCreditsMode", SKIP_MODES, if (AppState.uiBool("autoSkipCredits", false)) "auto" else "button", "Skip credits") } }
@@ -368,6 +370,8 @@ private val SUB_COLOR = listOf(Opt("#ffffff", "White"), Opt("#ffff00", "Yellow")
 private val SUB_BG = listOf(Opt(0, "None"), Opt(30, "Light"), Opt(60, "Medium"), Opt(90, "Dark"))
 private val SKIPS = listOf(Opt(5, "5 seconds"), Opt(10, "10 seconds"), Opt(15, "15 seconds"), Opt(30, "30 seconds"), Opt(60, "60 seconds"))
 private val REWIND = listOf(Opt(0, "Off"), Opt(5, "5 seconds"), Opt(10, "10 seconds"), Opt(15, "15 seconds"), Opt(30, "30 seconds"))
+private val STILL_EPS = listOf(Opt(0, "Never"), Opt(2, "2 episodes"), Opt(3, "3 episodes"), Opt(4, "4 episodes"), Opt(6, "6 episodes"))
+private val STILL_HRS = listOf(Opt(0, "Never"), Opt(2, "2 hours"), Opt(3, "3 hours"), Opt(4, "4 hours"), Opt(6, "6 hours"))
 private val SLEEP = listOf(Opt(0, "Off"), Opt(15, "15 minutes"), Opt(30, "30 minutes"), Opt(60, "60 minutes"), Opt(90, "90 minutes"), Opt(120, "2 hours"))
 private val COUNTDOWN = listOf(Opt(3, "3 seconds"), Opt(5, "5 seconds"), Opt(10, "10 seconds"), Opt(15, "15 seconds"), Opt(30, "30 seconds"))
 private val SKIP_MODES = listOf(Opt("off", "Off"), Opt("button", "Show button"), Opt("auto", "Skip automatically"))
