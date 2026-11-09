@@ -17,7 +17,7 @@ export default async function live(el, route) {
   const u = ui();
   let cat = route.query.cat || prefs.get(`livecat.${pid}`, '__all');
   let channels = [], selected = null, preview = null, previewDesc = null, q = '', reordering = false, rendered = 0, moreIO = null;
-  let cats = [], favLists = [];
+  let cats = [], favLists = [], gone = false, lent = false; // lent: the full player is using the preview's video
   const CHUNK = 150;
 
   const catsCol = h('div', { class: 'col cats' });
@@ -25,7 +25,8 @@ export default async function live(el, route) {
   const pvVideo = h('video', { playsinline: true, autoplay: true });
   const pvMsg = h('div', { class: 'msg' }, 'Select a channel to preview');
   const info = h('div', { class: 'info' });
-  // Preview controls (shown on hover): play/pause, sound, open the full player, browser fullscreen.
+  // Preview controls (shown on hover): play/pause, sound, full screen. Full screen (also Watch, double-click, Enter)
+  // hands this very stream to the full player with all its controls; leaving full screen puts it back here.
   // (Buttons drop focus after a click, so the controls can hide again — e.g. once the preview is full screen.)
   const pvBtn = (name, title, fn) => h('button', { class: 'pbtn', title, 'aria-label': title, html: icon(name), onClick: e => { e.stopPropagation(); e.currentTarget.blur(); fn(e); } });
   const pvPlay = pvBtn('pause', 'Play / pause', () => { pvVideo.paused ? pvVideo.play().catch(() => {}) : pvVideo.pause(); });
@@ -34,18 +35,15 @@ export default async function live(el, route) {
   pvVideo.addEventListener('play', () => { pvPlay.innerHTML = icon('pause'); });
   pvVideo.addEventListener('pause', () => { pvPlay.innerHTML = icon('play'); });
   pvVideo.addEventListener('volumechange', () => { pvMute.innerHTML = icon(pvVideo.muted || pvVideo.volume === 0 ? 'mute' : 'vol'); pvVol.value = pvVideo.muted ? 0 : pvVideo.volume; });
-  const pvBox = h('div', { class: 'pv', onDblclick: () => fullscreen() }, pvVideo, pvMsg);
+  const pvBox = h('div', { class: 'pv', onDblclick: () => watch() }, pvVideo, pvMsg);
   const pvCtrls = h('div', { class: 'pv-ctrls' }, pvPlay, pvMute, pvVol, h('span', { class: 'pv-live' }, 'LIVE'), h('div', { class: 'spacer', style: { flex: 1 } }),
-    pvBtn('play', 'Watch in the full player', () => fullscreen()),
-    pvBtn('fs', 'Fullscreen', () => { document.fullscreenElement ? document.exitFullscreen() : pvBox.requestFullscreen?.().catch(() => {}); }));
+    pvBtn('fs', 'Full screen', () => watch()));
   pvBox.append(pvCtrls);
   // Controls (and the pointer) hide after a few seconds without moving the mouse — also in full screen.
   let idleT = 0;
   const wake = () => { pvBox.classList.remove('idle'); clearTimeout(idleT); idleT = setTimeout(() => pvBox.classList.add('idle'), 2500); };
   pvBox.addEventListener('mousemove', wake);
   pvBox.addEventListener('mouseleave', () => { clearTimeout(idleT); pvBox.classList.remove('idle'); });
-  const onFs = () => { if (document.fullscreenElement === pvBox) wake(); else { clearTimeout(idleT); pvBox.classList.remove('idle'); } };
-  document.addEventListener('fullscreenchange', onFs);
   const pvCol = h('div', { class: 'col preview' }, pvBox, info);
   el.append(h('div', { class: 'live' }, catsCol, listCol, pvCol));
 
@@ -124,9 +122,9 @@ export default async function live(el, route) {
 
   function chRow(c, i) {
     const row = h('div', { class: `ch ${selected?.id === c.id ? 'active' : ''}`, tabindex: 0, dataset: { i },
-      onClick: () => { if (reordering) return; if (selected?.id === c.id) fullscreen(); else select(c); },
+      onClick: () => { if (reordering) return; if (selected?.id === c.id) watch(c); else select(c); },
       onKeydown: e => {
-        if (e.key === 'Enter' && !reordering) { e.preventDefault(); fullscreen(); }
+        if (e.key === 'Enter' && !reordering) { e.preventDefault(); watch(c); }
         else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
           e.preventDefault(); e.stopPropagation();
           const j = i + (e.key === 'ArrowDown' ? 1 : -1);
@@ -277,13 +275,13 @@ export default async function live(el, route) {
     listCol.querySelectorAll('.ch.active').forEach(x => x.classList.remove('active'));
     listCol.querySelector(`[data-i="${channels.indexOf(c)}"]`)?.classList.add('active');
     renderInfo();
-    if (ui().showPreview === false) return;
+    if (ui().showPreview === false || lent) return;
     stopPreview();
     pvMsg.replaceChildren(h('div', { class: 'spinner' }));
     pvMsg.classList.remove('hidden');
     try {
       const desc = await api.post('/api/iptv/play/live', { providerId: pid, channelId: c.id });
-      if (selected !== c) { releaseDesc(desc); return; }
+      if (selected !== c || lent) { releaseDesc(desc); return; }
       previewDesc = desc;
       const tryAttach = (d, mode) => {
         preview = attachEngine(pvVideo, d, { onFatal: async () => {
@@ -291,7 +289,7 @@ export default async function live(el, route) {
           const nm = mode === 'direct' ? 'remux' : mode === 'remux' ? 'transcode' : null;
           if (!nm || selected !== c) { pvMsg.textContent = 'Preview unavailable'; pvMsg.classList.remove('hidden'); return; }
           const d2 = await api.post('/api/iptv/play/live', { providerId: pid, channelId: c.id, mode: nm }).catch(() => null);
-          if (!d2 || selected !== c) return;
+          if (!d2 || selected !== c || lent) { releaseDesc(d2); return; }
           releaseDesc(previewDesc); previewDesc = d2; tryAttach(d2, nm);
         } });
       };
@@ -303,20 +301,43 @@ export default async function live(el, route) {
     preview?.destroy(); preview = null;
     releaseDesc(previewDesc); previewDesc = null;
   }
-  /** Watch: the preview that's already playing goes full screen (no second stream: providers often allow only one). */
+  /**
+   * Watch = maximise. The preview that's already playing becomes the full player (no second stream: providers often
+   * allow only one); without a preview the channel opens in the player. Either way it goes full screen.
+   */
   function watch(c = selected) {
     if (!c) return;
-    if (c === selected && preview && ui().showPreview !== false) {
-      pvBox.requestFullscreen?.().then(() => pvVideo.play().catch(() => {})).catch(() => fullscreen(c));
+    if (c !== selected) select(c);
+    const playing = c === selected && preview && previewDesc;
+    const handBack = (r) => { lent = false; backFromPlayer(r); };
+    if (playing && !window.LumenNative) {
+      const adopt = { video: pvVideo, engine: preview, desc: previewDesc, handBack, fullscreen: true };
+      preview = null; previewDesc = null; lent = true; // the player owns the stream now
+      playLive(pid, c, channels, catTitle(), { adopt });
       return;
     }
-    fullscreen(c);
-  }
-  function fullscreen(c = selected) {
-    if (!c) return;
-    stopPreview();
+    stopPreview(); lent = !window.LumenNative;
     pvMsg.textContent = 'Select a channel to preview'; pvMsg.classList.remove('hidden');
-    playLive(pid, c, channels, catTitle());
+    playLive(pid, c, channels, catTitle(), window.LumenNative ? {} : { adopt: { video: pvVideo, handBack, fullscreen: true } }).then(p => { if (!p) lent = false; });
+  }
+  /** The player closed: its stream (maybe another channel by now) plays on in the preview. */
+  function backFromPlayer({ video, engine, desc, channel }) {
+    pvBox.prepend(video);
+    if (gone) { engine?.destroy(); releaseDesc(desc); return; }
+    if (!engine) { if (selected && ui().showPreview !== false) select(selected); return; }
+    preview = engine; previewDesc = desc;
+    engine.onFatal = () => { stopPreview(); if (selected) select(selected); };
+    pvMsg.classList.add('hidden');
+    video.play().catch(() => {});
+    const c = channel && (channels.find(x => String(x.id) === String(channel.id)) || channel);
+    if (c && String(c.id) !== String(selected?.id)) {
+      selected = c;
+      listCol.querySelectorAll('.ch.active').forEach(x => x.classList.remove('active'));
+      const row = listCol.querySelector(`[data-i="${channels.indexOf(c)}"]`);
+      row?.classList.add('active'); row?.scrollIntoView({ block: 'nearest' });
+      renderInfo();
+    }
+    if (ui().showPreview === false) stopPreview();
   }
 
   async function renderInfo() {
@@ -357,5 +378,5 @@ export default async function live(el, route) {
   renderCats();
   await loadChannels();
   const refresh = setInterval(() => { if (!document.hidden && !reordering) api.get(`/api/iptv/providers/${pid}/channels${qs({ category: q ? '__all' : cat, q })}`).then(l => { const sel = selected?.id; channels = l; renderList(); selected = channels.find(x => x.id === sel) || selected; }).catch(() => {}); }, 120000);
-  return () => { clearInterval(refresh); moreIO?.disconnect(); stopPreview(); document.removeEventListener('fullscreenchange', onFs); clearTimeout(idleT); };
+  return () => { gone = true; clearInterval(refresh); moreIO?.disconnect(); stopPreview(); clearTimeout(idleT); pvVideo._lumenAudio?.ctx.close().catch(() => {}); };
 }

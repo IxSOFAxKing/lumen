@@ -24,20 +24,28 @@ export function closePlayer() { current?.close(); }
  *   subtitleUrl
  * }
  */
-export function openPlayer(desc, meta = {}) {
+export function openPlayer(desc, meta = {}, adopt = null) {
   if (window.LumenNative?.play) return openNative(desc, meta);
   if (current && !current.closed) { current.report('stopped'); current.load(desc, meta); return current; }
-  current = new Player(desc, meta);
+  current = new Player(desc, meta, adopt);
+  if (adopt?.fullscreen) current.fullscreen(true);
   return current;
 }
 
 class Player {
-  constructor(desc, meta) {
+  constructor(desc, meta, adopt = null) {
     this.desc = desc; this.meta = meta;
     this.root = document.getElementById('player-root');
-    this.video = h('video', { playsinline: true, autoplay: true, crossorigin: 'use-credentials' });
-    this.video.volume = Number(localStorage.getItem('lumen.volume') ?? 1);
-    this.video.muted = localStorage.getItem('lumen.muted') === 'true';
+    // adopt = { video, engine, handBack }: take over a stream that's already playing (the Live TV preview) — same
+    // picture, no new connection to the provider — and give it back when the player closes.
+    this.adopt = adopt?.video ? adopt : null;
+    this.vAbort = new AbortController();
+    if (this.adopt) this.video = this.adopt.video;
+    else {
+      this.video = h('video', { playsinline: true, autoplay: true, crossorigin: 'use-credentials' });
+      this.video.volume = Number(localStorage.getItem('lumen.volume') ?? 1);
+      this.video.muted = localStorage.getItem('lumen.muted') === 'true';
+    }
     this.build();
     this.timers = [];
     this.timers.push(setInterval(() => this.report(this.video.paused ? 'paused' : 'playing'), 10000));
@@ -125,15 +133,20 @@ class Player {
     this.el.append(this.video, this.center, this.ui, this.overlay);
     this.root.replaceChildren(this.el);
 
-    const v = this.video;
-    v.addEventListener('play', () => { this.playBtn.innerHTML = icon('pause'); this.report('playing'); });
-    v.addEventListener('pause', () => { this.playBtn.innerHTML = icon('play'); this.poke(); this.report('paused'); });
-    v.addEventListener('waiting', () => this.setBusy(true));
-    v.addEventListener('playing', () => { this.setBusy(false); this.clearError(); this.autoReloads = 0; });
-    v.addEventListener('canplay', () => this.setBusy(false));
-    v.addEventListener('ended', () => this.ended());
-    v.addEventListener('volumechange', () => { this.volBtn.innerHTML = icon(v.muted || v.volume === 0 ? 'mute' : 'vol'); });
-    document.addEventListener('fullscreenchange', this.onFs = () => { this.fsBtn.innerHTML = icon(document.fullscreenElement ? 'fsx' : 'fs'); });
+    const v = this.video, sig = { signal: this.vAbort.signal };
+    v.addEventListener('play', () => { this.playBtn.innerHTML = icon('pause'); this.report('playing'); }, sig);
+    v.addEventListener('pause', () => { this.playBtn.innerHTML = icon('play'); this.poke(); this.report('paused'); }, sig);
+    v.addEventListener('waiting', () => this.setBusy(true), sig);
+    v.addEventListener('playing', () => { this.setBusy(false); this.clearError(); this.autoReloads = 0; }, sig);
+    v.addEventListener('canplay', () => this.setBusy(false), sig);
+    v.addEventListener('ended', () => this.ended(), sig);
+    v.addEventListener('volumechange', () => { this.volBtn.innerHTML = icon(v.muted || v.volume === 0 ? 'mute' : 'vol'); }, sig);
+    document.addEventListener('fullscreenchange', this.onFs = () => {
+      this.fsBtn.innerHTML = icon(document.fullscreenElement ? 'fsx' : 'fs');
+      // Opened from the Live TV preview: leaving full screen (Esc, the button) shrinks it back into the preview.
+      if (document.fullscreenElement === this.el) this.wasFs = true;
+      else if (this.wasFs && this.adopt && !document.fullscreenElement) this.close();
+    });
   }
 
   // ---------- Loading ----------
@@ -163,7 +176,11 @@ class Player {
     this.audioBtn.classList.toggle('hidden', !(meta.audio?.length > 1));
     this.ccBtn.classList.toggle('hidden', !(meta.subtitles?.length));
     this.renderMarkers();
-    this.engine = attachEngine(this.video, desc, {
+    if (this.adopt?.engine) {
+      this.engine = this.adopt.engine; this.adopt.engine = null;
+      this.engine.onFatal = (reason) => this.fatal(reason);
+      if (!this.video.paused && this.video.readyState >= 3) this.setBusy(false);
+    } else this.engine = attachEngine(this.video, desc, {
       onFatal: (reason) => this.fatal(reason),
     });
     // Watchdog: the stream downloads but the picture never moves (e.g. a video format this browser can't decode).
@@ -403,9 +420,10 @@ class Player {
   // ---------- Basic controls ----------
   toggle() { if (this.video.paused) this.video.play().catch(() => {}); else this.video.pause(); this.poke(); }
   setMuted(m) { this.video.muted = m; localStorage.setItem('lumen.muted', String(m)); }
-  fullscreen() {
-    if (document.fullscreenElement) document.exitFullscreen();
-    else (this.el.requestFullscreen?.() || this.video.webkitEnterFullscreen?.());
+  fullscreen(on = !document.fullscreenElement) {
+    if (!on) { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); return; }
+    const p = this.el.requestFullscreen?.() || this.video.webkitEnterFullscreen?.();
+    p?.catch?.(() => {});
   }
   async pip() {
     try {
@@ -577,6 +595,8 @@ class Player {
     const offsetDb = Number(this.meta.live ? ui.liveVolumeOffset : ui.plexVolumeOffset) || 0;
     const gain = (pct / 100) * Math.pow(10, offsetDb / 20);
     this.wantGain = gain;
+    const kept = this.video._lumenAudio; // set up earlier for this same video (the Live TV preview's)
+    if (kept && !this.gain) { this.audioCtx = kept.ctx; this.gain = kept.gain; }
     if (this.gain) { this.gain.gain.value = gain; return; }
     if (Math.abs(gain - 1) < 0.001 || this.audioCtx) return;
     try {
@@ -593,6 +613,7 @@ class Player {
         const limiter = ctx.createDynamicsCompressor();
         limiter.threshold.value = -1; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.003; limiter.release.value = 0.25;
         src.connect(this.gain).connect(limiter).connect(ctx.destination);
+        this.video._lumenAudio = { ctx, gain: this.gain }; // a video can be connected only once: keep it with the video
         this.video.addEventListener('play', () => ctx.resume().catch(() => {}));
       };
       if (ctx.state === 'running') connect();
@@ -785,15 +806,28 @@ class Player {
     for (const ev of ['keydown', 'pointerdown', 'wheel']) document.removeEventListener(ev, this.onInput, true);
     clearInterval(this.stallTimer);
     this.offAudioWait?.();
-    this.audioCtx?.close().catch(() => {}); this.audioCtx = null; this.gain = null;
+    this.vAbort.abort();
+    // A borrowed video keeps its audio processor (it can't be connected again); the owner closes it.
+    if (!(this.adopt && this.gain)) this.audioCtx?.close().catch(() => {});
+    if (!this.adopt) delete this.video._lumenAudio;
+    this.audioCtx = null; this.gain = null;
     clearTimeout(this.stillTimer);
     document.removeEventListener('fullscreenchange', this.onFs);
     window.removeEventListener('pagehide', this.onUnload);
     window.removeEventListener('popstate', this.onPop);
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {});
-    this.engine?.destroy();
-    releaseDesc(this.desc);
+    const hb = this.adopt?.handBack;
+    if (hb && this.meta.live && this.engine) {
+      // Still watching live TV: the stream (maybe another channel by now) goes back to the preview.
+      this.engine.onFatal = null;
+      this.video.remove();
+      hb({ video: this.video, engine: this.engine, desc: this.desc, channel: this.meta.channel });
+    } else {
+      this.engine?.destroy();
+      releaseDesc(this.desc);
+      if (hb) { this.video.remove(); hb({ video: this.video }); }
+    }
     api.clearCache();
     this.el.remove();
     if (current === this) current = null;

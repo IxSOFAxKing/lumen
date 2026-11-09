@@ -12,9 +12,10 @@ const PROFILES = {
 const profile = () => PROFILES[window.lumenSettings?.ui?.liveBuffer] || PROFILES.smooth;
 
 export function attachEngine(video, desc, { onFatal, onReady } = {}) {
+  let api; // returned below; its onFatal can be swapped when another player takes the stream over
   let hls = null, ts = null, destroyed = false, watchdog = null, stallTimer = null;
   const prof = profile();
-  const fatal = (reason) => { if (!destroyed) onFatal?.(reason); };
+  const fatal = (reason) => { if (!destroyed) (api ? api.onFatal : onFatal)?.(reason); };
 
   const startAt = Number(desc.seekTo) || 0;
 
@@ -117,7 +118,8 @@ export function attachEngine(video, desc, { onFatal, onReady } = {}) {
   const p = video.play();
   if (p && p.catch) p.catch(() => { /* autoplay may need user gesture */ });
 
-  return {
+  api = {
+    onFatal,
     hls, ts,
     destroy() {
       destroyed = true;
@@ -130,6 +132,7 @@ export function attachEngine(video, desc, { onFatal, onReady } = {}) {
       try { video.pause(); video.removeAttribute('src'); while (video.firstChild) video.firstChild.remove(); video.load(); } catch { /* */ }
     },
   };
+  return api;
 }
 
 /** Release server resources for a playback descriptor. */

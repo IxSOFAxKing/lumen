@@ -120,23 +120,28 @@ export async function playPlex(ratingKey, opts = {}) {
 // ---------------- IPTV Live ----------------
 
 /** Open a live channel full screen. channels = list for zapping (same category). */
-export async function playLive(providerId, channel, channels = [channel], title = 'Channels') {
+/**
+ * Play a live channel. opts.adopt = { video, engine, desc, handBack, fullscreen }: take over a stream that is already
+ * playing (the Live TV preview) instead of opening a new one, and give it back when the player closes.
+ */
+export async function playLive(providerId, channel, channels = [channel], title = 'Channels', opts = {}) {
   const open = async (ch, mode) => {
     const d = await api.post('/api/iptv/play/live', { providerId, channelId: ch.id, mode });
-    const meta = {
-      title: ch.name, subtitle: ch.now ? `${fmtTime(ch.now.start)} – ${fmtTime(ch.now.stop)} · ${ch.now.title}` : '',
-      live: true, channel: ch, providerId,
-      catchup: (prog) => playCatchup(providerId, ch, prog),
-      reload: async ({ mode: m }) => (await open(ch, m)),
-    };
-    return { desc: d, meta };
+    return { desc: d, meta: liveMeta(ch) };
   };
+  const liveMeta = (ch) => ({
+    title: ch.name, subtitle: ch.now ? `${fmtTime(ch.now.start)} – ${fmtTime(ch.now.stop)} · ${ch.now.title}` : '',
+    live: true, channel: ch, providerId,
+    catchup: (prog) => playCatchup(providerId, ch, prog),
+    reload: async ({ mode: m }) => (await open(ch, m)),
+  });
   try {
     const list = channels.length ? channels : [channel];
     const idx = Math.max(0, list.findIndex(c => String(c.id) === String(channel.id)));
     const zap = { channels: list, index: idx, open: (ch) => open(ch), title };
+    if (opts.adopt?.desc) return openPlayer(opts.adopt.desc, { ...liveMeta(channel), zap }, opts.adopt);
     const { desc, meta } = await open(channel);
-    return openPlayer(desc, { ...meta, zap });
+    return openPlayer(desc, { ...meta, zap }, opts.adopt);
   } catch (e) { toastErr(e); }
 }
 
