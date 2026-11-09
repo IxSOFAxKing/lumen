@@ -523,3 +523,7 @@ body.tv-mode .card-more { display: none; }
 /* "Are you still watching?" */
 .p-still { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.6); z-index: 30; }
 .p-still .card-box { text-align: center; min-width: 320px; padding: 26px 30px; }
+/* Live TV preview: controls hide when the mouse rests (also in full screen). */
+.preview .pv.idle .pv-ctrls { opacity: 0 !important; pointer-events: none; }
+.preview .pv.idle { cursor: none; }
+.preview .pv:fullscreen { max-width: none; max-height: none; width: 100%; height: 100%; }

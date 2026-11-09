@@ -123,3 +123,32 @@ test('the server owner account can\'t be blocked', async () => {
   db.prepare("INSERT INTO accounts(plex_id, title, role, verified_at) VALUES ('1','Owner','owner',unixepoch())").run();
   assert.equal((await req('PUT', '/api/accounts/1', { withCookie: true, body: { blocked: true } })).status, 400);
 });
+
+test('each Plex user has their own Live TV favourites', async () => {
+  const { db } = await import('../src/db.js');
+  db.prepare("INSERT INTO providers(id, name, type, url) VALUES (9, 'Test IPTV', 'm3u', 'http://127.0.0.1:1/list.m3u')").run();
+  db.prepare("INSERT INTO categories(provider_id, kind, id, name) VALUES (9, 'live', 'news', 'News'), (9, 'live', 'adult', 'Adult')").run();
+  db.prepare("INSERT INTO channels(provider_id, id, num, name, category_id, url) VALUES (9, 'n1', 1, 'News One', 'news', 'http://127.0.0.1:1/n1'), (9, 'n2', 2, 'News Two', 'news', 'http://127.0.0.1:1/n2'), (9, 'a1', 3, 'Late Night', 'adult', 'http://127.0.0.1:1/a1')").run();
+  await req('POST', '/api/iptv/favorites', { withCookie: true, body: { providerId: 9, channelId: 'n1' } });
+  await req('POST', '/api/iptv/favorites', { token: tokens.home, body: { providerId: 9, channelId: 'n2' } });
+  const mine = (await req('GET', '/api/iptv/favorites', { withCookie: true })).json.map(c => c.id);
+  const hers = (await req('GET', '/api/iptv/favorites', { token: tokens.home })).json.map(c => c.id);
+  assert.deepEqual(mine, ['n1']);
+  assert.deepEqual(hers, ['n2']);
+  // Her lists are hers: the owner's list ids don't work for her.
+  const ownerList = (await req('GET', '/api/iptv/fav-lists', { withCookie: true })).json[0].id;
+  assert.equal((await req('DELETE', `/api/iptv/fav-lists/${ownerList}`, { token: tokens.home })).status, 404);
+});
+
+test('the owner chooses which Live TV groups a Plex user can see', async () => {
+  assert.equal((await req('PUT', '/api/iptv/access/u43', { token: tokens.home, body: { blocked: { 9: [] } } })).status, 403);
+  assert.equal((await req('PUT', '/api/iptv/access/u43', { withCookie: true, body: { blocked: { 9: ['adult'] } } })).status, 200);
+  const cats = (await req('GET', '/api/iptv/providers/9/categories', { token: tokens.home })).json.map(c => c.id);
+  assert.deepEqual(cats.sort(), ['news']);
+  const all = (await req('GET', '/api/iptv/providers/9/channels?category=__all', { token: tokens.home })).json.map(c => c.id);
+  assert.ok(!all.includes('a1') && all.includes('n1'));
+  assert.equal((await req('POST', '/api/iptv/play/live', { token: tokens.home, body: { providerId: 9, channelId: 'a1' } })).status, 403);
+  // The owner still sees everything.
+  const ownerCats = (await req('GET', '/api/iptv/providers/9/categories', { withCookie: true })).json.map(c => c.id);
+  assert.deepEqual(ownerCats.sort(), ['adult', 'news']);
+});

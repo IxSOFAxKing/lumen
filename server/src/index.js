@@ -118,13 +118,13 @@ app.use('/api/discover', (req, res, next) => {
   if (req.method === 'GET' && req.path === '/config') return res.json({ url: '', configured: false, blocked: true });
   return auth.requirePerm('discover')(req, res, next);
 }, discoverRoutes);
-// Live TV: per-account permission. Watching is open to anyone allowed Live TV; favourites, recordings and
-// reminders need a Home member (or the owner); providers and channel-list edits are owner-only.
-const IPTV_MANAGE = /^\/(favorites|recordings|reminders|progress|fav-lists)\b/;
-const IPTV_OPEN = /^\/(play\/|parental\/unlock|progress)/;
+// Live TV: per-account permission. Watching and (personal) favourites are open to anyone allowed Live TV; recordings
+// and reminders need a Home member (or the owner); providers and channel-list edits are owner-only.
+const IPTV_MANAGE = /^\/(recordings|reminders)\b/;
+// Favourites are personal (each Plex user has their own), so anyone with Live TV manages their own.
+const IPTV_OPEN = /^\/(play\/|parental\/unlock|progress|favorites|fav-lists)/;
 app.use('/api/iptv', auth.requirePerm('live'), (req, res, next) => {
   if (req.method === 'GET' || IPTV_OPEN.test(req.path)) return next();
-  if (/^\/fav-lists/.test(req.path) && req.method !== 'GET' && !req.perms.admin) return admin(req, res, next);
   if (IPTV_MANAGE.test(req.path)) return req.perms.manage ? next() : auth.requirePerm('manage')(req, res, next);
   return admin(req, res, next);
 }, iptvRoutes);

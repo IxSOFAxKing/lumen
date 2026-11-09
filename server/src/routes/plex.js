@@ -21,7 +21,7 @@ export function selectedUser(req) {
   const c = plex.plexConf();
   const uuid = req.device?.plex_user || cookies(req).lumen_plex_user || c.defaultUser || null;
   const u = uuid && c.homeUsers?.[uuid];
-  return u?.token ? { uuid, token: u.token, title: u.title, restricted: !!u.restricted } : null;
+  return u?.token ? { uuid, token: u.token, title: u.title, restricted: !!u.restricted, admin: !!u.admin } : null;
 }
 r.use((req, res, next) => {
   const u = selectedUser(req);

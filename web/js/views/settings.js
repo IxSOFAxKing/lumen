@@ -489,6 +489,53 @@ async function peopleTab(el) {
         ]))))));
   };
   await draw();
+  el.append(await liveAccessCard());
+}
+
+/** Owner: which Live TV groups each Plex user can see (favourites are already personal). */
+async function liveAccessCard() {
+  const box = h('div', {}, spinner());
+  const card = h('div', { class: 'card-box', style: { marginBottom: '18px' } }, h('h3', { style: { marginTop: 0 } }, 'Live TV groups per person'),
+    h('p', { class: 'muted small', style: { marginTop: 0 } }, 'Choose which channel groups each Plex user can see in Live TV, the guide and search (handy for kids). Each person also has their own Live TV favourites.'), box);
+  const draw = async () => {
+    let d; try { d = await api.get('/api/iptv/access'); } catch (e) { box.replaceChildren(h('div', { class: 'dim' }, e.message)); return; }
+    if (!d.users.length) { box.replaceChildren(h('div', { class: 'dim' }, 'No other Plex users yet. Plex Home users and friends who signed in with Plex appear here.')); return; }
+    const total = d.providers.reduce((n, p) => n + p.groups.length, 0);
+    box.replaceChildren(h('table', { class: 'tbl' }, h('tbody', {}, d.users.map(u => {
+      const blocked = d.access[u.uuid] || {};
+      const nBlocked = Object.values(blocked).reduce((n, l) => n + l.length, 0);
+      return h('tr', {},
+        h('td', {}, h('div', { class: 'row', style: { gap: '10px' } }, u.thumb ? h('img', { src: u.thumb, alt: '', style: { width: '28px', height: '28px', borderRadius: '50%' } }) : null,
+          h('div', {}, h('b', {}, u.title), h('div', { class: 'dim small' }, u.kind)))),
+        h('td', {}, nBlocked ? `${total - nBlocked} of ${total} groups` : 'All groups'),
+        h('td', { style: { textAlign: 'right' } }, btn('Choose groups', () => groupsDialog(u, d, blocked, draw), { cls: 'sm' })));
+    }))));
+  };
+  await draw();
+  return card;
+}
+
+function groupsDialog(user, d, blocked, onSaved) {
+  const sel = {}; // pid -> Set of blocked ids
+  for (const p of d.providers) sel[p.id] = new Set((blocked[p.id] || []).map(String));
+  const body = h('div', { style: { maxHeight: '60vh', overflow: 'auto', minWidth: '360px' } },
+    ...d.providers.map(p => h('div', { style: { marginBottom: '14px' } },
+      h('div', { class: 'row', style: { marginBottom: '6px' } }, h('b', { class: 'grow' }, p.name),
+        btn('All', () => { sel[p.id].clear(); body.querySelectorAll(`input[data-p="${p.id}"]`).forEach(c => { c.checked = true; }); }, { cls: 'sm ghost' }),
+        btn('None', () => { p.groups.forEach(g => sel[p.id].add(String(g.id))); body.querySelectorAll(`input[data-p="${p.id}"]`).forEach(c => { c.checked = false; }); }, { cls: 'sm ghost' })),
+      ...p.groups.map(g => h('label', { class: 'check', style: { margin: '2px 0' } },
+        h('input', { type: 'checkbox', dataset: { p: p.id }, checked: !sel[p.id].has(String(g.id)), onChange: e => { if (e.target.checked) sel[p.id].delete(String(g.id)); else sel[p.id].add(String(g.id)); } }),
+        h('span', {}, g.name))))));
+  return modal({
+    title: `Live TV groups for ${user.title}`, body,
+    actions: [
+      { label: 'Cancel' },
+      { label: 'Save', primary: true, onClick: async () => {
+        const out = {}; for (const [pid, set] of Object.entries(sel)) if (set.size) out[pid] = [...set];
+        await api.put(`/api/iptv/access/${encodeURIComponent(user.uuid)}`, { blocked: out }); toast('Saved', { type: 'ok' }); onSaved();
+      } },
+    ],
+  });
 }
 
 // ---------------- Appearance ----------------

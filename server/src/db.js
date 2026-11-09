@@ -141,6 +141,8 @@ CREATE TABLE IF NOT EXISTS fav_lists (
 );
 `);
 if (!db.prepare('SELECT COUNT(*) AS n FROM fav_lists').get().n) db.prepare("INSERT INTO fav_lists(id, name, position) VALUES (1, 'Favorites', 0)").run();
+// Each Plex user has their own favourite lists ('' = the server owner, otherwise the Plex user's uuid).
+if (!db.prepare('PRAGMA table_info(fav_lists)').all().some(c => c.name === 'owner')) db.exec("ALTER TABLE fav_lists ADD COLUMN owner TEXT NOT NULL DEFAULT ''");
 // favorites: one row per (list, channel) — migrate from the single-list schema
 if (!db.prepare('PRAGMA table_info(favorites)').all().some(c => c.name === 'list_id')) {
   db.exec(`

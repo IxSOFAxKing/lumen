@@ -26,7 +26,8 @@ export default async function live(el, route) {
   const pvMsg = h('div', { class: 'msg' }, 'Select a channel to preview');
   const info = h('div', { class: 'info' });
   // Preview controls (shown on hover): play/pause, sound, open the full player, browser fullscreen.
-  const pvBtn = (name, title, fn) => h('button', { class: 'pbtn', title, 'aria-label': title, html: icon(name), onClick: e => { e.stopPropagation(); fn(e); } });
+  // (Buttons drop focus after a click, so the controls can hide again — e.g. once the preview is full screen.)
+  const pvBtn = (name, title, fn) => h('button', { class: 'pbtn', title, 'aria-label': title, html: icon(name), onClick: e => { e.stopPropagation(); e.currentTarget.blur(); fn(e); } });
   const pvPlay = pvBtn('pause', 'Play / pause', () => { pvVideo.paused ? pvVideo.play().catch(() => {}) : pvVideo.pause(); });
   const pvMute = pvBtn('vol', 'Mute', () => { pvVideo.muted = !pvVideo.muted; });
   const pvVol = h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: pvVideo.volume, onInput: e => { pvVideo.volume = Number(e.target.value); pvVideo.muted = false; }, onClick: e => e.stopPropagation() });
@@ -38,6 +39,13 @@ export default async function live(el, route) {
     pvBtn('play', 'Watch in the full player', () => fullscreen()),
     pvBtn('fs', 'Fullscreen', () => { document.fullscreenElement ? document.exitFullscreen() : pvBox.requestFullscreen?.().catch(() => {}); }));
   pvBox.append(pvCtrls);
+  // Controls (and the pointer) hide after a few seconds without moving the mouse — also in full screen.
+  let idleT = 0;
+  const wake = () => { pvBox.classList.remove('idle'); clearTimeout(idleT); idleT = setTimeout(() => pvBox.classList.add('idle'), 2500); };
+  pvBox.addEventListener('mousemove', wake);
+  pvBox.addEventListener('mouseleave', () => { clearTimeout(idleT); pvBox.classList.remove('idle'); });
+  const onFs = () => { if (document.fullscreenElement === pvBox) wake(); else { clearTimeout(idleT); pvBox.classList.remove('idle'); } };
+  document.addEventListener('fullscreenchange', onFs);
   const pvCol = h('div', { class: 'col preview' }, pvBox, info);
   el.append(h('div', { class: 'live' }, catsCol, listCol, pvCol));
 
@@ -349,5 +357,5 @@ export default async function live(el, route) {
   renderCats();
   await loadChannels();
   const refresh = setInterval(() => { if (!document.hidden && !reordering) api.get(`/api/iptv/providers/${pid}/channels${qs({ category: q ? '__all' : cat, q })}`).then(l => { const sel = selected?.id; channels = l; renderList(); selected = channels.find(x => x.id === sel) || selected; }).catch(() => {}); }, 120000);
-  return () => { clearInterval(refresh); moreIO?.disconnect(); stopPreview(); };
+  return () => { clearInterval(refresh); moreIO?.disconnect(); stopPreview(); document.removeEventListener('fullscreenchange', onFs); clearTimeout(idleT); };
 }

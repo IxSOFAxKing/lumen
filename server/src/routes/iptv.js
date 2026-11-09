@@ -9,10 +9,40 @@ import { startSession } from '../services/transcoder.js';
 import { proxied, proxyImages } from '../services/proxy.js';
 import { getConfig } from '../services/settings.js';
 import { viewerKey, claim, holdSession } from '../services/liveconn.js';
+import { selectedUser } from './plex.js';
+import * as plexSvc from '../services/plex.js';
+import * as accounts from '../services/accounts.js';
+import { getSetting, setSetting } from '../db.js';
 
 const r = Router();
 // Route remote channel logos / posters through Lumen's image cache (faster, and avoids mixed-content on HTTPS).
 r.use((req, res, next) => { const json = res.json.bind(res); res.json = body => json(proxyImages(body)); next(); });
+
+// ---------- per Plex user: favourites and which Live TV groups they can see ----------
+// '' = the server owner (or nobody picked); otherwise the Plex user's uuid (a Home user, or someone signed in with Plex).
+r.use((req, res, next) => {
+  const u = selectedUser(req);
+  req.liveUser = u && !u.admin ? String(u.uuid).replace(/[^\w-]/g, '') : '';
+  next();
+});
+const sq = v => `'${String(v).replace(/'/g, "''")}'`;
+/** Live TV groups this user may not see: { providerId: [categoryId, …] } (set by the owner in Settings → People). */
+const blockedFor = req => (req.liveUser && (getSetting('liveAccess', {}) || {})[req.liveUser]) || {};
+function blockedClause(req, alias) {
+  const parts = Object.entries(blockedFor(req)).filter(([, ids]) => ids?.length)
+    .map(([pid, ids]) => `NOT (${alias}.provider_id = ${Number(pid)} AND ${alias}.category_id IN (${ids.map(sq).join(',')}))`);
+  return parts.length ? `(${parts.join(' AND ')})` : '1=1';
+}
+/** Parental lock + this user's blocked groups. */
+const lock = (req, alias, kind) => kind === 'live' ? `(${parental.lockClause(req, alias, kind)} AND ${blockedClause(req, alias)})` : parental.lockClause(req, alias, kind);
+const isBlocked = (req, pid, catId) => !!catId && (blockedFor(req)[pid] || []).map(String).includes(String(catId));
+/** The user's favourite lists (created on first use). */
+function userLists(req) {
+  let lists = db.prepare('SELECT id FROM fav_lists WHERE owner = ? ORDER BY position, id').all(req.liveUser).map(x => x.id);
+  if (!lists.length) lists = [Number(db.prepare("INSERT INTO fav_lists(name, position, owner) VALUES ('Favorites', 0, ?)").run(req.liveUser).lastInsertRowid)];
+  return lists;
+}
+const ownsList = (req, id) => !!db.prepare('SELECT 1 FROM fav_lists WHERE id = ? AND owner = ?').get(Number(id), req.liveUser);
 const now = () => Math.floor(Date.now() / 1000);
 
 const publicProvider = p => {
@@ -100,9 +130,10 @@ r.post('/providers/:id/epg', ah(async (req, res) => res.json(await epg.syncEpg(r
 // ---------- Categories & channels ----------
 
 // Channel columns with the user's custom name / number applied (channel_prefs survives provider re-syncs).
-const CH_COLS = `c.id, COALESCE(cp.num, c.num) AS num, COALESCE(cp.name, c.name) AS name, c.name AS original_name, c.num AS original_num,
+const chCols = req => `c.id, COALESCE(cp.num, c.num) AS num, COALESCE(cp.name, c.name) AS name, c.name AS original_name, c.num AS original_num,
   c.logo, c.category_id, c.epg_id, c.archive, c.archive_days, c.hidden,
-  (SELECT GROUP_CONCAT(f.list_id) FROM favorites f WHERE f.provider_id = c.provider_id AND f.channel_id = c.id) AS fav_lists`;
+  (SELECT GROUP_CONCAT(f.list_id) FROM favorites f JOIN fav_lists fl2 ON fl2.id = f.list_id AND fl2.owner = ${sq(req.liveUser || '')}
+    WHERE f.provider_id = c.provider_id AND f.channel_id = c.id) AS fav_lists`;
 const CH_JOIN = 'LEFT JOIN channel_prefs cp ON cp.provider_id = c.provider_id AND cp.channel_id = c.id';
 const shapeCh = r2 => { const lists = r2.fav_lists ? String(r2.fav_lists).split(',').map(Number) : []; return { ...r2, fav: lists.length ? 1 : 0, fav_lists: lists }; };
 
@@ -119,6 +150,7 @@ r.get('/providers/:id/categories', (req, res) => {
     FROM categories c LEFT JOIN category_prefs gp ON gp.provider_id = c.provider_id AND gp.kind = c.kind AND gp.id = c.id
     WHERE c.provider_id = ? AND c.kind = ? ${all ? '' : 'AND c.hidden = 0'}
     ORDER BY (gp.sort IS NULL), gp.sort, c.sort`).all(Number(req.params.id), kind);
+  if (kind === 'live') { const blocked = new Set((blockedFor(req)[req.params.id] || []).map(String)); return res.json(rows.filter(x => !blocked.has(String(x.id)))); }
   res.json(rows);
 });
 
@@ -146,7 +178,7 @@ r.put('/categories-order/:pid/:kind', (req, res) => {
 // ---------- Channels ----------
 
 function channelRows(req, pid, { category, q, favList, includeHidden } = {}) {
-  const where = ['c.provider_id = ?', parental.lockClause(req, 'c', 'live')];
+  const where = ['c.provider_id = ?', lock(req, 'c', 'live')];
   const args = [Number(pid)];
   if (!includeHidden) where.push('c.hidden = 0', `(c.category_id IS NULL OR c.category_id NOT IN (SELECT id FROM categories WHERE provider_id = c.provider_id AND kind = 'live' AND hidden = 1))`);
   if (category) { where.push('c.category_id = ?'); args.push(String(category)); }
@@ -154,7 +186,7 @@ function channelRows(req, pid, { category, q, favList, includeHidden } = {}) {
   // Custom drag order applies inside a group; mixed lists (All channels, search) sort by channel number.
   let join = '', order = category ? '(cp.sort IS NULL), cp.sort, COALESCE(cp.num, c.num), c.name' : 'COALESCE(cp.num, c.num), c.name';
   if (favList) { join = 'JOIN favorites fl ON fl.provider_id = c.provider_id AND fl.channel_id = c.id AND fl.list_id = ?'; args.unshift(Number(favList)); order = 'fl.position, COALESCE(cp.num, c.num)'; }
-  return db.prepare(`SELECT ${CH_COLS} FROM channels c ${CH_JOIN} ${join}
+  return db.prepare(`SELECT ${chCols(req)} FROM channels c ${CH_JOIN} ${join}
     WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT 5000`).all(...args).map(shapeCh);
 }
 
@@ -163,16 +195,16 @@ function withNowNext(pid, rows) {
   return rows.map(r2 => ({ ...r2, now: nn[r2.id]?.[0] || null, next: nn[r2.id]?.[1] || null }));
 }
 /** category param: '__all' | '__recent' | '__fav' (first list) | '__fav:<listId>' | <category id> */
-function favListFromCat(category) {
-  if (category === '__fav') return db.prepare('SELECT id FROM fav_lists ORDER BY position, id LIMIT 1').get()?.id || 1;
-  const m = /^__fav:(\d+)$/.exec(category || ''); return m ? Number(m[1]) : null;
+function favListFromCat(req, category) {
+  if (category === '__fav') return userLists(req)[0];
+  const m = /^__fav:(\d+)$/.exec(category || ''); return m && ownsList(req, m[1]) ? Number(m[1]) : (m ? -1 : null);
 }
 function rowsForCategory(req, pid, category, extra = {}) {
-  const favList = favListFromCat(category);
+  const favList = favListFromCat(req, category);
   if (favList) return channelRows(req, pid, { favList, ...extra });
   if (category === '__recent') {
-    return db.prepare(`SELECT ${CH_COLS} FROM history h JOIN channels c ON c.provider_id = h.provider_id AND c.id = h.channel_id ${CH_JOIN}
-      WHERE h.provider_id = ? AND ${parental.lockClause(req, 'c', 'live')} ORDER BY h.watched_at DESC LIMIT 50`).all(Number(pid)).map(shapeCh);
+    return db.prepare(`SELECT ${chCols(req)} FROM history h JOIN channels c ON c.provider_id = h.provider_id AND c.id = h.channel_id ${CH_JOIN}
+      WHERE h.provider_id = ? AND ${lock(req, 'c', 'live')} ORDER BY h.watched_at DESC LIMIT 50`).all(Number(pid)).map(shapeCh);
   }
   return channelRows(req, pid, { category: category && category !== '__all' ? category : null, ...extra });
 }
@@ -211,27 +243,29 @@ r.delete('/channels-order/:pid', (req, res) => {
 // ---------- Favourite lists ----------
 
 r.get('/fav-lists', (req, res) => {
+  userLists(req);
   res.json(db.prepare(`SELECT l.id, l.name, l.position, (SELECT COUNT(*) FROM favorites f WHERE f.list_id = l.id) AS count
-    FROM fav_lists l ORDER BY l.position, l.id`).all());
+    FROM fav_lists l WHERE l.owner = ? ORDER BY l.position, l.id`).all(req.liveUser));
 });
 r.post('/fav-lists', (req, res) => {
   const name = String(req.body?.name || '').trim();
   if (!name) return res.status(400).json({ error: 'Name is required' });
-  const pos = db.prepare('SELECT COALESCE(MAX(position), 0) + 1 AS p FROM fav_lists').get().p;
-  res.json({ id: Number(db.prepare('INSERT INTO fav_lists(name, position) VALUES (?,?)').run(name, pos).lastInsertRowid), name });
+  const pos = db.prepare('SELECT COALESCE(MAX(position), 0) + 1 AS p FROM fav_lists WHERE owner = ?').get(req.liveUser).p;
+  res.json({ id: Number(db.prepare('INSERT INTO fav_lists(name, position, owner) VALUES (?,?,?)').run(name, pos, req.liveUser).lastInsertRowid), name });
 });
 r.put('/fav-lists/:id', (req, res) => {
   const name = String(req.body?.name || '').trim();
-  if (name) db.prepare('UPDATE fav_lists SET name = ? WHERE id = ?').run(name, Number(req.params.id));
+  if (name) db.prepare('UPDATE fav_lists SET name = ? WHERE id = ? AND owner = ?').run(name, Number(req.params.id), req.liveUser);
   res.json({ ok: true });
 });
 r.put('/fav-lists-order', (req, res) => {
-  const upd = db.prepare('UPDATE fav_lists SET position = ? WHERE id = ?');
-  tx(() => (req.body.order || []).forEach((id, i) => upd.run(i, Number(id))));
+  const upd = db.prepare('UPDATE fav_lists SET position = ? WHERE id = ? AND owner = ?');
+  tx(() => (req.body.order || []).forEach((id, i) => upd.run(i, Number(id), req.liveUser)));
   res.json({ ok: true });
 });
 r.delete('/fav-lists/:id', (req, res) => {
-  if (db.prepare('SELECT COUNT(*) AS n FROM fav_lists').get().n <= 1) return res.status(400).json({ error: 'You need at least one favourites list.' });
+  if (!ownsList(req, req.params.id)) return res.status(404).json({ error: 'List not found' });
+  if (db.prepare('SELECT COUNT(*) AS n FROM fav_lists WHERE owner = ?').get(req.liveUser).n <= 1) return res.status(400).json({ error: 'You need at least one favourites list.' });
   tx(() => { db.prepare('DELETE FROM favorites WHERE list_id = ?').run(Number(req.params.id)); db.prepare('DELETE FROM fav_lists WHERE id = ?').run(Number(req.params.id)); });
   res.json({ ok: true });
 });
@@ -239,9 +273,9 @@ r.delete('/fav-lists/:id', (req, res) => {
 // ---------- Favorites ----------
 
 r.get('/favorites', (req, res) => {
-  const list = Number(req.query.list) || favListFromCat('__fav');
-  const rows = db.prepare(`SELECT f.provider_id, ${CH_COLS} FROM favorites f JOIN channels c ON c.provider_id = f.provider_id AND c.id = f.channel_id ${CH_JOIN}
-    WHERE f.list_id = ? AND ${parental.lockClause(req, 'c', 'live')} ORDER BY f.position, COALESCE(cp.num, c.num)`).all(list).map(shapeCh);
+  const list = req.query.list && ownsList(req, req.query.list) ? Number(req.query.list) : favListFromCat(req, '__fav');
+  const rows = db.prepare(`SELECT f.provider_id, ${chCols(req)} FROM favorites f JOIN channels c ON c.provider_id = f.provider_id AND c.id = f.channel_id ${CH_JOIN}
+    WHERE f.list_id = ? AND ${lock(req, 'c', 'live')} ORDER BY f.position, COALESCE(cp.num, c.num)`).all(list).map(shapeCh);
   const byP = {};
   for (const r2 of rows) (byP[r2.provider_id] ||= []).push(r2);
   const out = [];
@@ -250,27 +284,27 @@ r.get('/favorites', (req, res) => {
 });
 r.post('/favorites', (req, res) => {
   const { providerId, channelId } = req.body;
-  const list = Number(req.body.listId) || favListFromCat('__fav');
+  const list = req.body.listId && ownsList(req, req.body.listId) ? Number(req.body.listId) : favListFromCat(req, '__fav');
   const max = db.prepare('SELECT COALESCE(MAX(position), 0) AS m FROM favorites WHERE list_id = ?').get(list).m;
   db.prepare('INSERT OR IGNORE INTO favorites(list_id, provider_id, channel_id, position) VALUES (?,?,?,?)').run(list, Number(providerId), String(channelId), max + 1);
   res.json({ ok: true });
 });
 r.delete('/favorites/:pid/:cid', (req, res) => {
-  if (req.query.list) db.prepare('DELETE FROM favorites WHERE list_id = ? AND provider_id = ? AND channel_id = ?').run(Number(req.query.list), Number(req.params.pid), req.params.cid);
-  else db.prepare('DELETE FROM favorites WHERE provider_id = ? AND channel_id = ?').run(Number(req.params.pid), req.params.cid);
+  if (req.query.list) { if (ownsList(req, req.query.list)) db.prepare('DELETE FROM favorites WHERE list_id = ? AND provider_id = ? AND channel_id = ?').run(Number(req.query.list), Number(req.params.pid), req.params.cid); }
+  else db.prepare('DELETE FROM favorites WHERE provider_id = ? AND channel_id = ? AND list_id IN (SELECT id FROM fav_lists WHERE owner = ?)').run(Number(req.params.pid), req.params.cid, req.liveUser);
   res.json({ ok: true });
 });
 r.put('/favorites/order', (req, res) => {
-  const list = Number(req.body.listId) || favListFromCat('__fav');
+  const list = req.body.listId && ownsList(req, req.body.listId) ? Number(req.body.listId) : favListFromCat(req, '__fav');
   const upd = db.prepare('UPDATE favorites SET position = ? WHERE list_id = ? AND provider_id = ? AND channel_id = ?');
   tx(() => (req.body.order || []).forEach((f, i) => upd.run(i, list, Number(f.providerId), String(f.channelId))));
   res.json({ ok: true });
 });
 
 r.get('/history', (req, res) => {
-  const rows = db.prepare(`SELECT h.provider_id, h.watched_at, ${CH_COLS}
+  const rows = db.prepare(`SELECT h.provider_id, h.watched_at, ${chCols(req)}
     FROM history h JOIN channels c ON c.provider_id = h.provider_id AND c.id = h.channel_id ${CH_JOIN}
-    WHERE ${parental.lockClause(req, 'c', 'live')} ORDER BY h.watched_at DESC LIMIT 30`).all().map(shapeCh);
+    WHERE ${lock(req, 'c', 'live')} ORDER BY h.watched_at DESC LIMIT 30`).all().map(shapeCh);
   const nn = {};
   for (const pid of new Set(rows.map(r2 => r2.provider_id))) nn[pid] = epg.nowNext(pid, rows.filter(r2 => r2.provider_id === pid).map(r2 => r2.id));
   res.json(rows.map(r2 => ({ ...r2, now: nn[r2.provider_id]?.[r2.id]?.[0] || null, next: nn[r2.provider_id]?.[r2.id]?.[1] || null })));
@@ -327,6 +361,7 @@ r.post('/play/live', ah(async (req, res) => {
   const p = iptv.getProvider(providerId);
   const ch0 = db.prepare('SELECT * FROM channels WHERE provider_id = ? AND id = ?').get(p.id, String(channelId));
   if (!ch0) return res.status(404).json({ error: 'Channel not found' });
+  if (isBlocked(req, p.id, ch0.category_id)) return res.status(403).json({ error: 'This channel isn\'t available for your profile.' });
   const pref = db.prepare('SELECT name, num FROM channel_prefs WHERE provider_id = ? AND channel_id = ?').get(p.id, ch0.id) || {};
   const ch = { ...ch0, name: pref.name || ch0.name, num: pref.num ?? ch0.num };
   db.prepare('INSERT INTO history(provider_id, channel_id, watched_at) VALUES (?,?,unixepoch()) ON CONFLICT DO UPDATE SET watched_at = unixepoch()').run(p.id, ch.id);
@@ -454,7 +489,7 @@ r.get('/search', (req, res) => {
   const q = String(req.query.q || '').trim();
   if (q.length < 2) return res.json({ channels: [], movies: [], series: [], programmes: [] });
   const like = `%${q}%`;
-  const channels = db.prepare(`SELECT c.provider_id, ${CH_COLS} FROM channels c ${CH_JOIN} WHERE (c.name LIKE ? OR cp.name LIKE ?) AND c.hidden = 0 AND ${parental.lockClause(req, 'c', 'live')} LIMIT 40`).all(like, like).map(shapeCh);
+  const channels = db.prepare(`SELECT c.provider_id, ${chCols(req)} FROM channels c ${CH_JOIN} WHERE (c.name LIKE ? OR cp.name LIKE ?) AND c.hidden = 0 AND ${lock(req, 'c', 'live')} LIMIT 40`).all(like, like).map(shapeCh);
   const vodOn = iptv.vodGloballyEnabled();
   const movies = !vodOn ? [] : db.prepare("SELECT v.* FROM vod v JOIN providers p ON p.id = v.provider_id WHERE p.enabled = 1 AND p.vod_enabled = 1 AND v.kind = 'movie' AND v.name LIKE ? LIMIT 40").all(like);
   const series = !vodOn ? [] : db.prepare("SELECT v.* FROM vod v JOIN providers p ON p.id = v.provider_id WHERE p.enabled = 1 AND p.series_enabled = 1 AND v.kind = 'series' AND v.name LIKE ? LIMIT 40").all(like);
@@ -500,5 +535,26 @@ r.post('/reminders', (req, res) => {
   res.json({ id: Number(r2.lastInsertRowid) });
 });
 r.delete('/reminders/:id', (req, res) => { db.prepare('DELETE FROM reminders WHERE id = ?').run(Number(req.params.id)); res.json({ ok: true }); });
+
+// ---------- Live TV groups per Plex user (owner only) ----------
+r.get('/access', ah(async (req, res) => {
+  if (!req.perms?.admin) return res.status(403).json({ error: 'Only the server owner can change this.' });
+  const home = await plexSvc.homeUsers().catch(() => []);
+  const users = home.filter(u => !u.admin).map(u => ({ uuid: u.uuid, title: u.title, thumb: u.thumb, kind: u.restricted ? 'Plex Home (managed)' : 'Plex Home' }));
+  for (const a of accounts.list()) if (a.role === 'friend' && a.uuid && !users.some(u => u.uuid === a.uuid)) users.push({ uuid: a.uuid, title: a.title, thumb: a.thumb, kind: 'Friend' });
+  const providers = iptv.listProviders().map(p => ({ id: p.id, name: p.name,
+    groups: db.prepare("SELECT c.id, COALESCE(gp.name, c.name) AS name FROM categories c LEFT JOIN category_prefs gp ON gp.provider_id = c.provider_id AND gp.kind = c.kind AND gp.id = c.id WHERE c.provider_id = ? AND c.kind = 'live' AND c.hidden = 0 ORDER BY (gp.sort IS NULL), gp.sort, c.sort").all(p.id) }));
+  res.json({ users, providers, access: getSetting('liveAccess', {}) || {} });
+}));
+r.put('/access/:uuid', (req, res) => {
+  if (!req.perms?.admin) return res.status(403).json({ error: 'Only the server owner can change this.' });
+  const uuid = String(req.params.uuid).replace(/[^\w-]/g, '');
+  const all = getSetting('liveAccess', {}) || {};
+  const blocked = {};
+  for (const [pid, ids] of Object.entries(req.body?.blocked || {})) if (Array.isArray(ids) && ids.length) blocked[Number(pid)] = ids.map(String);
+  if (Object.keys(blocked).length) all[uuid] = blocked; else delete all[uuid];
+  setSetting('liveAccess', all);
+  res.json({ ok: true });
+});
 
 export default r;

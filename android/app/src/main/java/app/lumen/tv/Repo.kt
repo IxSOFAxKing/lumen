@@ -38,7 +38,19 @@ object AppState {
         val pu = runCatching { Plex.users() }.getOrNull() ?: return
         if (pu.optJSONArray("users").objects().size < 2) return
         if (force || Net.prefs.askProfile) askProfile = pu
-        else if (pu.optBoolean("defaultSet")) runCatching { Plex.resetUser() }
+        else if (pu.optBoolean("defaultSet")) { runCatching { Plex.resetUser() }; syncServerUser() }
+    }
+
+    /**
+     * Tell the Lumen server which Plex Home user is watching on this device: Live TV favourites and the groups each
+     * person may see depend on it (and Discover requests are made as them).
+     */
+    private var serverUserSynced = false
+    suspend fun syncServerUser() {
+        if (!hasLumen || !Plex.owned) return
+        val uuid = Net.prefs.plexUserUuid ?: runCatching { Plex.homeUsers().firstOrNull { it.optBoolean("admin") }?.optString("uuid") }.getOrNull() ?: return
+        runCatching { Net.post("/api/plex/users/switch", JSONObject().put("uuid", uuid)) }
+        serverUserSynced = true
     }
 
     /** Switch Plex Home user on this device (and tell the Lumen server, which uses it for Discover). */
@@ -47,6 +59,8 @@ object AppState {
         if (Net.prefs.isPaired) runCatching { Net.post("/api/plex/users/switch", JSONObject().put("uuid", u.optString("uuid"))) }
         Net.clearCache(); Nav.memory.clear()
         discoverOn = lumenDiscover && !Net.prefs.plexUserRestricted
+        // Their own favourite lists.
+        if (hasLumen) runCatching { Net.arr("/api/iptv/fav-lists") }.getOrNull()?.let { a -> favLists = a.objects().map { Group("__fav:${it.optInt("id")}", it.optString("name"), it.optInt("count")) } }
         return u
     }
     var loadError by mutableStateOf<String?>(null)
@@ -86,6 +100,7 @@ object AppState {
 
     suspend fun refresh() = coroutineScope {
         val lumen = hasLumen
+        if (lumen && !serverUserSynced) syncServerUser()
         val settings = async { if (lumen) runCatching { Net.obj("/api/settings") }.getOrNull() else null }
         val prov = async { if (lumen) runCatching { Net.arr("/api/iptv/providers") }.getOrNull() else null }
         val favs = async { if (lumen) runCatching { Net.arr("/api/iptv/fav-lists") }.getOrNull() else null }
