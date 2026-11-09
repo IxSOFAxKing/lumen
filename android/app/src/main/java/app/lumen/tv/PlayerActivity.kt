@@ -149,6 +149,7 @@ class PlayerActivity : ComponentActivity() {
             .setLoadControl(load)
             .build()
         exo.addListener(listener)
+        liveAudio = LiveAudio.attach(exo) { source?.isLive == true }
         applyAudioPrefs(exo)
         applyVolumeBoost(exo.audioSessionId)
         if (!AppState.isTv) runCatching { Cast.context(this)?.sessionManager?.addSessionManagerListener(castListener, com.google.android.gms.cast.framework.CastSession::class.java) }
@@ -1209,6 +1210,7 @@ class PlayerActivity : ComponentActivity() {
 
     /** Leaving live TV for the Live TV / Guide screen: hand the running stream to the preview window (no reload). */
     private var handedOff = false
+    private var liveAudio: LiveAudio? = null
     override fun finish() {
         val src = source; val d = desc
         // Live preview window: TV only (phones go straight back to the channel list).
@@ -1247,6 +1249,7 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onDestroy() {
         if (!AppState.isTv) runCatching { Cast.context(this)?.sessionManager?.removeSessionManagerListener(castListener, com.google.android.gms.cast.framework.CastSession::class.java) }
+        liveAudio?.let { exo.removeListener(it) }
         if (!handedOff) Volume.release(exo) // a stream handed to the Live TV preview keeps its volume
         close()
         if (PlayerBus.player?.get() === this) PlayerBus.player = null

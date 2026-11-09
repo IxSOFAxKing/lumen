@@ -176,6 +176,7 @@ fun SettingsScreen() {
         item { Section("Audio") }
         item { SettingRow("Audio channels", label("audioOutput", AUDIO_OUT, "auto")) { cycle("audioOutput", AUDIO_OUT, "auto", "Audio channels") } }
         item { SettingRow("Maximum volume", label("maxVolume", MAX_VOL, 100)) { cycle("maxVolume", MAX_VOL, 100, "Maximum volume") } }
+        item { SettingRow("Live TV audio track", label("liveAudioTrack", LIVE_AUDIO, "aac"), hint = "Channels with both AAC and Dolby (E-AC-3) sound start on AAC, which is usually louder") { cycle("liveAudioTrack", LIVE_AUDIO, "aac", "Live TV audio track") } }
         item { SettingRow("Live TV volume offset", label("liveVolumeOffset", VOL_OFFSET, 0), hint = "Make IPTV channels louder or quieter than everything else") { cycle("liveVolumeOffset", VOL_OFFSET, 0, "Live TV volume offset") } }
         item { SettingRow("Plex volume offset", label("plexVolumeOffset", VOL_OFFSET, 0), hint = "Make movies and shows louder or quieter than everything else") { cycle("plexVolumeOffset", VOL_OFFSET, 0, "Plex volume offset") } }
 
@@ -362,6 +363,7 @@ private fun SettingRow(label: String, value: String, fr: FocusRequester? = null,
 @Composable
 private fun Toggle(label: String, on: Boolean, onClick: () -> Unit) = SettingRow(label, if (on) "On" else "Off", onClick = onClick)
 
+private val LIVE_AUDIO = listOf(Opt("aac", "AAC when available"), Opt("auto", "Automatic"))
 private val AUDIO_OUT = listOf(Opt("auto", "Auto (surround / passthrough)"), Opt("stereo", "Stereo (mix down)"))
 private val VOL_OFFSET = listOf(Opt(-6, "−6 dB (quieter)"), Opt(-3, "−3 dB"), Opt(0, "Off"), Opt(3, "+3 dB"), Opt(6, "+6 dB"), Opt(9, "+9 dB"), Opt(12, "+12 dB (loudest)"))
 private val MAX_VOL = listOf(Opt(100, "100%"), Opt(125, "125%"), Opt(150, "150%"), Opt(200, "200%"))

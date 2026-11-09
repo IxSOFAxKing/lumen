@@ -94,6 +94,41 @@ fun applyAudioPrefs(exo: ExoPlayer) {
         exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().setMaxAudioChannelCount(2).build()
 }
 
+/**
+ * Live TV audio track (Settings → Audio → Live TV audio track). Many IPTV channels carry the same sound twice: AAC
+ * ("mp4a") and Dolby E-AC-3. The Dolby track often plays much quieter, and players could end up on different ones.
+ * With "AAC" (the default) every channel starts on its AAC track when it has one; picking a track yourself in the
+ * player still wins for that channel.
+ */
+class LiveAudio(private val isLive: () -> Boolean) : androidx.media3.common.Player.Listener {
+    private var handled = ""
+    var exo: ExoPlayer? = null
+
+    override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+        val p = exo ?: return
+        if (!isLive() || AppState.uiStr("liveAudioTrack", "aac") != "aac") return
+        val audio = tracks.groups.filter { it.type == androidx.media3.common.C.TRACK_TYPE_AUDIO }
+        if (audio.size < 2 && (audio.firstOrNull()?.length ?: 0) < 2) return
+        val key = (p.currentMediaItem?.localConfiguration?.uri?.toString() ?: "") + audio.joinToString { it.mediaTrackGroup.id }
+        if (key == handled) return // once per channel, so a track picked by hand stays
+        handled = key
+        fun isAac(f: androidx.media3.common.Format) = f.sampleMimeType == MimeTypes.AUDIO_AAC || f.codecs?.startsWith("mp4a") == true
+        val selected = audio.any { g -> (0 until g.length).any { g.isTrackSelected(it) && isAac(g.getTrackFormat(it)) } }
+        if (selected) return
+        for (g in audio) for (i in 0 until g.length) if (g.isTrackSupported(i) && isAac(g.getTrackFormat(i))) {
+            p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+                .setOverrideForType(androidx.media3.common.TrackSelectionOverride(g.mediaTrackGroup, i)).build()
+            return
+        }
+    }
+
+    companion object {
+        /** Watch [exo]'s tracks; returns the listener so it can be removed. */
+        fun attach(exo: ExoPlayer, isLive: () -> Boolean = { true }): LiveAudio =
+            LiveAudio(isLive).also { it.exo = exo; exo.addListener(it) }
+    }
+}
+
 fun mediaItemFor(d: Desc): MediaItem {
     val b = MediaItem.Builder().setUri(Uri.parse(d.url))
     when (d.type) {
@@ -132,8 +167,10 @@ fun LivePreview(ch: Channel, modifier: Modifier = Modifier) {
             override fun onAudioSessionIdChanged(audioSessionId: Int) { Volume.apply(exo, live = true, session = audioSessionId) }
         }
         exo.addListener(l)
+        val la = LiveAudio.attach(exo)
         onDispose {
             exo.removeListener(l)
+            exo.removeListener(la)
             Volume.release(exo)
             exo.release()
             desc?.let { d -> AppScope.launch { Playback.release(d) } }

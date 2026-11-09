@@ -170,7 +170,9 @@ private fun MultiTile(ch: Channel, muted: Boolean, modifier: Modifier) {
     var desc by remember(exo) { mutableStateOf<Desc?>(null) }
     var failed by remember(exo) { mutableStateOf(false) }
     DisposableEffect(exo) {
+        val la = LiveAudio.attach(exo)
         onDispose {
+            exo.removeListener(la)
             exo.release()
             desc?.let { d -> AppScope.launch { Playback.release(d) } }
         }
