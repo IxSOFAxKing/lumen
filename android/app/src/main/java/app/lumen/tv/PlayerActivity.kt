@@ -141,24 +141,7 @@ class PlayerActivity : ComponentActivity() {
         val http = androidx.media3.datasource.ResolvingDataSource.Factory(plain) { spec ->
             if (Net.token.isNotEmpty() && spec.uri.host == lumenHost) spec.withAdditionalHeaders(mapOf("Authorization" to "Bearer ${Net.token}", "Cookie" to "lumen_device=${Net.token}")) else spec
         }
-        // Settings → Player / Audio: hardware decoding, Dolby Vision, stereo downmix.
-        val hw = AppState.uiBool("hwDecoding", true)
-        val noDv = AppState.uiBool("disableDolbyVision", false)
-        val stereo = AppState.uiStr("audioOutput", "auto") == "stereo"
-        val renderers = object : DefaultRenderersFactory(applicationContext) {
-            override fun buildAudioSink(context: android.content.Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): androidx.media3.exoplayer.audio.AudioSink? =
-                if (!stereo) super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams)
-                // No passthrough: decode everything and let Android mix it down for TV speakers / headphones.
-                else androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
-                    .setAudioCapabilities(androidx.media3.exoplayer.audio.AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES).build()
-        }
-            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
-            .setEnableDecoderFallback(true)
-            .setMediaCodecSelector { mime, secure, tunneling ->
-                val m = if (noDv && mime == MimeTypes.VIDEO_DOLBY_VISION) MimeTypes.VIDEO_H265 else mime
-                val list = runCatching { androidx.media3.exoplayer.mediacodec.MediaCodecUtil.getDecoderInfos(m, secure, tunneling) }.getOrDefault(emptyList())
-                if (!hw) list.filter { !it.hardwareAccelerated }.ifEmpty { list } else list
-            }
+        val renderers = lumenRenderers(applicationContext)
         // Bigger buffers than the default smooth out IPTV streams.
         val load = DefaultLoadControl.Builder().setBufferDurationsMs(20_000, 60_000, 1_500, 3_000).build()
         exo = ExoPlayer.Builder(applicationContext, renderers)
@@ -166,7 +149,7 @@ class PlayerActivity : ComponentActivity() {
             .setLoadControl(load)
             .build()
         exo.addListener(listener)
-        if (stereo) exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().setMaxAudioChannelCount(2).build()
+        applyAudioPrefs(exo)
         applyVolumeBoost(exo.audioSessionId)
         if (!AppState.isTv) runCatching { Cast.context(this)?.sessionManager?.addSessionManagerListener(castListener, com.google.android.gms.cast.framework.CastSession::class.java) }
         // Settings → Seek & timing → Default sleep timer

@@ -57,11 +57,41 @@ fun buildExo(ctx: Context): ExoPlayer {
         .setConnectTimeoutMs(15_000)
         .setReadTimeoutMs(90_000)
         .setDefaultRequestProperties(mapOf("Authorization" to "Bearer ${Net.token}", "Cookie" to "lumen_device=${Net.token}"))
-    val renderers = DefaultRenderersFactory(ctx).setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER).setEnableDecoderFallback(true)
-    return ExoPlayer.Builder(ctx, renderers)
+    return ExoPlayer.Builder(ctx, lumenRenderers(ctx))
         .setMediaSourceFactory(DefaultMediaSourceFactory(http))
         .setLoadControl(DefaultLoadControl.Builder().setBufferDurationsMs(8_000, 30_000, 1_000, 2_000).build())
-        .build()
+        .build().also { applyAudioPrefs(it) }
+}
+
+/**
+ * Decoders and audio output for every player (full screen, Live TV preview, Multi-View), so they all sound the same:
+ * Settings → Player / Audio: hardware decoding, Dolby Vision, stereo downmix.
+ */
+@OptIn(UnstableApi::class)
+fun lumenRenderers(ctx: Context): DefaultRenderersFactory {
+    val hw = AppState.uiBool("hwDecoding", true)
+    val noDv = AppState.uiBool("disableDolbyVision", false)
+    val stereo = AppState.uiStr("audioOutput", "auto") == "stereo"
+    return object : DefaultRenderersFactory(ctx) {
+        override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): androidx.media3.exoplayer.audio.AudioSink? =
+            if (!stereo) super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams)
+            // No passthrough: decode everything and let Android mix it down for TV speakers / headphones.
+            else androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
+                .setAudioCapabilities(androidx.media3.exoplayer.audio.AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES).build()
+    }
+        .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+        .setEnableDecoderFallback(true)
+        .setMediaCodecSelector { mime, secure, tunneling ->
+            val m = if (noDv && mime == MimeTypes.VIDEO_DOLBY_VISION) MimeTypes.VIDEO_H265 else mime
+            val list = runCatching { androidx.media3.exoplayer.mediacodec.MediaCodecUtil.getDecoderInfos(m, secure, tunneling) }.getOrDefault(emptyList())
+            if (!hw) list.filter { !it.hardwareAccelerated }.ifEmpty { list } else list
+        }
+}
+
+/** Track choices that go with lumenRenderers (stereo output = at most two audio channels). */
+fun applyAudioPrefs(exo: ExoPlayer) {
+    if (AppState.uiStr("audioOutput", "auto") == "stereo")
+        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().setMaxAudioChannelCount(2).build()
 }
 
 fun mediaItemFor(d: Desc): MediaItem {
