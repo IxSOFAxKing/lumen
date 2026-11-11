@@ -193,24 +193,6 @@ fun Shell(onExit: () -> Unit) {
         val p = Links.pending
         if (p != null && AppState.loaded && !AppState.checkingProfile && AppState.askProfile == null) { Links.pending = null; Links.handle(p) }
     }
-    // "Now available": requested titles that arrived (Overseerr), checked every few minutes.
-    LaunchedEffect(AppState.loaded) {
-        if (!AppState.loaded) return@LaunchedEffect
-        while (true) {
-            if (AppState.discoverOn) runCatching {
-                val since = Net.prefs.alertsSince
-                val j = Net.obj("/api/discover/alerts?since=$since")
-                Net.prefs.alertsSince = j.optLong("now", System.currentTimeMillis())
-                if (since > 0) j.optJSONArray("alerts").objects().take(3).forEach { a ->
-                    AppState.alert = a
-                    kotlinx.coroutines.delay(9000)
-                    AppState.alert = null
-                    kotlinx.coroutines.delay(400)
-                }
-            }
-            kotlinx.coroutines.delay(5 * 60_000)
-        }
-    }
     // Not connected to Lumen yet (e.g. it wasn't found during setup)? Look for it once in the background.
     LaunchedEffect(AppState.loaded) {
         if (AppState.loaded && !AppState.hasLumen && !LumenLink.tried) {
@@ -303,37 +285,6 @@ fun Shell(onExit: () -> Unit) {
         if (showRail) Rail(entries, screen, railFocus, railRequesters) { e -> Nav.root(e) }
         if (showBottomNav) BottomNav(screen, Modifier.align(Alignment.BottomCenter))
         MenuHost()
-        AlertBanner(Modifier.align(Alignment.TopCenter))
-    }
-}
-
-/** "Now available": a requested title arrived in Plex (tap on a phone to open it). */
-@Composable
-private fun AlertBanner(modifier: Modifier) {
-    var last by remember { mutableStateOf<org.json.JSONObject?>(null) }
-    AppState.alert?.let { last = it }
-    androidx.compose.animation.AnimatedVisibility(AppState.alert != null, modifier,
-        enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.slideInVertically { -it },
-        exit = androidx.compose.animation.fadeOut()) {
-        val a = last ?: return@AnimatedVisibility
-        Row(
-            Modifier.padding(top = if (LocalPortrait.current) topSafe() + 8.dp else 20.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
-                .background(C.bg2.copy(alpha = 0.97f))
-                .then(Modifier.clickable(interactionSource = androidx.compose.foundation.interaction.MutableInteractionSource(), indication = null) {
-                    val key = a.str("ratingKey") ?: return@clickable
-                    AppState.alert = null
-                    AppScope.launch { runCatching { Repo.meta(key) }.getOrNull()?.let { Nav.openDetails(it) } }
-                })
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            a.str("poster")?.let { Img(it, Modifier.width(40.dp).height(60.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))); Spacer(Modifier.width(12.dp)) }
-            Column {
-                T("Now available", 12.sp, C.accent, FontWeight.SemiBold)
-                T(a.optString("title") + (a.str("year")?.let { " ($it)" } ?: ""), 16.sp, weight = FontWeight.Bold)
-                a.str("requestedBy")?.let { T("Requested by $it", 12.sp, C.text2) }
-            }
-        }
     }
 }
 

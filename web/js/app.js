@@ -215,22 +215,6 @@ export async function askWhoIsWatching(force = false) {
   });
 }
 
-// ---------- "Now available" (Overseerr requests) ----------
-async function checkAvailable() {
-  if (!store.discover) return;
-  const key = 'lumen.alertsSince';
-  const since = Number(localStorage.getItem(key)) || 0;
-  let d; try { d = await api.get(`/api/discover/alerts?since=${since}`); } catch { return; }
-  localStorage.setItem(key, String(d.now));
-  if (!since) return; // first visit: don't show old news
-  for (const a of d.alerts.slice(0, 3)) {
-    toast(`🎉 ${a.title}${a.year ? ` (${a.year})` : ''} is now available${a.requestedBy ? ` · requested by ${a.requestedBy}` : ''}`, {
-      timeout: 20000, type: 'ok',
-      action: a.ratingKey ? { label: 'Open', onClick: () => { location.hash = `#/item/${a.ratingKey}`; } } : undefined,
-    });
-  }
-}
-
 // ---------- Reminders ----------
 const notified = new Set();
 async function checkReminders() {
@@ -275,8 +259,6 @@ async function start() {
   (window.requestIdleCallback || (f => setTimeout(f, 1500)))(() => Object.values(routes).forEach(load => load().catch(() => {})));
   setInterval(checkReminders, 30000);
   checkReminders();
-  setInterval(checkAvailable, 5 * 60000);
-  setTimeout(checkAvailable, 8000);
 }
 
 (async function boot() {

@@ -64,8 +64,6 @@ object AppState {
         return u
     }
     var loadError by mutableStateOf<String?>(null)
-    /** A "now available" alert being shown (from the Lumen server's Overseerr check). */
-    var alert by mutableStateOf<JSONObject?>(null)
     /** Changes whenever the app comes back to the foreground (e.g. after the player), so rows refresh. */
     var resumeTick by mutableIntStateOf(0)
 
