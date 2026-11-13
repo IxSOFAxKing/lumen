@@ -104,6 +104,7 @@ class MainActivity : ComponentActivity() {
     private var lastRepeat = 0L
     private var backLong = false
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (Preview.idleStopped && event.action == android.view.KeyEvent.ACTION_DOWN) Preview.idleStopped = false // someone's back
         // The remote's search key: Search, listening straight away.
         if (event.keyCode == android.view.KeyEvent.KEYCODE_SEARCH) {
             if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0 && AppState.loaded) { Nav.root(Screen.Search); VoiceSearch.listenTick++ }

@@ -5,6 +5,8 @@ import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -36,6 +38,8 @@ object Preview {
     var channel by mutableStateOf<Channel?>(null)
     /** True while the full-screen player is open (providers often allow only one connection). */
     var pausedForPlayer by mutableStateOf(false)
+    /** Live TV stopped because nobody answered "Are you still watching?": no preview until a button is pressed. */
+    var idleStopped by mutableStateOf(false)
     /** The full-screen player's running stream, handed over on Back so the preview continues without reloading. */
     var handoff: Triple<Channel, ExoPlayer, Desc>? = null
 
@@ -153,6 +157,10 @@ fun LivePreview(ch: Channel, modifier: Modifier = Modifier) {
         }
         lifecycle.addObserver(obs)
         onDispose { lifecycle.removeObserver(obs) }
+    }
+    if (Preview.idleStopped) {
+        Box(modifier.background(Color.Black), contentAlignment = Alignment.Center) { T("Stopped — press any button to continue", 13.sp, C.text3) }
+        return
     }
     if (!started || Preview.pausedForPlayer) { Box(modifier.background(Color.Black)); return }
 

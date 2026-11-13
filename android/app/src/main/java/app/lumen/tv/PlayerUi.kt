@@ -143,7 +143,7 @@ fun PlayerOverlay(st: PlayerState, view: PlayerView) {
                 T("Playing in $left s", 13.sp, C.text2)
                 Spacer(Modifier.height(10.dp))
                 Row {
-                    Box(Modifier.clip(RoundedCornerShape(50)).background(Color.White).tap { playerActions?.upNext() }.padding(horizontal = 14.dp, vertical = 6.dp)) { T("OK  Play now", 12.sp, Color.Black, FontWeight.Bold) }
+                    Box(Modifier.clip(RoundedCornerShape(50)).background(Color.White).tap { playerActions?.upNext() }.padding(horizontal = 14.dp, vertical = 6.dp)) { T("Play now", 12.sp, Color.Black, FontWeight.Bold) }
                     Spacer(Modifier.width(8.dp))
                     Box(Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.15f)).padding(horizontal = 14.dp, vertical = 6.dp)) { T("BACK  Cancel", 12.sp, weight = FontWeight.SemiBold) }
                 }

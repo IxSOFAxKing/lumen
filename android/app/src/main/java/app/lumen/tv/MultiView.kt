@@ -165,7 +165,7 @@ private fun MultiTile(ch: Channel, muted: Boolean, modifier: Modifier) {
         lifecycle.addObserver(obs)
         onDispose { lifecycle.removeObserver(obs) }
     }
-    if (!started || Preview.pausedForPlayer) { Box(modifier.background(Color.Black)); return }
+    if (!started || Preview.pausedForPlayer || Preview.idleStopped) { Box(modifier.background(Color.Black)); return }
     val exo = remember(ch.providerId, ch.id) { buildExo(ctx) }
     var desc by remember(exo) { mutableStateOf<Desc?>(null) }
     var failed by remember(exo) { mutableStateOf(false) }

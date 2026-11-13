@@ -393,6 +393,7 @@ class PlayerActivity : ComponentActivity() {
     private var autoCount = 0
     private var stillContinue: (() -> Unit)? = null
     private var stillSince = 0L
+    private var idleStop = false
     private fun userInput() { lastInput = System.currentTimeMillis(); inputThisItem = true }
     /** The next episode starts by itself, unless several already have in a row without anyone touching the remote. */
     private fun autoNext() {
@@ -407,19 +408,26 @@ class PlayerActivity : ComponentActivity() {
         stillContinue = onContinue; stillSince = System.currentTimeMillis()
         st.upNext = null; st.controls = false; st.panel = null
         st.still = true
+        // Nobody may be watching: let the TV go to its screen saver / sleep as usual while the question waits.
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
     private fun answerStill(cont: Boolean) {
         if (!st.still) return
         st.still = false
         lastInput = System.currentTimeMillis(); autoCount = 0
         val c = stillContinue; stillContinue = null
-        if (!cont) { finish(); return }
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        if (!cont) {
+            // Stopped because nobody answered: don't carry on playing in the Live TV preview either.
+            if (idleStop) Preview.idleStopped = true
+            finish(); return
+        }
         if (c != null) c() else exo.play()
     }
     private fun checkStill(now: Long) {
         if (st.still) {
             // No answer within a minute: live TV stops (frees the provider connection); anything else stays paused.
-            if (st.live && now - stillSince > 60_000) answerStill(false)
+            if (st.live && now - stillSince > 60_000) { idleStop = true; answerStill(false) }
             return
         }
         val hrs = AppState.uiNum("stillWatchingHours", 4.0)
@@ -1214,7 +1222,7 @@ class PlayerActivity : ComponentActivity() {
     override fun finish() {
         val src = source; val d = desc
         // Live preview window: TV only (phones go straight back to the channel list).
-        if (AppState.isTv && !handedOff && src is LiveSource && d != null && st.error == null && (Nav.current == Screen.Live || Nav.current == Screen.Guide)) {
+        if (AppState.isTv && !handedOff && !idleStop && src is LiveSource && d != null && st.error == null && (Nav.current == Screen.Live || Nav.current == Screen.Guide)) {
             handedOff = true
             exo.removeListener(listener)
             view.player = null
