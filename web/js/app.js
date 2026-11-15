@@ -184,7 +184,7 @@ async function showLogin({ setup = false, plex = false, server = null } = {}) {
 // ---------- Who's watching? (Plex Home users) ----------
 /** Shown once per browser session when the Plex account has several users (Settings → Playback to turn off). */
 export async function askWhoIsWatching(force = false) {
-  if ((window.LumenNative && !window.LumenNative.webUi) || !store.plex?.online) return; // the TV app asks on its own screen
+  if (window.LumenNative || !store.plex?.online) return;
   if (!force && (localStorage.getItem('lumen.askProfile') === 'false' || sessionStorage.getItem('lumen.profileChosen'))) return;
   let d;
   try { d = await api.get('/api/plex/users'); } catch { return; }

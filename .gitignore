@@ -10,5 +10,3 @@ android/local.properties
 *.apk
 *.jks
 *.keystore
-windows/bin/
-windows/obj/

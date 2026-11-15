@@ -849,7 +849,6 @@ class Player {
 // ---------------------------------------------------------------------------
 let native = null;
 const abs = u => (u ? new URL(u, location.href).toString() : null);
-const prog = p => (p ? { title: p.title || '', start: p.start, stop: p.stop } : null);
 
 function openNative(desc, meta) {
   if (native) releaseDesc(native.desc);
@@ -865,15 +864,8 @@ function openNative(desc, meta) {
     url: abs(desc.url), type: desc.type, startPosition: Number(desc.seekTo) || 0, startOffset: Number(desc.startOffset) || 0,
     title: meta.title || '', subtitle: meta.subtitle || '', live: !!meta.live, duration: meta.duration || desc.duration || 0,
     subtitleUrl: abs(desc.subtitleUrl), markers: meta.markers || [], hasNext: !!meta.next, canZap: !!meta.zap,
-    channel: meta.channel ? { id: meta.channel.id, name: meta.channel.name, num: meta.channel.num, logo: abs(meta.channel.logo), now: prog(meta.channel.now), next: prog(meta.channel.next) } : null,
+    channel: meta.channel ? { id: meta.channel.id, name: meta.channel.name, num: meta.channel.num, logo: abs(meta.channel.logo) } : null,
   };
-  // Live TV: the group being zapped through, for the app's own channel list (Windows app).
-  if (meta.zap?.channels?.length) {
-    const prov = (store.providers || []).find(p => String(p.id) === String(meta.providerId));
-    payload.group = [prov?.name, meta.zap.title].filter(Boolean).join(' • ');
-    payload.channelIndex = meta.zap.index;
-    payload.channels = meta.zap.channels.slice(0, 5000).map(c => ({ name: c.name, num: c.num ?? null, now: c.now?.title || '' }));
-  }
   window.LumenNative.play(JSON.stringify(payload));
   return { native: true };
 }
@@ -885,13 +877,6 @@ window.lumenNative = {
     const n = native; if (!n) return;
     if (pos !== undefined && n.meta.progress && !n.meta.live) n.meta.progress(Number(pos) + (Number(n.desc.startOffset) || 0), n.meta.duration, 'stopped');
     clearInterval(n.ping); releaseDesc(n.desc); native = null; api.clearCache();
-  },
-  /** Jump to a channel in the list being zapped through (by its index). */
-  async zapTo(i) {
-    const z = native?.meta.zap; if (!z?.channels?.[i]) return;
-    z.index = i;
-    const { desc, meta } = await z.open(z.channels[i]);
-    openNative(desc, { ...meta, zap: z });
   },
   async zap(dir) {
     const z = native?.meta.zap; if (!z?.channels?.length) return;
