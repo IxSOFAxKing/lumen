@@ -20,7 +20,10 @@ Sign in as in the browser. Needs 64-bit Windows 10/11 (the Edge WebView2 runtime
 ## Keys while playing
 
 Esc / Backspace back · F, F11 or double-click full screen · Space pause · ← → seek · ↑ ↓ channel (Live TV) or volume ·
-PgUp / PgDn channel · S skip intro / credits · N next episode · mouse wheel volume. All of mpv's usual keys work too
+PgUp / PgDn channel · S skip intro / credits · N next episode · mouse wheel volume.
+
+Live TV: an info bar (channel, programme, progress, next, clock) shows when the channel changes or the mouse moves;
+Enter (again) or the Channels button opens the channel list (↑ ↓, wheel, Enter or click); type a number to jump to a channel. All of mpv's usual keys work too
 (`j` subtitles, `#` audio track, `i` stats).
 
 ## Your own mpv settings

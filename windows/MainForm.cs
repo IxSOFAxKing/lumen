@@ -21,6 +21,8 @@ public sealed class MainForm : Form
     readonly Panel video = new() { Dock = DockStyle.Fill, BackColor = Color.Black, Visible = false, TabStop = true };
     readonly Button back = new() { Text = "←  Back", AutoSize = true, Visible = false, FlatStyle = FlatStyle.Flat, ForeColor = Color.White,
         BackColor = Color.FromArgb(30, 30, 34), Font = new Font("Segoe UI Semibold", 10.5f), Cursor = Cursors.Hand, TabStop = false };
+    readonly Button chanBtn = new() { Text = "☰  Channels", AutoSize = true, Visible = false, FlatStyle = FlatStyle.Flat, ForeColor = Color.White,
+        BackColor = Color.FromArgb(30, 30, 34), Font = new Font("Segoe UI Semibold", 10.5f), Cursor = Cursors.Hand, TabStop = false };
     readonly System.Windows.Forms.Timer tick = new() { Interval = 500 };
 
     Mpv? mpv;
@@ -34,7 +36,16 @@ public sealed class MainForm : Form
     int endWait;
 
     sealed record Play(string Url, string Type, double Start, double Offset, string Title, string Subtitle, bool Live, double Duration,
-        string? SubtitleUrl, List<(string Type, double Start, double End)> Markers, bool HasNext, bool CanZap, string? Channel);
+        string? SubtitleUrl, List<(string Type, double Start, double End)> Markers, bool HasNext, bool CanZap,
+        string ChNum, string ChName, Prog? Now, Prog? Next, string Group, List<Chan> Channels, int Index);
+
+    // Live TV overlay state (drawn by mpv, see Overlay.cs)
+    long infoUntil;
+    bool listOpen;
+    int listSel;
+    string digits = "";
+    long digitsAt;
+    bool overlayShown;
 
     public MainForm()
     {
@@ -48,8 +59,13 @@ public sealed class MainForm : Form
         if (cfg.Maximized) WindowState = FormWindowState.Maximized;
         back.FlatAppearance.BorderSize = 0;
         back.Click += (_, _) => ClosePlayer();
-        Controls.Add(back); Controls.Add(video); Controls.Add(web);
-        back.BringToFront();
+        chanBtn.FlatAppearance.BorderSize = 0;
+        back.Location = new Point(16, 16);
+        back.SizeChanged += (_, _) => chanBtn.Location = new Point(back.Right + 8, 16);
+        chanBtn.Click += (_, _) => { if (cur?.Live == true && cur.Channels.Count > 0) { if (listOpen) { listOpen = false; DrawOverlay(); } else OpenList(); } FocusVideo(); };
+        back.VisibleChanged += (_, _) => chanBtn.Visible = back.Visible && cur?.Live == true && cur.Channels.Count > 0;
+        Controls.Add(back); Controls.Add(chanBtn); Controls.Add(video); Controls.Add(web);
+        back.BringToFront(); chanBtn.BringToFront();
         tick.Tick += (_, _) => OnTick();
         Load += async (_, _) => await Start();
         Resize += (_, _) => UpdateWebActivity();
@@ -162,15 +178,23 @@ public sealed class MainForm : Form
                 markers.Add((x.TryGetProperty("type", out var t) ? t.GetString() ?? "" : "",
                     x.TryGetProperty("start", out var s) && s.ValueKind == JsonValueKind.Number ? s.GetDouble() : 0,
                     x.TryGetProperty("end", out var e) && e.ValueKind == JsonValueKind.Number ? e.GetDouble() : 0));
-        string? channel = null;
+        static string Str(JsonElement e, string k) => e.TryGetProperty(k, out var v)
+            ? v.ValueKind switch { JsonValueKind.String => v.GetString() ?? "", JsonValueKind.Number => v.GetRawText(), _ => "" } : "";
+        static Prog? P(JsonElement e, string k) => e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Object
+            && v.TryGetProperty("start", out var st) && st.ValueKind == JsonValueKind.Number && v.TryGetProperty("stop", out var sp) && sp.ValueKind == JsonValueKind.Number
+            ? new Prog(Str(v, "title"), (long)st.GetDouble(), (long)sp.GetDouble()) : null;
+        string chNum = "", chName = ""; Prog? now = null, next = null;
         if (r.TryGetProperty("channel", out var c) && c.ValueKind == JsonValueKind.Object)
         {
-            var num = c.TryGetProperty("num", out var n) && n.ValueKind == JsonValueKind.Number ? n.GetRawText() + "  " : "";
-            channel = num + (c.TryGetProperty("name", out var nm) ? nm.GetString() : "");
+            chNum = Str(c, "num"); chName = Str(c, "name"); now = P(c, "now"); next = P(c, "next");
         }
+        var chans = new List<Chan>();
+        if (r.TryGetProperty("channels", out var cl) && cl.ValueKind == JsonValueKind.Array)
+            foreach (var x in cl.EnumerateArray()) chans.Add(new Chan(Str(x, "name"), Str(x, "num"), Str(x, "now")));
+        var index = r.TryGetProperty("channelIndex", out var ix) && ix.ValueKind == JsonValueKind.Number ? ix.GetInt32() : 0;
         var sub = S("subtitleUrl");
         return new Play(S("url"), S("type"), D("startPosition"), D("startOffset"), S("title"), S("subtitle"), B("live"), D("duration"),
-            sub.Length > 0 ? sub : null, markers, B("hasNext"), B("canZap"), channel);
+            sub.Length > 0 ? sub : null, markers, B("hasNext"), B("canZap"), chNum, chName.Length > 0 ? chName : S("title"), now, next, S("group"), chans, index);
     }
 
     // ------------------------------------------------------------------ playback
@@ -183,6 +207,8 @@ public sealed class MainForm : Form
         endWait = 0;
         if (!EnsureMpv()) return;
         cur = p; skipShown.Clear(); lastReport = 0; lastPause = null;
+        listOpen = false; digits = "";
+        if (p.Live) ShowInfo(); else HideOverlay();
 
         // The stream needs the same sign-in as the web app.
         string cookie = "";
@@ -243,15 +269,28 @@ public sealed class MainForm : Form
         DOWN script-message lumen-down
         PGUP script-message lumen-ch -1
         PGDWN script-message lumen-ch 1
-        WHEEL_UP add volume 5
-        WHEEL_DOWN add volume -5
+        WHEEL_UP script-message lumen-wheel -1
+        WHEEL_DOWN script-message lumen-wheel 1
+        ENTER script-message lumen-ok
+        KP_ENTER script-message lumen-ok
+        l script-message lumen-list
+        MBTN_LEFT script-message lumen-click
+        0 script-message lumen-digit 0
+        1 script-message lumen-digit 1
+        2 script-message lumen-digit 2
+        3 script-message lumen-digit 3
+        4 script-message lumen-digit 4
+        5 script-message lumen-digit 5
+        6 script-message lumen-digit 6
+        7 script-message lumen-digit 7
+        8 script-message lumen-digit 8
+        9 script-message lumen-digit 9
         """;
 
     void OnFileLoaded()
     {
         if (cur == null || mpv == null) return;
         if (cur.SubtitleUrl != null) mpv.Command("sub-add", cur.SubtitleUrl, "select");
-        if (cur.Live) mpv.Command("show-text", (cur.Channel ?? cur.Title) + (cur.Subtitle.Length > 0 ? "\n" + cur.Subtitle : ""), "4000");
         FocusVideo();
     }
 
@@ -290,20 +329,118 @@ public sealed class MainForm : Form
         if (a.Length == 0 || cur == null || mpv == null) return;
         switch (a[0])
         {
-            case "lumen-close": ClosePlayer(); break;
+            case "lumen-close": if (listOpen) { listOpen = false; DrawOverlay(); } else ClosePlayer(); break;
             case "lumen-fs": SetFullscreen(!fullscreen); fsByPlayer = fullscreen; break;
             case "lumen-skip": Skip(); break;
             case "lumen-next": if (cur.HasNext) Js("window.lumenNative && lumenNative.ended()"); break;
-            case "lumen-up": if (cur.CanZap) Zap(-1); else mpv.Command("add", "volume", "5"); break;
-            case "lumen-down": if (cur.CanZap) Zap(1); else mpv.Command("add", "volume", "-5"); break;
+            case "lumen-up": if (listOpen) MoveList(-1); else if (cur.CanZap) Zap(-1); else mpv.Command("add", "volume", "5"); break;
+            case "lumen-down": if (listOpen) MoveList(1); else if (cur.CanZap) Zap(1); else mpv.Command("add", "volume", "-5"); break;
+            case "lumen-wheel": if (listOpen) MoveList(a.Length > 1 && a[1] == "-1" ? -1 : 1); else mpv.Command("add", "volume", a.Length > 1 && a[1] == "-1" ? "5" : "-5"); break;
+            case "lumen-ok":
+                if (!cur.Live) mpv.Command("cycle", "pause");
+                else if (listOpen) ZapTo(listSel);
+                else if (Environment.TickCount64 < infoUntil && cur.Channels.Count > 0) OpenList();
+                else ShowInfo();
+                break;
+            case "lumen-list": if (cur.Live && cur.Channels.Count > 0) { if (listOpen) { listOpen = false; DrawOverlay(); } else OpenList(); } break;
+            case "lumen-click": OnClick(); break;
+            case "lumen-digit": if (a.Length > 1) Digit(a[1]); break;
             case "lumen-ch": if (cur.CanZap && a.Length > 1) Zap(a[1] == "-1" ? -1 : 1); break;
         }
     }
 
     void Zap(int dir)
     {
-        mpv?.Command("show-text", dir < 0 ? "Channel up…" : "Channel down…", "1500");
+        if (cur == null) return;
+        if (cur.Channels.Count > 0) { ZapTo((cur.Index + dir + cur.Channels.Count) % cur.Channels.Count); return; }
         Js($"window.lumenNative && lumenNative.zap({dir})");
+    }
+
+    /// <summary>Show the new channel's name straight away; Lumen opens the stream and calls play() again.</summary>
+    void ZapTo(int i)
+    {
+        if (cur == null || i < 0 || i >= cur.Channels.Count) return;
+        var c = cur.Channels[i];
+        listOpen = false;
+        cur = cur with { Index = i, ChNum = c.Num, ChName = c.Name, Now = c.Now.Length > 0 ? new Prog(c.Now, 0, 0) : null, Next = null, Subtitle = "" };
+        ShowInfo();
+        Js($"window.lumenNative && (lumenNative.zapTo ? lumenNative.zapTo({i}) : lumenNative.zap(0))");
+    }
+
+    // ---------- Live TV overlay ----------
+    double OverlayWidth()
+    {
+        var w = mpv?.GetDouble("osd-width") ?? 0; var h = mpv?.GetDouble("osd-height") ?? 0;
+        return w > 0 && h > 0 ? w / h * 1080 : 1920;
+    }
+
+    void ShowInfo() { infoUntil = Environment.TickCount64 + 5000; DrawOverlay(); }
+
+    void OpenList()
+    {
+        if (cur == null) return;
+        listOpen = true; listSel = cur.Index; infoUntil = 0;
+        DrawOverlay();
+    }
+
+    void MoveList(int d)
+    {
+        if (cur == null || cur.Channels.Count == 0) return;
+        listSel = Math.Clamp(listSel + d, 0, cur.Channels.Count - 1);
+        DrawOverlay();
+    }
+
+    void OnClick()
+    {
+        if (cur == null || mpv == null || !listOpen) return;
+        var h = mpv.GetDouble("osd-height") ?? 0;
+        var x = (mpv.GetDouble("mouse-pos/x") ?? 0) / (h > 0 ? h : 1080) * 1080;
+        var y = (mpv.GetDouble("mouse-pos/y") ?? 0) / (h > 0 ? h : 1080) * 1080;
+        if (x > Overlay.ListW) { listOpen = false; DrawOverlay(); return; }
+        var row = (int)Math.Floor((y - Overlay.ListTop) / Overlay.RowH);
+        if (row < 0 || row >= Overlay.Rows) return;
+        var i = Overlay.FirstRow(listSel, cur.Channels.Count) + row;
+        if (i < cur.Channels.Count) ZapTo(i);
+    }
+
+    void Digit(string d)
+    {
+        if (cur == null || mpv == null) return;
+        if (!cur.Live || cur.Channels.Count == 0) { if (d == "9") mpv.Command("add", "volume", "-2"); else if (d == "0") mpv.Command("add", "volume", "2"); return; }
+        if (digits.Length >= 5) digits = "";
+        digits += d; digitsAt = Environment.TickCount64;
+        DrawOverlay();
+    }
+
+    void FinishDigits()
+    {
+        var want = digits; digits = "";
+        if (cur == null) return;
+        var i = cur.Channels.FindIndex(c => c.Num == want);
+        if (i < 0 && int.TryParse(want, out var n)) i = cur.Channels.FindIndex(c => int.TryParse(c.Num, out var cn) && cn == n);
+        if (i >= 0) ZapTo(i);
+        else { mpv?.Command("show-text", $"No channel {want} in this list", "2000"); DrawOverlay(); }
+    }
+
+    void HideOverlay()
+    {
+        if (!overlayShown) return;
+        overlayShown = false;
+        mpv?.Command("osd-overlay", "1", "none", "", "0", "0", "0", "no", "no");
+    }
+
+    void DrawOverlay()
+    {
+        if (cur == null || mpv == null || !cur.Live) { HideOverlay(); return; }
+        var w = OverlayWidth();
+        var parts = new List<string>();
+        if (listOpen) parts.Add(Overlay.ChannelList(cur.Group, cur.Channels, listSel, cur.Index));
+        if (!listOpen && Environment.TickCount64 < infoUntil)
+            parts.Add(Overlay.InfoBar(w, cur.ChNum, cur.ChName, cur.Group, cur.Now?.Stop > 0 ? cur.Now : null, cur.Next, cur.Now?.Title ?? cur.Subtitle, cur.CanZap));
+        if (digits.Length > 0) parts.Add(Overlay.NumberEntry(w, digits));
+        if (parts.Count == 0) { HideOverlay(); return; }
+        overlayShown = true;
+        mpv.Command("osd-overlay", "1", "ass-events", string.Join("\n", parts), "0", "1080", "0", "no", "no");
     }
 
     double Position() => (mpv?.GetDouble("time-pos") ?? 0) + (cur?.Offset ?? 0);
@@ -327,8 +464,16 @@ public sealed class MainForm : Form
         var now = Environment.TickCount64;
         // Back button: shows while the mouse moves over the video.
         var mouse = mpv.Get("mouse-pos");
-        if (mouse != lastMouse) { lastMouse = mouse; back.Visible = true; backHideAt = now + 2500; }
+        if (mouse != lastMouse)
+        {
+            var first = lastMouse == null; lastMouse = mouse; back.Visible = true; backHideAt = now + 2500;
+            if (!first && cur.Live && !listOpen) infoUntil = Math.Max(infoUntil, now + 3000);
+        }
         else if (back.Visible && now > backHideAt) back.Visible = false;
+        // Live TV overlay: number entry finishes after 1.5 s; redraw for the clock / progress, hide when it times out.
+        if (digits.Length > 0 && now - digitsAt > 1500) FinishDigits();
+        if (cur == null || mpv == null) return;
+        if (cur.Live && (listOpen || digits.Length > 0 || now < infoUntil)) DrawOverlay(); else HideOverlay();
 
         var pos = Position();
         var paused = mpv.Get("pause");
@@ -367,7 +512,7 @@ public sealed class MainForm : Form
         tick.Enabled = on;
         if (on)
         {
-            video.Visible = true; video.BringToFront(); back.BringToFront();
+            video.Visible = true; video.BringToFront(); back.BringToFront(); chanBtn.BringToFront();
             web.Visible = false;
             if (cfg.PlayFullscreen && !fullscreen) { SetFullscreen(true); fsByPlayer = true; }
             FocusVideo();
