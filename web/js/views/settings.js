@@ -813,11 +813,11 @@ async function parentalCard() {
 async function devicesTab(el, route) {
   const native = window.LumenNative;
   if (native) {
-    el.append(h('div', { class: 'card-box', style: { marginBottom: '18px' } }, h('h3', { style: { marginTop: 0 } }, 'This Android TV app'),
+    el.append(h('div', { class: 'card-box', style: { marginBottom: '18px' } }, h('h3', { style: { marginTop: 0 } }, native.platform?.() === 'windows' ? 'This Windows app' : 'This Android TV app'),
       h('dl', { class: 'kv' }, h('dt', {}, 'Server'), h('dd', {}, native.serverUrl ? native.serverUrl() : location.origin),
         h('dt', {}, 'App version'), h('dd', {}, native.version ? native.version() : '?')),
       h('p', { class: 'muted small' }, 'Everything you change here — settings, Plex & IPTV logins, favourites — is stored on the Lumen server and shared with every device.'),
-      native.openAppSettings ? btn('Change server / pair again', () => native.openAppSettings(), { iconName: 'settings' }) : null));
+      native.openAppSettings ? btn(native.platform?.() === 'windows' ? 'Change server' : 'Change server / pair again', () => native.openAppSettings(), { iconName: 'settings' }) : null));
   }
   const code = h('input', { class: 'input', placeholder: '6-digit code', inputmode: 'numeric', maxlength: 6, value: (route?.query?.code || '').replace(/\D/g, ''),
     style: { width: '170px', fontSize: '22px', letterSpacing: '6px', textAlign: 'center' } });
@@ -838,6 +838,13 @@ async function devicesTab(el, route) {
       h('li', {}, 'In Downloader, enter ', h('code', {}, `${host}/tv.apk`), ' and install.'),
       h('li', {}, 'Open Lumen on the TV and sign in with Plex (enter the code at plex.tv/link). It finds this server by itself.')),
     h('p', { class: 'dim small' }, 'Updates: install the latest APK the same way. Your settings live on this server, so nothing is lost; with a signing key set up (see docs/ANDROID_TV.md) updates install over the old version and keep the pairing too.')));
+
+  el.append(h('div', { class: 'card-box', style: { marginTop: '18px' } }, h('h3', { style: { marginTop: 0 } }, 'Get the Windows app'),
+    h('p', { class: 'muted', style: { marginTop: 0 } }, 'Lumen for Windows plays everything in its own player (mpv): 4K HDR, HEVC and Dolby / DTS sound without transcoding. It is light enough to leave running while gaming.'),
+    h('ol', { class: 'muted', style: { lineHeight: 1.8, paddingLeft: '20px', margin: 0 } },
+      h('li', {}, 'Download ', h('a', { href: 'https://github.com/IxSOFAxKing/lumen/releases/download/windows-latest/Lumen-Windows.zip', target: '_blank', rel: 'noopener' }, 'Lumen-Windows.zip'), ' and unzip it anywhere (no installer).'),
+      h('li', {}, 'Run ', h('b', {}, 'Lumen.exe'), `. It finds this server by itself, or enter ${host}.`),
+      h('li', {}, 'Sign in like in the browser (Plex or your Lumen login).'))));
 
   async function draw() {
     const d = await api.get('/api/devices').catch(() => ({ devices: [], pending: [] }));

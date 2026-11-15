@@ -40,6 +40,7 @@ Lumen is a self-hosted web app that plays your **Plex library** and your **IPTV 
 - Arrow keys / D-pad navigation everywhere, OK to select, Back to go back
 - TV mode (auto-detected on TV browsers) with large focus highlights; per-device settings so the TV can have its own layout
 - Ready for the upcoming Android TV app: see [docs/ANDROID_TV.md](docs/ANDROID_TV.md)
+- Windows app (Lumen + mpv player, light enough for gaming): see [docs/WINDOWS.md](docs/WINDOWS.md)
 
 **Player and transcoding**
 - MPEG-TS live streams play directly in the browser (mpegts.js); HLS plays with hls.js
