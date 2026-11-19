@@ -466,7 +466,7 @@ object Plex {
         val selSub = streams.firstOrNull { it.optInt("streamType") == 3 && it.optInt("id") == sId }
 
         val direct = media.optString("container") in NATIVE_CONTAINERS && media.optString("videoCodec") in NATIVE_VIDEO &&
-            (selAudio?.optString("codec") ?: media.optString("audioCodec")) in NATIVE_AUDIO
+            (selAudio?.optString("codec") ?: media.optString("audioCodec")).let { it in NATIVE_AUDIO && it in DeviceCaps.audio() }
         val wantsOriginal = quality == "original" || quality == "auto"
         val duration = (if (meta.has("duration")) meta.optLong("duration") else media.optLong("duration")) / 1000.0
 
