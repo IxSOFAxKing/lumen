@@ -356,6 +356,8 @@ const QUALITY = {
 const LANG3 = { eng: 'en', spa: 'es', fre: 'fr', fra: 'fr', ger: 'de', deu: 'de', ita: 'it', por: 'pt', jpn: 'ja', kor: 'ko', chi: 'zh', zho: 'zh', rus: 'ru', ara: 'ar', hin: 'hi',
   dut: 'nl', nld: 'nl', swe: 'sv', nor: 'no', nob: 'no', dan: 'da', fin: 'fi', pol: 'pl', tur: 'tr', gre: 'el', ell: 'el', heb: 'he', tha: 'th', vie: 'vi', ind: 'id', ces: 'cs', cze: 'cs', hun: 'hu', ukr: 'uk', ron: 'ro', rum: 'ro' };
 const langOf = s => { const t = String(s.languageTag || '').slice(0, 2).toLowerCase(); if (t) return t; const c = String(s.languageCode || '').toLowerCase(); return LANG3[c] || c.slice(0, 2); };
+/** Commentary / audio-description tracks: never picked automatically. */
+const isExtraAudio = s => /comment|descri|narrat/i.test(`${s.title || ''} ${s.displayTitle || ''} ${s.extendedDisplayTitle || ''}`);
 const isPrivateIp = ip => /^(::ffff:)?(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.)|^::1$|^f[cd][0-9a-f]{2}:/i.test(ip || '');
 
 r.post('/play', ah(async (req, res) => {
@@ -376,9 +378,10 @@ r.post('/play', ah(async (req, res) => {
   {
     const sts = part.Stream || [];
     const audios = sts.filter(s => s.streamType === 2), subs = sts.filter(s => s.streamType === 3);
-    let audio = audios.find(s => s.selected) || audios[0];
-    if (audioStreamID === undefined && prefs.audioLang) {
-      const want = audios.find(s => langOf(s) === prefs.audioLang);
+    let audio = audios.find(s => s.selected) || audios.find(s => !isExtraAudio(s)) || audios[0];
+    // Preferred language: the main track in that language (never a commentary), unless the current one already fits.
+    if (audioStreamID === undefined && prefs.audioLang && !(audio && langOf(audio) === prefs.audioLang && !isExtraAudio(audio))) {
+      const want = audios.find(s => langOf(s) === prefs.audioLang && !isExtraAudio(s));
       if (want && want !== audio) { audioStreamID = want.id; audio = want; }
     }
     if (subtitleStreamID === undefined && prefs.subtitleMode && prefs.subtitleMode !== 'plex') {
@@ -402,7 +405,8 @@ r.post('/play', ah(async (req, res) => {
     await plex.plexFetch(`/library/parts/${part.id}`, { method: 'PUT', params }).catch(() => null);
   }
   const streams = part.Stream || [];
-  const selAudio = streams.find(s => s.streamType === 2 && (audioStreamID ? s.id === Number(audioStreamID) : s.selected)) || streams.find(s => s.streamType === 2);
+  const selAudio = streams.find(s => s.streamType === 2 && (audioStreamID ? s.id === Number(audioStreamID) : s.selected))
+    || streams.find(s => s.streamType === 2 && !isExtraAudio(s)) || streams.find(s => s.streamType === 2);
   const subId = subtitleStreamID !== undefined ? Number(subtitleStreamID) : (streams.find(s => s.streamType === 3 && s.selected)?.id || 0);
   const selSub = streams.find(s => s.streamType === 3 && s.id === subId) || null;
 
@@ -427,6 +431,7 @@ r.post('/play', ah(async (req, res) => {
   if (direct && wantsOriginal && !req.body.forceTranscode) {
     return res.json({
       ...base, method: 'direct', type: 'file', startOffset: 0, seekTo: offset,
+      audioIndex: streams.filter(s => s.streamType === 2).indexOf(selAudio), // the app starts on this track of the file
       url: `/api/plex/file?path=${encodeURIComponent(part.key)}`,
       subtitleUrl: selSub ? `/api/plex/subtitle/${selSub.id}?key=${encodeURIComponent(selSub.key)}` : null,
     });

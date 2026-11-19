@@ -403,6 +403,10 @@ object Plex {
         "kor" to "ko", "chi" to "zh", "zho" to "zh", "rus" to "ru", "ara" to "ar", "hin" to "hi", "dut" to "nl", "nld" to "nl", "swe" to "sv", "nor" to "no", "nob" to "no",
         "dan" to "da", "fin" to "fi", "pol" to "pl", "tur" to "tr", "gre" to "el", "ell" to "el", "heb" to "he", "tha" to "th", "vie" to "vi", "ind" to "id", "ces" to "cs",
         "cze" to "cs", "hun" to "hu", "ukr" to "uk", "ron" to "ro", "rum" to "ro")
+    /** Commentary / audio-description tracks: never picked automatically. */
+    private fun isExtraAudio(s: JSONObject): Boolean =
+        Regex("comment|descri|narrat", RegexOption.IGNORE_CASE).containsMatchIn("${s.optString("title")} ${s.optString("displayTitle")} ${s.optString("extendedDisplayTitle")}")
+
     private fun langOf(s: JSONObject): String {
         val t = s.optString("languageTag").take(2).lowercase()
         if (t.isNotEmpty()) return t
@@ -431,9 +435,11 @@ object Plex {
         // Preferred audio / subtitle languages (only when no track was picked by hand).
         run {
             val audios = streams.filter { it.optInt("streamType") == 2 }; val subs = streams.filter { it.optInt("streamType") == 3 }
-            var audio = audios.firstOrNull { it.optBoolean("selected") } ?: audios.firstOrNull()
+            var audio = audios.firstOrNull { it.optBoolean("selected") } ?: audios.firstOrNull { !isExtraAudio(it) } ?: audios.firstOrNull()
             val aLang = prefsJ.str("audioLang")
-            if (audioId == null && aLang != null) audios.firstOrNull { langOf(it) == aLang }?.let { if (it !== audio) { audioId = it.optInt("id"); audio = it } }
+            // Preferred language: the main track in that language (not a commentary), unless the current one already fits.
+            if (audioId == null && aLang != null && !(audio != null && langOf(audio!!) == aLang && !isExtraAudio(audio!!)))
+                audios.firstOrNull { langOf(it) == aLang && !isExtraAudio(it) }?.let { if (it !== audio) { audioId = it.optInt("id"); audio = it } }
             val mode = prefsJ.str("subtitleMode")
             if (subId == null && mode != null && mode != "plex") {
                 val subLang = prefsJ.str("subtitleLang") ?: aLang ?: "en"
@@ -455,7 +461,7 @@ object Plex {
             })
         }
         val selAudio = streams.firstOrNull { it.optInt("streamType") == 2 && (if (audioId != null) it.optInt("id") == audioId else it.optBoolean("selected")) }
-            ?: streams.firstOrNull { it.optInt("streamType") == 2 }
+            ?: streams.firstOrNull { it.optInt("streamType") == 2 && !isExtraAudio(it) } ?: streams.firstOrNull { it.optInt("streamType") == 2 }
         val sId = subId ?: (streams.firstOrNull { it.optInt("streamType") == 3 && it.optBoolean("selected") }?.optInt("id") ?: 0)
         val selSub = streams.firstOrNull { it.optInt("streamType") == 3 && it.optInt("id") == sId }
 
@@ -478,6 +484,8 @@ object Plex {
         if (direct && wantsOriginal && !body.optBoolean("forceTranscode")) {
             // The original file, decoded by this device.
             val sub = selSub?.takeIf { it.str("key") != null }?.let { runCatching { subtitleFile(it.optInt("id"), it.str("key"), 0) }.getOrNull() }
+            // The player picks this audio track from the file (the same one Plex would play).
+            base.put("audioIndex", streams.filter { it.optInt("streamType") == 2 }.indexOf(selAudio))
             return base.put("method", "direct").put("type", "file").put("startOffset", 0).put("seekTo", offset)
                 .put("url", url(part.optString("key"), mapOf("X-Plex-Client-Identifier" to clientId, "X-Plex-Product" to "Lumen")))
                 .apply { if (sub != null) put("subtitleUrl", sub) }

@@ -283,6 +283,7 @@ class PlayerActivity : ComponentActivity() {
                 val d = src.open(offset, mode)
                 if (d.url.isBlank()) throw IllegalStateException("The server didn't return a stream")
                 desc = d
+                pendingAudio = d.raw.optInt("audioIndex", -1).takeIf { it >= 0 && d.method.startsWith("direct") }
                 st.method = d.method
                 st.chapters = if (AppState.uiBool("chapterMarks", true) && src.duration > 0) src.chapters.drop(1).map { (it.start / src.duration).toFloat() } else emptyList()
                 st.buttons = buildButtons(src)
@@ -344,6 +345,16 @@ class PlayerActivity : ComponentActivity() {
         override fun onAudioSessionIdChanged(audioSessionId: Int) { applyVolumeBoost(audioSessionId) }
         override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) { matchFrameRate() }
         override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+            // Playing the original file: start on the audio track Plex chose (not whichever the player prefers).
+            pendingAudio?.let { want ->
+                val all = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }.flatMap { g -> (0 until g.length).map { g to it } }
+                if (all.isNotEmpty()) {
+                    pendingAudio = null
+                    all.getOrNull(want)?.takeIf { (g, i) -> g.isTrackSupported(i) && !g.isTrackSelected(i) }?.let { (g, i) ->
+                        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, i)).build()
+                    }
+                }
+            }
             // After a subtitle-sync reload, switch to the shifted subtitles.
             if (!pickSynced) return
             tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }.forEach { g ->
@@ -804,6 +815,8 @@ class PlayerActivity : ComponentActivity() {
 
     // ---------- subtitle sync ----------
     private var pickSynced = false
+    /** Original-file playback: which audio track (in file order) to start on, once the tracks are known. */
+    private var pendingAudio: Int? = null
 
     private fun syncPanel(src: Source, parent: Panel): Panel {
         val steps = listOf(-5000, -3000, -2000, -1500, -1000, -750, -500, -250, 0, 250, 500, 750, 1000, 1500, 2000, 3000, 5000)
