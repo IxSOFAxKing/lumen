@@ -345,12 +345,17 @@ class PlayerActivity : ComponentActivity() {
         override fun onAudioSessionIdChanged(audioSessionId: Int) { applyVolumeBoost(audioSessionId) }
         override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) { matchFrameRate() }
         override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+            val all = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }.flatMap { g -> (0 until g.length).map { g to it } }
+            // The sound can't be played on this device (e.g. E-AC3 / DTS without a decoder or HDMI passthrough): Android
+            // would show the picture in silence. Switch to a version with converted sound instead.
+            if (all.isNotEmpty() && all.none { (g, i) -> g.isTrackSupported(i) }) { noSoundFallback(); return }
             // Playing the original file: start on the audio track Plex chose (not whichever the player prefers).
             pendingAudio?.let { want ->
-                val all = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }.flatMap { g -> (0 until g.length).map { g to it } }
                 if (all.isNotEmpty()) {
                     pendingAudio = null
-                    all.getOrNull(want)?.takeIf { (g, i) -> g.isTrackSupported(i) && !g.isTrackSelected(i) }?.let { (g, i) ->
+                    val target = all.getOrNull(want)
+                    if (target != null && !target.first.isTrackSupported(target.second)) { noSoundFallback(); return }
+                    target?.takeIf { (g, i) -> !g.isTrackSelected(i) }?.let { (g, i) ->
                         exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, i)).build()
                     }
                 }
@@ -815,6 +820,19 @@ class PlayerActivity : ComponentActivity() {
 
     // ---------- subtitle sync ----------
     private var pickSynced = false
+    private var noSoundFor: Desc? = null
+
+    /** Once per stream: reopen it with the sound converted (Plex for the library, the Lumen server for IPTV). */
+    private fun noSoundFallback() {
+        val src = source ?: return
+        val d = desc ?: return
+        if (noSoundFor === d) return
+        noSoundFor = d
+        if (src is WebSource) { PlayerBus.error("audio format not supported on this device"); return }
+        val mode = nextMode(d) ?: return
+        st.message = "This device can't play this sound format — converting it…"
+        start(src, if (src.isLive) 0.0 else absPos().coerceAtLeast(d.startPosition), mode, keepState = true)
+    }
     /** Original-file playback: which audio track (in file order) to start on, once the tracks are known. */
     private var pendingAudio: Int? = null
 
