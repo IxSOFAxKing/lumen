@@ -185,6 +185,7 @@ class PlexSource(override val ratingKey: String, private val queue: List<String>
         }
         val body = JSONObject().put("ratingKey", ratingKey).put("offset", offset).put("client", "native").put("prefs", uiPrefs())
             .put("audioCodecs", org.json.JSONArray(DeviceCaps.audio().toList()))
+            .put("videoCodecs", org.json.JSONArray(DeviceCaps.videoCodecs().toList()))
             .put("forceTranscode", forceTranscode)
         quality?.let { body.put("quality", it) }
         if (mediaIndex > 0) body.put("mediaIndex", mediaIndex)

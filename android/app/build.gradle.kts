@@ -72,6 +72,9 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
     implementation("androidx.media3:media3-datasource:1.5.1")
+    // Software audio decoders (FFmpeg: AC-3, E-AC-3, DTS, TrueHD…), like Plex's own app: used when the TV / soundbar
+    // can't take the sound as it is and the device has no decoder for it. Prebuilt by the Jellyfin project.
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.5.0+1")
     implementation("com.google.zxing:core:3.5.3")
 
     // Native TV interface (Jetpack Compose)

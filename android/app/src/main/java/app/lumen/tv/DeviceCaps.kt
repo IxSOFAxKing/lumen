@@ -5,6 +5,7 @@ import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.decoder.ffmpeg.FfmpegLibrary
 import androidx.media3.exoplayer.audio.AudioCapabilities
 
 /**
@@ -27,13 +28,38 @@ object DeviceCaps {
         }.getOrDefault(emptySet())
     }
 
+    private val VIDEO = mapOf(
+        "h264" to MimeTypes.VIDEO_H264, "hevc" to MimeTypes.VIDEO_H265, "h265" to MimeTypes.VIDEO_H265, "vp9" to MimeTypes.VIDEO_VP9,
+        "vp8" to MimeTypes.VIDEO_VP8, "av1" to MimeTypes.VIDEO_AV1, "mpeg2video" to MimeTypes.VIDEO_MPEG2, "mpeg4" to MimeTypes.VIDEO_MP4V,
+    )
+    private val videoDecoders by lazy {
+        runCatching { MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos.filter { !it.isEncoder } }.getOrDefault(emptyList())
+    }
+
+    /** Whether a decoder on this device plays [codec] at this size (e.g. HEVC / AV1 in 4K). Unknown size = codec only. */
+    fun video(codec: String, width: Int, height: Int): Boolean {
+        val mime = VIDEO[codec.lowercase()] ?: return false
+        return videoDecoders.any { info ->
+            info.supportedTypes.any { it.equals(mime, true) } && runCatching {
+                width <= 0 || height <= 0 || info.getCapabilitiesForType(mime).videoCapabilities?.let { vc ->
+                    vc.isSizeSupported(width, height) || vc.isSizeSupported(height, width)
+                } != false
+            }.getOrDefault(true)
+        }
+    }
+
+    /** Plex codec names (video) this device decodes at all. */
+    fun videoCodecs(): Set<String> = VIDEO.keys.filter { video(it, 0, 0) }.toSet()
+
     /** Plex codec names this device can play right now. */
     @OptIn(UnstableApi::class)
     fun audio(): Set<String> {
         val out = mutableSetOf("pcm")
         for ((codec, mime) in MIMES) if (mime.lowercase() in decoders) out += codec
-        // "Audio channels: Stereo" turns passthrough off (everything is decoded here).
-        if (AppState.uiStr("audioOutput", "auto") != "stereo") runCatching {
+        // The app's own FFmpeg decoders (like Plex's app): any of these plays even without a device decoder.
+        runCatching { if (FfmpegLibrary.isAvailable()) for ((codec, mime) in MIMES) if (FfmpegLibrary.supportsFormat(mime)) out += codec }
+        // Passthrough only with "Audio output: Auto" (Decode / Stereo decode everything here).
+        if (AppState.uiStr("audioOutput", "auto") == "auto") runCatching {
             @Suppress("DEPRECATION")
             val caps = AudioCapabilities.getCapabilities(Nav.appContext)
             for ((codec, enc) in PASSTHROUGH) if (caps.supportsEncoding(enc)) out += codec

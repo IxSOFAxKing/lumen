@@ -415,6 +415,7 @@ r.post('/play', ah(async (req, res) => {
     ? NATIVE.containers.includes(media.container) && NATIVE.video.includes(media.videoCodec) && NATIVE.audio.includes(selAudio?.codec || media.audioCodec)
       // The app says which sound formats the device really plays (phones: usually no DTS / TrueHD); otherwise Plex converts the sound.
       && (!Array.isArray(req.body.audioCodecs) || req.body.audioCodecs.includes(selAudio?.codec || media.audioCodec))
+      && (!Array.isArray(req.body.videoCodecs) || req.body.videoCodecs.includes(media.videoCodec))
     : DIRECT_CONTAINERS.includes(media.container) && DIRECT_VIDEO.includes(media.videoCodec)
       && DIRECT_AUDIO.includes(selAudio?.codec || media.audioCodec) && (!selAudio || selAudio === streams.find(s => s.streamType === 2))
       && (!selSub || (selSub.key && TEXT_SUBS.includes(selSub.codec)));
