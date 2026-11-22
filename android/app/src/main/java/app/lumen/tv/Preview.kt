@@ -75,8 +75,9 @@ fun buildExo(ctx: Context): ExoPlayer {
 fun lumenRenderers(ctx: Context): DefaultRenderersFactory {
     val hw = AppState.uiBool("hwDecoding", true)
     val noDv = AppState.uiBool("disableDolbyVision", false)
-    // "auto": Dolby / DTS go untouched to the TV / soundbar when it takes them; "decode" and "stereo": decoded here.
-    val passthrough = AppState.uiStr("audioOutput", "auto") == "auto"
+    // Like Plex for Android TV: sound is decoded in the app (its FFmpeg decoders first — the TV box's own Dolby decoders
+    // and HDMI passthrough are often what goes silent). "passthrough" sends Dolby / DTS untouched to a receiver instead.
+    val passthrough = AppState.uiStr("audioOutput", "auto") == "passthrough"
     return object : DefaultRenderersFactory(ctx) {
         override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): androidx.media3.exoplayer.audio.AudioSink? =
             if (passthrough) super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams)
@@ -84,8 +85,7 @@ fun lumenRenderers(ctx: Context): DefaultRenderersFactory {
             else androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
                 .setAudioCapabilities(androidx.media3.exoplayer.audio.AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES).build()
     }
-        // Like Plex: the device's own decoders / HDMI passthrough first, then the app's FFmpeg decoders for anything else.
-        .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+        .setExtensionRendererMode(if (passthrough) DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON else DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
         .setEnableDecoderFallback(true)
         .setMediaCodecSelector { mime, secure, tunneling ->
             val m = if (noDv && mime == MimeTypes.VIDEO_DOLBY_VISION) MimeTypes.VIDEO_H265 else mime

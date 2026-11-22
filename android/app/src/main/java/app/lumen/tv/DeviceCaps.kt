@@ -58,8 +58,8 @@ object DeviceCaps {
         for ((codec, mime) in MIMES) if (mime.lowercase() in decoders) out += codec
         // The app's own FFmpeg decoders (like Plex's app): any of these plays even without a device decoder.
         runCatching { if (FfmpegLibrary.isAvailable()) for ((codec, mime) in MIMES) if (FfmpegLibrary.supportsFormat(mime)) out += codec }
-        // Passthrough only with "Audio output: Auto" (Decode / Stereo decode everything here).
-        if (AppState.uiStr("audioOutput", "auto") == "auto") runCatching {
+        // Passthrough only when chosen in Settings → Audio → Audio output.
+        if (AppState.uiStr("audioOutput", "auto") == "passthrough") runCatching {
             @Suppress("DEPRECATION")
             val caps = AudioCapabilities.getCapabilities(Nav.appContext)
             for ((codec, enc) in PASSTHROUGH) if (caps.supportsEncoding(enc)) out += codec

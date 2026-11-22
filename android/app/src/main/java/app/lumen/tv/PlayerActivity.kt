@@ -149,6 +149,12 @@ class PlayerActivity : ComponentActivity() {
             .setLoadControl(load)
             .build()
         exo.addListener(listener)
+        exo.addAnalyticsListener(object : androidx.media3.exoplayer.analytics.AnalyticsListener {
+            override fun onAudioDecoderInitialized(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
+                audioDecoder = decoderName
+            }
+            override fun onAudioDisabled(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, decoderCounters: androidx.media3.exoplayer.DecoderCounters) { audioDecoder = null }
+        })
         liveAudio = LiveAudio.attach(exo) { source?.isLive == true }
         applyAudioPrefs(exo)
         applyVolumeBoost(exo.audioSessionId)
@@ -820,6 +826,8 @@ class PlayerActivity : ComponentActivity() {
 
     // ---------- subtitle sync ----------
     private var pickSynced = false
+    /** The audio decoder in use (null = passthrough / none), for Playback info. */
+    private var audioDecoder: String? = null
     private var noSoundFor: Desc? = null
 
     /** Once per stream: reopen it with the sound converted (Plex for the library, the Lumen server for IPTV). */
@@ -894,6 +902,8 @@ class PlayerActivity : ComponentActivity() {
             v?.let { "Video: ${it.width}×${it.height}${if (it.frameRate > 0) " @ ${"%.2f".format(it.frameRate)} fps" else ""} · ${it.sampleMimeType?.substringAfter('/') ?: it.codecs ?: "?"}" },
             v?.bitrate?.takeIf { it > 0 }?.let { "Video bitrate: ${it / 1000} kbps" },
             a?.let { "Audio: ${it.sampleMimeType?.substringAfter('/') ?: "?"} · ${it.channelCount} ch · ${it.sampleRate} Hz" },
+            a?.let { "Audio decoder: ${audioDecoder ?: "none — passthrough to the TV / receiver"}" },
+            "Audio output: ${AppState.uiStr("audioOutput", "auto").let { if (it == "passthrough") "passthrough" else if (it == "stereo") "stereo (decoded)" else "decoded in the app" }}",
             d?.raw?.optString("quality")?.takeIf { it.isNotBlank() }?.let { "Quality setting: $it" },
             d?.raw?.optString("network")?.takeIf { it.isNotBlank() }?.let { "Network: $it" },
             "Buffered: ${"%.1f".format((exo.totalBufferedDuration) / 1000.0)} s",
