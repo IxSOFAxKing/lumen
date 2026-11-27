@@ -374,10 +374,13 @@ object Plex {
                 val userToken = runCatching { JSONObject(text).let { it.str("authToken") ?: it.str("authenticationToken") } }.getOrNull()
                     ?: xmlElements(text, "user").firstOrNull()?.let { it["authenticationToken"] ?: it["authToken"] }
                     ?: throw PlexError(502, "Plex didn't return a token for this user")
+                switchedAccountToken = userToken
                 servers(userToken).firstOrNull { it.machineId == prefs.plexMachineId }?.accessToken
                     ?: throw PlexError(403, "${u.optString("title")} doesn't have access to this Plex server")
             }
         }
+        if (prefs.plexUserUuid != u.optString("uuid")) prefs.plexUserAccountToken = switchedAccountToken
+        switchedAccountToken = null
         prefs.plexUserToken = if (u.optBoolean("admin")) null else serverToken
         prefs.plexUserUuid = if (u.optBoolean("admin")) null else u.optString("uuid")
         prefs.plexUserRestricted = u.optBoolean("restricted")
@@ -389,8 +392,79 @@ object Plex {
     /** Follow the default user again. */
     suspend fun resetUser() {
         val def = prefs.plexDefaultUser
-        if (def == null) { prefs.plexUserToken = null; prefs.plexUserUuid = null; prefs.plexUserRestricted = false; cache.clear() }
+        if (def == null) { prefs.plexUserToken = null; prefs.plexUserUuid = null; prefs.plexUserAccountToken = null; prefs.plexUserRestricted = false; cache.clear() }
         else runCatching { switchUser(def, null) }
+    }
+
+    // ------------------------------------------------------------------ Plex watchlist (plex.tv)
+    // The watchlist belongs to a plex.tv account: the signed-in one, or the chosen Home user's (fetched with the
+    // owner's sign-in, or remembered from their PIN).
+    private var switchedAccountToken: String? = null
+    private const val DISCOVER = "https://discover.provider.plex.tv"
+    private var wlCache: Triple<String, Long, List<JSONObject>>? = null
+
+    private suspend fun watchlistToken(): String? {
+        val uuid = prefs.plexUserUuid ?: return prefs.plexToken
+        prefs.plexUserAccountToken?.let { return it }
+        val u = runCatching { homeUsers().firstOrNull { it.optString("uuid") == uuid } }.getOrNull() ?: return null
+        val t = runCatching {
+            val text = http("POST", tvUrl("/api/home/users/${u.optString("id")}/switch"), prefs.plexToken)
+            runCatching { JSONObject(text).let { it.str("authToken") ?: it.str("authenticationToken") } }.getOrNull()
+                ?: xmlElements(text, "user").firstOrNull()?.let { (it["authenticationToken"] ?: it["authToken"])?.toString() }
+        }.getOrNull()
+        if (t != null) prefs.plexUserAccountToken = t
+        return t
+    }
+
+    private fun discoverUrl(path: String, params: Map<String, Any?> = emptyMap()) = Uri.parse(DISCOVER + path).buildUpon().apply {
+        params.forEach { (k, v) -> if (v != null) appendQueryParameter(k, v.toString()) }
+    }.build().toString()
+
+    /** plex://movie/5d77… → the id plex.tv uses for that title. */
+    fun discoverId(guid: String?): String? = guid?.let { Regex("^plex://(movie|show)/([0-9a-f]+)$", RegexOption.IGNORE_CASE).find(it)?.groupValues?.get(2) }
+
+    private suspend fun watchlistRaw(fresh: Boolean = false): List<JSONObject> {
+        val tok = watchlistToken() ?: throw PlexError(409, "The Plex watchlist needs this user's PIN once (switch to them with it).")
+        wlCache?.let { (t, at, list) -> if (!fresh && t == tok && System.currentTimeMillis() - at < 120_000) return list }
+        val out = mutableListOf<JSONObject>()
+        var start = 0
+        while (start < 1000) {
+            val j = JSONObject(http("GET", discoverUrl("/library/sections/watchlist/all", mapOf("includeCollections" to 1, "includeExternalMedia" to 1,
+                "sort" to "watchlistedAt:desc", "X-Plex-Container-Start" to start, "X-Plex-Container-Size" to 100)), tok))
+            val page = j.optJSONObject("MediaContainer")?.optJSONArray("Metadata").objects()
+            out += page
+            if (page.size < 100) break
+            start += 100
+        }
+        wlCache = Triple(tok, System.currentTimeMillis(), out)
+        return out
+    }
+
+    /** The watchlist as cards: titles in this Plex server open normally; others have a "wl:" key (request them). */
+    suspend fun watchlist(fresh: Boolean = false): List<PlexItem> = coroutineScope {
+        watchlistRaw(fresh).map { m ->
+            async {
+                val guid = m.optString("guid")
+                val local = runCatching { get("/library/all", mapOf("guid" to guid), 600_000).optJSONArray("Metadata").objects().firstOrNull()?.optString("ratingKey") }.getOrNull()
+                val thumb = m.str("thumb")?.let { t -> runCatching { url("/photo/:/transcode", mapOf("url" to t, "width" to 240, "height" to 360, "minSize" to 1, "upscale" to 1)) }.getOrNull() ?: t }
+                PlexItem.from(JSONObject().put("ratingKey", local?.takeIf { it.isNotBlank() } ?: "wl:${m.optString("ratingKey")}")
+                    .put("type", m.optString("type")).put("title", m.optString("title")).put("guid", guid)
+                    .apply { m.num("year")?.let { put("year", it.toInt()) }; thumb?.let { put("thumb", it) } })
+            }
+        }.awaitAll()
+    }
+
+    /** null = this title can't be on the watchlist (not matched with Plex's agent) or no plex.tv sign-in for this user. */
+    suspend fun watchlisted(guid: String?): Boolean? {
+        if (discoverId(guid) == null) return null
+        return runCatching { watchlistRaw().any { it.optString("guid") == guid } }.getOrNull()
+    }
+
+    suspend fun setWatchlisted(guid: String?, on: Boolean) {
+        val id = discoverId(guid) ?: throw PlexError(400, "This title can't be added to the Plex watchlist")
+        val tok = watchlistToken() ?: throw PlexError(409, "The Plex watchlist needs this user's PIN once (switch to them with it).")
+        http("PUT", discoverUrl("/actions/${if (on) "addToWatchlist" else "removeFromWatchlist"}", mapOf("ratingKey" to id)), tok)
+        wlCache = null
     }
 
     // ------------------------------------------------------------------ playback

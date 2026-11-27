@@ -165,6 +165,7 @@ data class HomeSection(val id: String, val label: String, val pin: JSONObject? =
 
 val HOME_SECTIONS = listOf(
     HomeSection("continue", "Continue Watching"),
+    HomeSection("watchlist", "Plex Watchlist"),
     HomeSection("liveFavorites", "Live TV · Favorites"),
     HomeSection("recentMovies", "Recently Added Movies"),
     HomeSection("recentShows", "Recently Added TV Shows"),

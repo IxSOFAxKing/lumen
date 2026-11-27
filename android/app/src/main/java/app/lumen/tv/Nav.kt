@@ -65,6 +65,7 @@ object Nav {
     }
 
     fun openDetails(item: PlexItem) {
+        if (item.ratingKey.startsWith("wl:")) { Watchlist.openMissing(item); return } // watchlist title not in the library
         when (item.type) {
             "episode" -> item.grandparentRatingKey?.let { push(Screen.Detail(it, item.parentRatingKey, item.ratingKey)) } ?: push(Screen.Detail(item.ratingKey))
             "season" -> item.parentRatingKey?.let { push(Screen.Detail(it, item.ratingKey)) } ?: push(Screen.Detail(item.ratingKey))

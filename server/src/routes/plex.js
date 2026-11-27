@@ -45,7 +45,7 @@ r.get('/users', ah(async (req, res) => {
     let changed = false;
     for (const u of users) {
       const tok = shared.get(u.id);
-      if (!u.admin && tok && homeUsers[u.uuid]?.token !== tok) { homeUsers[u.uuid] = { title: u.title, thumb: u.thumb, admin: false, token: tok, restricted: u.restricted }; changed = true; }
+      if (!u.admin && tok && homeUsers[u.uuid]?.token !== tok) { homeUsers[u.uuid] = { ...homeUsers[u.uuid], title: u.title, thumb: u.thumb, admin: false, token: tok, restricted: u.restricted }; changed = true; }
       if (homeUsers[u.uuid] && homeUsers[u.uuid].restricted !== u.restricted) { homeUsers[u.uuid] = { ...homeUsers[u.uuid], restricted: u.restricted }; changed = true; }
     }
     if (changed) { plex.saveServer({ homeUsers }); Object.assign(c, { homeUsers }); }
@@ -74,7 +74,10 @@ r.post('/users/switch', ah(async (req, res) => {
     if (u.protected && !pin) return res.status(403).json({ error: 'This user needs a PIN', needsPin: true });
     token = await plex.switchHomeUser(u, pin);
   }
-  const homeUsers = { ...(c.homeUsers || {}), [u.uuid]: { title: u.title, thumb: u.thumb, admin: u.admin, token, restricted: u.restricted } };
+  const prev = c.homeUsers?.[u.uuid] || {};
+  // With the PIN at hand, also keep the user's plex.tv token (their Plex watchlist needs it).
+  const accountToken = prev.accountToken || (!u.admin && pin ? await plex.homeAccountToken(u.id, pin).catch(() => null) : null);
+  const homeUsers = { ...(c.homeUsers || {}), [u.uuid]: { ...prev, title: u.title, thumb: u.thumb, admin: u.admin, token, restricted: u.restricted, ...(accountToken ? { accountToken } : {}) } };
   plex.saveServer({ homeUsers, ...(makeDefault ? { defaultUser: u.uuid } : {}) });
   if (req.device) setDevicePlexUser(req.device.id, u.uuid);
   else {
@@ -303,7 +306,8 @@ const saveBadImages = () => setSetting('badPlexImages', Object.fromEntries([...b
 
 r.get('/image', ah(async (req, res) => {
   const path = String(req.query.path || '');
-  if (!path.startsWith('/')) return res.status(400).end();
+  // Plex server artwork (a path), or Plex's own artwork for watchlist titles (resized by the Plex server too).
+  if (!path.startsWith('/') && !/^https:\/\/(metadata-static\.plex\.tv|image\.tmdb\.org)\//.test(path)) return res.status(400).end();
   const w = Math.min(Number(req.query.w) || 400, 3840), h = Math.min(Number(req.query.h) || 600, 2160);
   if ((badImages.get(path) || 0) > Date.now()) return res.status(404).end();
   // Plex's photo transcoder is slow; keep resized artwork on disk.
@@ -573,6 +577,65 @@ r.get('/thumb/:partId/:ms', ah(async (req, res) => {
 }));
 
 /** Remove an item from Continue Watching (Plex's own action). */
+// ---------- Plex watchlist ----------
+// It lives on plex.tv, per Plex account: the owner's, a Home user's (fetched with the owner's token, or remembered
+// from their PIN) or that of someone signed in with their own Plex account.
+async function watchlistToken(req) {
+  const a = req.account;
+  if (a && a.role !== 'owner') return a.plex_token || null;
+  const u = selectedUser(req);
+  if (u && !u.admin) {
+    const c = plex.plexConf();
+    const hu = c.homeUsers?.[u.uuid] || {};
+    if (hu.accountToken) return hu.accountToken;
+    const info = (await plex.homeUsers().catch(() => [])).find(x => x.uuid === u.uuid);
+    const t = info ? await plex.homeAccountToken(info.id).catch(() => null) : null;
+    if (t) plex.saveServer({ homeUsers: { ...(plex.plexConf().homeUsers || {}), [u.uuid]: { ...hu, accountToken: t } } });
+    return t;
+  }
+  return plex.ownerAccountToken();
+}
+const noWatchlist = res => res.status(409).json({ error: 'The Plex watchlist needs a Plex sign-in: sign in with Plex (Settings → Plex), or switch to this user once with their PIN.' });
+
+/** Is a watchlist title in this Plex server? (by Plex's own id; cached 10 min) */
+async function localKey(guid) {
+  if (!guid) return null;
+  const j = await plex.plexCached('/library/all', { params: { guid } }, 600000).catch(() => null);
+  return MC(j).Metadata?.[0]?.ratingKey || null;
+}
+
+r.get('/watchlist', ah(async (req, res) => {
+  const token = await watchlistToken(req);
+  if (!token) return noWatchlist(res);
+  const list = await plex.watchlist(token, { fresh: req.query.fresh === '1' });
+  const out = [];
+  for (let i = 0; i < list.length; i += 8) {
+    out.push(...await Promise.all(list.slice(i, i + 8).map(async m => ({
+      ...m, local: await localKey(m.guid),
+      thumb: m.thumb ? `/api/plex/image?path=${encodeURIComponent(m.thumb)}&w=300&h=450` : null,
+      art: m.art ? `/api/plex/image?path=${encodeURIComponent(m.art)}&w=1280&h=720` : null,
+    }))));
+  }
+  res.json({ items: out });
+}));
+
+r.get('/watchlist/state', ah(async (req, res) => {
+  const guid = String(req.query.guid || '');
+  if (!plex.discoverId(guid)) return res.json({ available: false, on: false });
+  const token = await watchlistToken(req);
+  if (!token) return res.json({ available: false, on: false });
+  const list = await plex.watchlist(token).catch(() => null);
+  res.json({ available: !!list, on: !!list?.some(m => m.guid === guid) });
+}));
+
+r.post('/watchlist', ah(async (req, res) => {
+  const { guid, on = true } = req.body || {};
+  const token = await watchlistToken(req);
+  if (!token) return noWatchlist(res);
+  await plex.setWatchlisted(token, String(guid || ''), !!on);
+  res.json({ ok: true, on: !!on });
+}));
+
 r.post('/continue/remove/:key', ah(async (req, res) => {
   await plex.plexFetch('/actions/removeFromContinueWatching', { method: 'PUT', params: { ratingKey: req.params.key } }).catch(() => null);
   plex.clearPlexCache();

@@ -323,3 +323,56 @@ export async function sharedTokens() {
   sharedCache = { t: Date.now(), map };
   return map;
 }
+
+// ---------- Plex watchlist (plex.tv "Discover" service) ----------
+// The watchlist belongs to a plex.tv account, so it needs that person's plex.tv token (not the server token).
+
+const DISCOVER = 'https://discover.provider.plex.tv';
+
+/** plex.tv token of a Home user, fetched with the owner's token (works for users without a PIN). */
+export async function homeAccountToken(userId, pin) {
+  const { json, text } = await plexTv(`/api/home/users/${encodeURIComponent(userId)}/switch`, { method: 'POST', token: accountToken(), params: pin ? { pin } : {} });
+  return json?.authToken || json?.authenticationToken || json?.user?.authToken
+    || xmlElements(text, 'user')[0]?.authenticationToken || xmlElements(text, 'user')[0]?.authToken || null;
+}
+
+// The owner's server token is usually their plex.tv token too (when Plex was connected with a token, not a sign-in).
+export const ownerAccountToken = () => plexConf().accountToken || plexConf().token || null;
+
+async function discoverFetch(path, { token, method = 'GET', params = {} } = {}) {
+  const u = new URL(DISCOVER + path);
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null) u.searchParams.set(k, String(v));
+  const res = await fetch(u, { method, headers: plexHeaders({ 'X-Plex-Token': token }), signal: AbortSignal.timeout(15000) });
+  if (!res.ok) throw Object.assign(new Error(`plex.tv watchlist responded ${res.status}`), { status: res.status === 401 ? 401 : 502 });
+  const text = await res.text();
+  try { return text ? JSON.parse(text) : {}; } catch { return {}; }
+}
+
+const wlCache = new Map(); // token -> { t, items }
+/** The account's watchlist (newest first): [{ id, guid, type, title, year, thumb, art, summary }]. */
+export async function watchlist(token, { fresh = false } = {}) {
+  const hit = wlCache.get(token);
+  if (!fresh && hit && Date.now() - hit.t < 120000) return hit.items;
+  const items = [];
+  for (let start = 0; start < 1000; start += 100) {
+    const j = await discoverFetch('/library/sections/watchlist/all', { token, params: {
+      includeCollections: 1, includeExternalMedia: 1, sort: 'watchlistedAt:desc',
+      'X-Plex-Container-Start': start, 'X-Plex-Container-Size': 100 } });
+    const page = j?.MediaContainer?.Metadata || [];
+    items.push(...page.map(m => ({ id: m.ratingKey, guid: m.guid, type: m.type, title: m.title, year: m.year || null,
+      thumb: m.thumb || null, art: m.art || null, summary: m.summary || '' })));
+    if (page.length < 100) break;
+  }
+  wlCache.set(token, { t: Date.now(), items });
+  return items;
+}
+
+/** plex://movie/5d77… → the id plex.tv uses for that title. */
+export const discoverId = guid => (/^plex:\/\/(movie|show|season|episode)\/([0-9a-f]+)$/i.exec(guid || '') || [])[2] || null;
+
+export async function setWatchlisted(token, guid, on) {
+  const id = discoverId(guid);
+  if (!id) throw Object.assign(new Error('This title can\'t be added to the Plex watchlist (it isn\'t matched with Plex\'s own agent).'), { status: 400 });
+  await discoverFetch(`/actions/${on ? 'addToWatchlist' : 'removeFromWatchlist'}`, { token, method: 'PUT', params: { ratingKey: id } });
+  wlCache.delete(token);
+}

@@ -143,6 +143,10 @@ fun PortraitDetail(
                     if (onRestart != null) RoundAction(Ico.Restart, "Play from the beginning", onClick = onRestart)
                     item.trailer()?.let { t -> RoundAction(Ico.Movie, "Trailer") { Nav.play(t, resume = false) } }
                     RoundAction(Icons.Filled.Check, if (item.watched) "Mark unwatched" else "Mark watched", on = item.watched, onClick = onToggleWatched)
+                    val wl = rememberWatchlisted(item)
+                    val wlScope = androidx.compose.runtime.rememberCoroutineScope()
+                    val wlCtx = androidx.compose.ui.platform.LocalContext.current
+                    wl.value?.let { on -> RoundAction(if (on) Ico.BookmarkOn else Ico.Bookmark, if (on) "Remove from watchlist" else "Add to watchlist", on = on) { Watchlist.toggle(item, wl, wlScope, wlCtx) } }
                     RoundAction(Icons.Filled.MoreVert, "More") { Menus.item(item) }
                 }
             }

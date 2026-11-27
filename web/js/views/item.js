@@ -42,6 +42,26 @@ function watchedBtn(m, onDone) {
   }, { iconName: isWatched ? 'eyeoff' : 'check' });
 }
 
+/** Plex watchlist toggle (movies and shows; for a season or episode, its show). Hidden when the title can't be added. */
+function watchlistBtn(m) {
+  const guid = m.type === 'episode' ? m.grandparentGuid : m.type === 'season' ? m.parentGuid : m.guid;
+  if (!/^plex:\/\/(movie|show)\//.test(guid || '')) return null;
+  const label = m.type === 'episode' || m.type === 'season' ? 'show ' : '';
+  const b = btn('Watchlist', () => {}, { iconName: 'bookmark' });
+  b.style.display = 'none';
+  let on = false;
+  const draw = () => { b.innerHTML = `${icon(on ? 'bookmarkf' : 'bookmark')}<span>${on ? `On ${label ? 'your ' : ''}watchlist` : `Add ${label}to watchlist`}</span>`; };
+  api.get(`/api/plex/watchlist/state?guid=${encodeURIComponent(guid)}`).then(st => { if (!st.available) return; on = st.on; draw(); b.style.display = ''; }).catch(() => {});
+  b.onclick = async () => {
+    try {
+      await api.post('/api/plex/watchlist', { guid, on: !on });
+      on = !on; draw(); api.clearCache();
+      toast(on ? 'Added to your Plex watchlist' : 'Removed from your Plex watchlist', { type: 'ok' });
+    } catch (e) { toastErr(e); }
+  };
+  return b;
+}
+
 function episodeRow(ep) {
   const prog = ep.viewOffset && ep.duration ? ep.viewOffset / ep.duration : 0;
   return h('div', { class: `ep ${ep.viewCount > 0 || ep.viewOffset ? '' : 'unwatched'}`, onClick: () => playPlex(ep.ratingKey, { offset: (ep.viewOffset || 0) / 1000 }) },
@@ -88,6 +108,8 @@ async function itemView(el, route) {
     }, { iconName: 'shuffle' }));
   }
   actions.push(watchedBtn(m, reload));
+  const wl = watchlistBtn(m);
+  if (wl) actions.push(wl);
   el.append(hero(m, actions));
   const page = h('div', { class: 'page', style: { paddingTop: 0 } });
   el.append(page);

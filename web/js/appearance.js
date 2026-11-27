@@ -2,6 +2,7 @@
 
 export const HOME_SECTIONS = [
   { id: 'continue', label: 'Continue Watching', source: 'plex' },
+  { id: 'watchlist', label: 'Plex Watchlist', source: 'plex' },
   { id: 'liveFavorites', label: 'Live TV · Favorites', source: 'iptv' },
   { id: 'recentMovies', label: 'Recently Added Movies', source: 'plex' },
   { id: 'recentShows', label: 'Recently Added TV Shows', source: 'plex' },

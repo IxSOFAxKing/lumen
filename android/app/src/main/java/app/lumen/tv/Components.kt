@@ -264,6 +264,9 @@ fun PosterCard(item: PlexItem, memKey: String, onFocus: () -> Unit = {}, onMenu:
             if (item.poster == null) T(item.title, 13.sp, C.text2, maxLines = 3, modifier = Modifier.align(Alignment.Center).padding(8.dp))
             if (item.watched) WatchedBadge(Modifier.align(Alignment.TopEnd).padding(5.dp))
             if (item.progress > 0f) ProgressLine(item.progress, Modifier.align(Alignment.BottomStart).fillMaxWidth())
+            if (item.ratingKey.startsWith("wl:")) Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(Color.Black.copy(alpha = 0.7f)).padding(vertical = 3.dp), contentAlignment = Alignment.Center) {
+                T("Not in library", 10.sp, C.text2, FontWeight.SemiBold)
+            }
         }
         if (AppState.uiBool("showCardTitles", true)) {
             Spacer(Modifier.height(6.dp))

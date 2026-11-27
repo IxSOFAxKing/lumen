@@ -102,6 +102,7 @@ private suspend fun loadHome(): HomeData = coroutineScope {
     val plexJob = async { if (AppState.plexOnline) runCatching { Repo.plexHome() }.getOrNull() else null }
     val favJob = async { if (hasIptv && "liveFavorites" in ids) runCatching { Repo.favorites() }.getOrNull() else null }
     val histJob = async { if (hasIptv && "recentChannels" in ids) runCatching { Repo.history() }.getOrNull() else null }
+    val wlJob = async { if (AppState.plexOnline && "watchlist" in ids) runCatching { Plex.watchlist() }.getOrNull() else null }
     val pinJobs = sections.filter { it.pin != null }.associate { s -> s.id to async { runCatching { loadPin(s.pin!!) }.getOrNull() } }
 
     val plex = plexJob.await()
@@ -118,6 +119,7 @@ private suspend fun loadHome(): HomeData = coroutineScope {
             "plexHubs" -> hubs.filter { it !== cont && it.items.isNotEmpty() && it.id !in hiddenHubs }.forEach { h -> rows += HomeRow.Plex("hub:${h.id}", h.title, h.items, h.wide) }
             "playlists" -> plex?.optJSONArray("playlists").objects().map { PlexItem.from(it) }.takeIf { it.isNotEmpty() }?.let { rows += HomeRow.Plex("playlists", "Playlists", it, true) }
             "liveFavorites" -> favJob.await()?.takeIf { it.isNotEmpty() }?.let { rows += HomeRow.Channels("liveFavorites", "Live TV · Favorites", it) }
+            "watchlist" -> wlJob.await()?.takeIf { it.isNotEmpty() }?.let { rows += HomeRow.Plex("watchlist", "Watchlist", it.take(60), false) }
             "recentChannels" -> histJob.await()?.takeIf { it.isNotEmpty() }?.let { rows += HomeRow.Channels("recentChannels", "Recently Watched Channels", it.take(20)) }
             else -> pinJobs[s.id]?.await()?.let { rows += it }
         }

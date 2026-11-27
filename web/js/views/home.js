@@ -113,6 +113,10 @@ export default async function home(el) {
   const hideSection = id => () => saveUi({ homeHidden: [...new Set([...(ui().homeHidden || []), id])] });
   const put = (id, title, content, opts = {}) => { if (s[id]) s[id].replaceChildren(row(title, content, { onHide: hideSection(id), ...opts })); };
   const clear = id => s[id]?.replaceChildren();
+  // Plex watchlist (Settings → Home to hide it). Titles not in the library can be requested in Discover.
+  const loadWatchlist = () => api.cached('/api/plex/watchlist', 60000)
+    .then(d => d.items?.length ? put('watchlist', 'Watchlist', hrow(d.items.slice(0, 60).map(watchlistCard))) : clear('watchlist'))
+    .catch(() => clear('watchlist'));
 
   // ---- Plex ----
   if (store.plex?.configured && !store.plex.online) {
@@ -141,6 +145,7 @@ export default async function home(el) {
           });
         }));
       }
+      if (s.watchlist) loadWatchlist();
       if (playlists?.length) put('playlists', 'Playlists', hrow(playlists.map(p => plexCard(p, { wide: true })))); else clear('playlists');
     }).catch(e => { heroSlot.replaceChildren(); s.continue?.replaceChildren(empty('Could not load Plex', e.message)); clear('recentMovies'); });
   }
@@ -180,6 +185,19 @@ export default async function home(el) {
     if (prov?.vod_enabled && s.iptvMovies) vodRow('iptvMovies', 'movie', 'New Movies · IPTV');
     if (prov?.series_enabled && s.iptvSeries) vodRow('iptvSeries', 'series', 'New Series · IPTV');
   }
+}
+
+/** A Plex watchlist title: opens it when it's in the library, otherwise offers to request it (Discover). */
+export function watchlistCard(m) {
+  return card({
+    img: m.thumb, title: m.title, sub: m.year ? String(m.year) : (m.type === 'show' ? 'TV show' : ''),
+    corner: m.local ? null : 'Not in library',
+    onClick: () => {
+      if (m.local) return go(`#/item/${m.local}`);
+      if (store.discover) return go(`#/discover?q=${encodeURIComponent(m.title)}`);
+      toast(`${m.title} isn't in your Plex library yet`);
+    },
+  });
 }
 
 function pinLink(p) {

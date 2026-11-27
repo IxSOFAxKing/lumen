@@ -180,6 +180,10 @@ fun DetailScreen(s: Screen.Detail) {
                                     .onFailure { Toast.makeText(ctx, it.message, Toast.LENGTH_SHORT).show() }
                             }
                         }
+                        val wl = rememberWatchlisted(item)
+                        wl.value?.let { on ->
+                            PillButton(if (on) "On watchlist" else "Watchlist", if (on) Ico.BookmarkOn else Ico.Bookmark, memKey = "btn/watchlist") { Watchlist.toggle(item, wl, scope, ctx) }
+                        }
                     }
                 }
               }

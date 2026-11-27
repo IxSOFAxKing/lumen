@@ -72,6 +72,8 @@ class Prefs(context: Context) {
     var plexUrl: String? get() = s("plexUrl"); set(v) = s("plexUrl", v)
     /** Current Plex Home user (null = the account itself). */
     var plexUserToken: String? get() = s("plexUserToken"); set(v) = s("plexUserToken", v)
+    /** plex.tv token of the chosen Home user (their Plex watchlist needs it). */
+    var plexUserAccountToken: String? get() = s("plexUserAccountToken"); set(v) = s("plexUserAccountToken", v)
     var plexUserUuid: String? get() = s("plexUserUuid"); set(v) = s("plexUserUuid", v)
     var plexUserRestricted: Boolean get() = sp.getBoolean("plexUserRestricted", false); set(v) = sp.edit().putBoolean("plexUserRestricted", v).apply()
     var plexDefaultUser: String? get() = s("plexDefaultUser"); set(v) = s("plexDefaultUser", v)
