@@ -467,6 +467,27 @@ object Plex {
         wlCache = null
     }
 
+    // ------------------------------------------------------------------ subtitle search (Plex → OpenSubtitles)
+    /** Subtitles Plex can find online for this title, in [lang] (2-letter code). */
+    suspend fun searchSubtitles(ratingKey: String, lang: String): List<JSONObject> =
+        get("/library/metadata/${Uri.encode(ratingKey)}/subtitles", mapOf("language" to lang, "hearingImpaired" to 0, "forced" to 0)).optJSONArray("Stream").objects()
+
+    /** Ask Plex to download one of the search results and add it to the title. */
+    suspend fun downloadSubtitle(ratingKey: String, s: JSONObject) {
+        send("PUT", "/library/metadata/${Uri.encode(ratingKey)}/subtitles", mapOf(
+            "key" to s.str("key"), "codec" to s.str("codec"), "language" to (s.str("languageCode") ?: s.str("language")),
+            "hearingImpaired" to (if (s.optBoolean("hearingImpaired")) 1 else 0), "forced" to (if (s.optBoolean("forced")) 1 else 0),
+            "providerTitle" to s.str("providerTitle"), "title" to s.str("title"), "sourceKey" to s.str("sourceKey"),
+        ))
+        cache.clear()
+    }
+
+    /** Ids of the subtitle tracks the title has right now (straight from Plex, not cached). */
+    suspend fun subtitleIds(ratingKey: String): Set<Int> =
+        get("/library/metadata/${Uri.encode(ratingKey)}").optJSONArray("Metadata").objects().firstOrNull()?.optJSONArray("Media").objects()
+            .flatMap { m -> m.optJSONArray("Part").objects() }.flatMap { p -> p.optJSONArray("Stream").objects() }
+            .filter { it.optInt("streamType") == 3 }.map { it.optInt("id") }.toSet()
+
     // ------------------------------------------------------------------ playback
     private val NATIVE_CONTAINERS = setOf("mp4", "m4v", "mov", "webm", "mkv", "mpegts", "ts", "avi")
     private val NATIVE_VIDEO = setOf("h264", "hevc", "h265", "vp9", "av1", "vp8", "mpeg2video", "mpeg4")

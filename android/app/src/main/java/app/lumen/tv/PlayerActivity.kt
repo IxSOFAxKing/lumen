@@ -692,6 +692,48 @@ class PlayerActivity : ComponentActivity() {
         poke()
     }
 
+    /** Plex looks for subtitles online (OpenSubtitles) in your subtitle language; picking one adds it to the title. */
+    private fun subtitleSearch(src: PlexSource) {
+        val parent = st.panel
+        val lang = AppState.uiStr("subtitleLang").ifBlank { "en" }.take(2)
+        st.panel = Panel("Search for subtitles", listOf(PanelItem("Searching…")), 0, parent)
+        lifecycleScope.launch {
+            val found = runCatching { Plex.searchSubtitles(src.ratingKey, lang) }
+            val list = found.getOrNull()
+            st.panel = when {
+                list == null -> Panel("Search for subtitles", listOf(PanelItem("Plex couldn't search: ${found.exceptionOrNull()?.message ?: "error"}")), 0, parent)
+                list.isEmpty() -> Panel("Search for subtitles", listOf(PanelItem("Nothing found")), 0, parent)
+                else -> Panel("Subtitles found", list.take(40).map { s ->
+                    val label = listOfNotNull(s.str("displayTitle") ?: s.str("language"), if (s.optBoolean("hearingImpaired")) "SDH" else null,
+                        s.str("title")?.take(70), s.str("providerTitle")).joinToString(" · ")
+                    PanelItem(label) { downloadSubtitle(src, s) }
+                }, 0, parent)
+            }
+        }
+    }
+
+    private fun downloadSubtitle(src: PlexSource, s: JSONObject) {
+        st.panel = null
+        st.message = "Adding subtitles…"; hideAt = System.currentTimeMillis() + 20_000
+        lifecycleScope.launch {
+            val before = runCatching { Plex.subtitleIds(src.ratingKey) }.getOrDefault(emptySet())
+            val ok = runCatching { Plex.downloadSubtitle(src.ratingKey, s) }
+            if (ok.isFailure) { st.message = "Couldn't add them: ${ok.exceptionOrNull()?.message}"; hideAt = System.currentTimeMillis(); return@launch }
+            // Plex downloads them in the background: wait for the new track to appear, then switch to it.
+            var added: Int? = null
+            for (i in 0 until 20) {
+                delay(1000)
+                added = runCatching { Plex.subtitleIds(src.ratingKey) }.getOrNull()?.firstOrNull { it !in before }
+                if (added != null) break
+            }
+            hideAt = System.currentTimeMillis()
+            if (added == null) { st.message = "Plex is still fetching them — they'll be in the subtitle menu shortly"; return@launch }
+            st.message = "Subtitles added"
+            src.choose(subtitleId = added)
+            start(src, st.pos, keepState = true)
+        }
+    }
+
     /** Settings → Subtitles → Subtitles listed: only your subtitle language (default English) and tracks without a language. */
     private fun subShown(lang: String?): Boolean {
         if (AppState.uiStr("subtitleList", "mine") == "all") return true
@@ -754,6 +796,7 @@ class PlayerActivity : ComponentActivity() {
                 src.subtitles.forEach { s -> items += PanelItem(s.label, s.selected) { src.choose(subtitleId = s.id); start(src, st.pos, keepState = true) } }
             }
         }
+        if (src is PlexSource) items += PanelItem("Search for subtitles…") { subtitleSearch(src) }
         val first = items.indexOfFirst { !it.header && it.selected }.takeIf { it >= 0 } ?: items.indexOfFirst { !it.header }.coerceAtLeast(0)
         return Panel("Audio & subtitles", items, first)
     }
