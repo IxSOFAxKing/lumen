@@ -183,6 +183,7 @@ fun SettingsScreen() {
         item { SettingRow("Plex volume offset", label("plexVolumeOffset", VOL_OFFSET, 0), hint = "Make movies and shows louder or quieter than everything else") { cycle("plexVolumeOffset", VOL_OFFSET, 0, "Plex volume offset") } }
 
         item { Section("Subtitles") }
+        item { tog("Styled subtitles (ASS)", "assSubtitles", true, "Anime-style subtitles keep their fonts, colours and positions. Turn off if one misbehaves") }
         item { SettingRow("Subtitles listed", label("subtitleList", SUB_LIST, "mine"), hint = "Plex movies and shows: only your subtitle language (English unless you chose another) and tracks with no language") { cycle("subtitleList", SUB_LIST, "mine", "Subtitles listed") } }
         item { SettingRow("Subtitle size", label("subtitleSize", SUB_SIZE, 100)) { cycle("subtitleSize", SUB_SIZE, 100, "Subtitle size") } }
         item { SettingRow("Subtitle colour", label("subtitleColor", SUB_COLOR, "#ffffff")) { cycle("subtitleColor", SUB_COLOR, "#ffffff", "Subtitle colour") } }

@@ -1,5 +1,7 @@
 package app.lumen.tv
 
+import io.github.peerless2012.ass.media.kt.buildWithAssSupport
+import io.github.peerless2012.ass.media.type.AssRenderType
 import android.graphics.Color as AColor
 import android.net.Uri
 import android.os.Bundle
@@ -148,7 +150,12 @@ class PlayerActivity : ComponentActivity() {
         val early = intent.getStringExtra("req")?.let { runCatching { JSONObject(it) }.getOrNull() }
         val adopted = if (early?.optString("kind") == "live") Preview.takeForFull(early.optString("providerId"), early.optString("channelId")) else null
         adoptedDesc = adopted?.second
-        exo = adopted?.first ?: ExoPlayer.Builder(applicationContext, renderers)
+        exo = adopted?.first ?: if (AppState.uiBool("assSubtitles", true)) {
+            // Styled ASS / SSA subtitles drawn by libass (as pictures, so styling, fonts and positions are kept).
+            ExoPlayer.Builder(applicationContext).setLoadControl(load).buildWithAssSupport(
+                applicationContext, AssRenderType.CUES, dataSourceFactory = http, renderersFactory = renderers,
+            )
+        } else ExoPlayer.Builder(applicationContext, renderers)
             .setMediaSourceFactory(DefaultMediaSourceFactory(http))
             .setLoadControl(load)
             .build()

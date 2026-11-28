@@ -68,13 +68,15 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-process:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
-    implementation("androidx.media3:media3-exoplayer:1.5.1")
-    implementation("androidx.media3:media3-exoplayer-hls:1.5.1")
-    implementation("androidx.media3:media3-ui:1.5.1")
-    implementation("androidx.media3:media3-datasource:1.5.1")
+    implementation("androidx.media3:media3-exoplayer:1.8.0")
+    implementation("androidx.media3:media3-exoplayer-hls:1.8.0")
+    implementation("androidx.media3:media3-ui:1.8.0")
+    implementation("androidx.media3:media3-datasource:1.8.0")
     // Software audio decoders (FFmpeg: AC-3, E-AC-3, DTS, TrueHD…), like Plex's own app: used when the TV / soundbar
     // can't take the sound as it is and the device has no decoder for it. Prebuilt by the Jellyfin project.
-    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.5.0+1")
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.8.0+1")
+    // Styled ASS / SSA subtitles (anime etc.) drawn by libass, like mpv and Plex: fonts, positions, colours.
+    implementation("io.github.peerless2012:ass-media:0.5.1")
     implementation("com.google.zxing:core:3.5.3")
 
     // Native TV interface (Jetpack Compose)
