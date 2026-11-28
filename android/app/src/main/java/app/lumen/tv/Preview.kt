@@ -43,6 +43,28 @@ object Preview {
     /** The full-screen player's running stream, handed over on Back so the preview continues without reloading. */
     var handoff: Triple<Channel, ExoPlayer, Desc>? = null
 
+    /** The preview's own running stream (TV), so opening full screen on that channel can carry on with it. */
+    var playing: Triple<Channel, ExoPlayer, Desc>? = null
+    /** Lent to the full-screen player that's opening (taken in its onCreate). */
+    var toFull: Triple<Channel, ExoPlayer, Desc>? = null
+
+    /** Full screen is opening on [ch]: if the preview is playing it, hand its player over (no reconnect, same sound). */
+    fun lendToFull(ch: Channel) {
+        toFull?.let { (_, p, d) -> p.release(); AppScope.launch { Playback.release(d) } }
+        val p = playing
+        toFull = if (p != null && p.first.id == ch.id && p.first.providerId == ch.providerId) p else null
+        if (toFull != null) playing = null
+    }
+
+    fun takeForFull(providerId: String, channelId: String): Pair<ExoPlayer, Desc>? {
+        val t = toFull ?: return null
+        toFull = null
+        if (t.first.id.toString() != channelId || t.first.providerId.toString() != providerId) {
+            t.second.release(); AppScope.launch { Playback.release(t.third) }; return null
+        }
+        return t.second to t.third
+    }
+
     fun take(ch: Channel): Pair<ExoPlayer, Desc>? {
         val h = handoff ?: return null
         handoff = null
@@ -181,6 +203,8 @@ fun LivePreview(ch: Channel, modifier: Modifier = Modifier) {
         onDispose {
             exo.removeListener(l)
             exo.removeListener(la)
+            if (Preview.toFull?.second === exo) return@onDispose // carried on by the full-screen player
+            if (Preview.playing?.second === exo) Preview.playing = null
             Volume.release(exo)
             exo.release()
             desc?.let { d -> AppScope.launch { Playback.release(d) } }
@@ -195,6 +219,7 @@ fun LivePreview(ch: Channel, modifier: Modifier = Modifier) {
         exo.prepare()
         exo.playWhenReady = true
     }
+    LaunchedEffect(exo, desc) { desc?.let { Preview.playing = Triple(ch, exo, it) } }
     LaunchedEffect(exo) { while (true) { delay(20_000); desc?.let { Playback.ping(it) } } }
     AndroidView(
         factory = { PlayerView(it).apply { useController = false; isFocusable = false; resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT; setShutterBackgroundColor(android.graphics.Color.BLACK) } },
@@ -238,6 +263,7 @@ object Volume {
                 apply(exo, liveOf[exo] ?: live, exo.audioSessionId)
             }
         })
+        applyLeveller(exo, session)
         val g = gainMb(live) + surroundMb(exo)
         runCatching { exo.volume = if (g < 0) Math.pow(10.0, g / 2000).toFloat().coerceIn(0f, 1f) else 1f }
         enhancers.remove(exo)?.let { runCatching { it.release() } }
@@ -245,5 +271,45 @@ object Volume {
         runCatching { android.media.audiofx.LoudnessEnhancer(session).apply { setTargetGain(g.toInt()); enabled = true } }.getOrNull()?.let { enhancers[exo] = it }
     }
 
-    @Synchronized fun release(exo: androidx.media3.exoplayer.ExoPlayer) { enhancers.remove(exo)?.let { runCatching { it.release() } } }
+    @Synchronized fun release(exo: androidx.media3.exoplayer.ExoPlayer) {
+        enhancers.remove(exo)?.let { runCatching { it.release() } }
+        levellers.remove(exo)?.let { runCatching { it.release() } }
+    }
+
+    // ---------- Settings → Audio → Volume leveller (Android 9+) ----------
+    // A compressor on the player's sound: quiet scenes and channels come up, loud ones (ads, explosions) come down.
+    // "night" squeezes harder, for late-night viewing with dialogue still clear.
+    private val levellers = java.util.WeakHashMap<androidx.media3.exoplayer.ExoPlayer, android.media.audiofx.DynamicsProcessing>()
+
+    private fun applyLeveller(exo: androidx.media3.exoplayer.ExoPlayer, session: Int) {
+        levellers.remove(exo)?.let { runCatching { it.release() } }
+        val mode = AppState.uiStr("leveller", "off")
+        if (mode == "off" || android.os.Build.VERSION.SDK_INT < 28 || session == androidx.media3.common.C.AUDIO_SESSION_ID_UNSET) return
+        if (AppState.uiStr("audioOutput", "auto") == "passthrough") return // a receiver gets the untouched sound
+        val channels0 = (channelsOf[exo] ?: exo.audioFormat?.channelCount ?: 2).coerceIn(1, 8)
+        if (android.os.Build.VERSION.SDK_INT >= 28) {
+            val dp = try { newLeveller(session, channels0, mode == "night") } catch (e: Exception) { null }
+            if (dp != null) levellers[exo] = dp
+        }
+    }
+
+    @androidx.annotation.RequiresApi(28)
+    private fun newLeveller(session: Int, channels: Int, night: Boolean): android.media.audiofx.DynamicsProcessing {
+        run {
+            val cfg = android.media.audiofx.DynamicsProcessing.Config.Builder(
+                android.media.audiofx.DynamicsProcessing.VARIANT_FAVOR_TIME_RESOLUTION, channels,
+                false, 0, true, 1, false, 0, true,
+            ).build()
+            val band = android.media.audiofx.DynamicsProcessing.MbcBand(
+                true, 20000f, 10f, if (night) 250f else 400f,   // all frequencies; attack / release (ms)
+                if (night) 6f else 3f,                          // ratio
+                if (night) -38f else -30f,                      // threshold (dB)
+                6f, -90f, 1f,                                    // knee, noise gate (off), expander ratio
+                0f, if (night) 12f else 8f,                      // pre-gain, make-up gain (dB)
+            )
+            val limiter = android.media.audiofx.DynamicsProcessing.Limiter(true, true, 0, 1f, 60f, 10f, if (night) -4f else -1.5f, 0f)
+            for (c in 0 until channels) { cfg.setMbcBandByChannelIndex(c, 0, band); cfg.setLimiterByChannelIndex(c, limiter) }
+            return android.media.audiofx.DynamicsProcessing(0, session, cfg).apply { enabled = true }
+        }
+    }
 }

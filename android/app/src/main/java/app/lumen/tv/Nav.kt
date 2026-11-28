@@ -87,6 +87,7 @@ object Nav {
     }
 
     fun playLive(ch: Channel, list: List<Channel>, groupName: String) {
+        if (AppState.isTv) Preview.lendToFull(ch)
         Preview.pausedForPlayer = true
         Playback.zapList = list.ifEmpty { listOf(ch) }
         Playback.zapTitle = groupName

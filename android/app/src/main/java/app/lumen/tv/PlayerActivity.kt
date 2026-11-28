@@ -144,7 +144,11 @@ class PlayerActivity : ComponentActivity() {
         val renderers = lumenRenderers(applicationContext)
         // Bigger buffers than the default smooth out IPTV streams.
         val load = DefaultLoadControl.Builder().setBufferDurationsMs(20_000, 60_000, 1_500, 3_000).build()
-        exo = ExoPlayer.Builder(applicationContext, renderers)
+        // Opened from the Live TV preview on the channel it's playing: carry on with the preview's player and stream.
+        val early = intent.getStringExtra("req")?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val adopted = if (early?.optString("kind") == "live") Preview.takeForFull(early.optString("providerId"), early.optString("channelId")) else null
+        adoptedDesc = adopted?.second
+        exo = adopted?.first ?: ExoPlayer.Builder(applicationContext, renderers)
             .setMediaSourceFactory(DefaultMediaSourceFactory(http))
             .setLoadControl(load)
             .build()
@@ -286,14 +290,16 @@ class PlayerActivity : ComponentActivity() {
                 src.prepare()
                 st.title = src.title; st.subtitle = src.subtitle
                 st.poster = src.poster; st.context = src.context; st.metaLine = src.metaLine
-                val d = src.open(offset, mode)
+                val carried = adoptedDesc?.takeIf { src is LiveSource && mode == null }
+                adoptedDesc = null
+                val d = carried ?: src.open(offset, mode)
                 if (d.url.isBlank()) throw IllegalStateException("The server didn't return a stream")
                 desc = d
                 pendingAudio = d.raw.optInt("audioIndex", -1).takeIf { it >= 0 && d.method.startsWith("direct") }
                 st.method = d.method
                 st.chapters = if (AppState.uiBool("chapterMarks", true) && src.duration > 0) src.chapters.drop(1).map { (it.start / src.duration).toFloat() } else emptyList()
                 st.buttons = buildButtons(src)
-                play(d)
+                if (carried != null) { st.buffering = exo.playbackState == Player.STATE_BUFFERING; exo.playWhenReady = true } else play(d)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 showError(e.message ?: "Couldn't start playback")
@@ -839,6 +845,8 @@ class PlayerActivity : ComponentActivity() {
 
     // ---------- subtitle sync ----------
     private var pickSynced = false
+    /** The Live TV preview's stream, carried on instead of opening the channel again. */
+    private var adoptedDesc: Desc? = null
     /** The audio decoder in use (null = passthrough / none), for Playback info. */
     private var audioDecoder: String? = null
     private var noSoundFor: Desc? = null
