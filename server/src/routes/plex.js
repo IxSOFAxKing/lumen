@@ -431,7 +431,7 @@ r.post('/play', ah(async (req, res) => {
     markers: meta.Marker || [], chapters: meta.Chapter || [],
     media: (meta.Media || []).map((m, i) => ({ index: i, label: `${m.videoResolution || ''}${/^\d+$/.test(m.videoResolution) ? 'p' : ''} ${m.videoCodec || ''} ${m.container || ''}`.trim(), bitrate: m.bitrate })),
     audio: streams.filter(s => s.streamType === 2).map(s => ({ id: s.id, label: s.displayTitle || s.language || `Track ${s.index}`, selected: s.id === selAudio?.id })),
-    subtitles: streams.filter(s => s.streamType === 3).map(s => ({ id: s.id, label: s.displayTitle || s.language || 'Subtitle', selected: s.id === selSub?.id })),
+    subtitles: streams.filter(s => s.streamType === 3).map(s => ({ id: s.id, lang: langOf(s), label: s.extendedDisplayTitle || s.displayTitle || s.language || 'Subtitle', selected: s.id === selSub?.id })),
     quality, sourceBitrate: media.bitrate, network: local ? 'local' : 'remote',
   };
 

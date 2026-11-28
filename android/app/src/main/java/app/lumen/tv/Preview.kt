@@ -217,8 +217,28 @@ object Volume {
         return maxMb + offsetDb * 100
     }
 
+    private val liveOf = java.util.WeakHashMap<androidx.media3.exoplayer.ExoPlayer, Boolean>()
+    private val channelsOf = java.util.WeakHashMap<androidx.media3.exoplayer.ExoPlayer, Int>()
+
+    /**
+     * Surround sound (5.1 / 7.1) decoded for the TV's own speakers is mixed down to stereo, and Android lowers the level
+     * when it does that: E-AC3 5.1 then sounds much quieter than a stereo AAC track. Settings → Audio → Surround boost.
+     */
+    private fun surroundMb(exo: androidx.media3.exoplayer.ExoPlayer): Double {
+        val ch = channelsOf[exo] ?: exo.audioFormat?.channelCount ?: 0
+        if (ch <= 2 || AppState.uiStr("audioOutput", "auto") == "passthrough") return 0.0
+        return AppState.uiNum("surroundBoost", 6.0) * 100
+    }
+
     @Synchronized fun apply(exo: androidx.media3.exoplayer.ExoPlayer, live: Boolean, session: Int) {
-        val g = gainMb(live)
+        // Re-applied whenever the sound format changes (another channel, another audio track).
+        if (liveOf.put(exo, live) == null) exo.addAnalyticsListener(object : androidx.media3.exoplayer.analytics.AnalyticsListener {
+            override fun onAudioInputFormatChanged(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, format: androidx.media3.common.Format, decoderReuseEvaluation: androidx.media3.exoplayer.DecoderReuseEvaluation?) {
+                channelsOf[exo] = format.channelCount
+                apply(exo, liveOf[exo] ?: live, exo.audioSessionId)
+            }
+        })
+        val g = gainMb(live) + surroundMb(exo)
         runCatching { exo.volume = if (g < 0) Math.pow(10.0, g / 2000).toFloat().coerceIn(0f, 1f) else 1f }
         enhancers.remove(exo)?.let { runCatching { it.release() } }
         if (g <= 0 || session == androidx.media3.common.C.AUDIO_SESSION_ID_UNSET) return

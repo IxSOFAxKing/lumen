@@ -177,12 +177,13 @@ private fun HomeContent(d: HomeData) {
     val listState = rememberLazyListState()
     val showBillboard = d.featured.isNotEmpty() && !AppState.uiList("homeHidden").contains("hero")
     var featIndex by remember { mutableStateOf(mem.data["featIndex"] as? Int ?: 0) }
-    var billboardFocused by remember { mutableStateOf(showBillboard && !mem.restorePending) }
+    // Home always starts on the first title of the first row; the banner is reached with ▲ from there.
+    var billboardFocused by remember { mutableStateOf(false) }
     val focusTarget = remember { mutableStateOf<Hero?>(null) }
     val hero = remember { mutableStateOf(d.featured.getOrNull(featIndex)?.let { Hero.of(it) } ?: d.rows.firstOrNull()?.let { r -> (r as? HomeRow.Plex)?.items?.firstOrNull()?.let { Hero.of(it) } }) }
     val playFr = remember { FocusRequester() }
     val firstCardFr = remember { FocusRequester() }
-    InitialFocus(if (showBillboard) playFr else firstCardFr)
+    InitialFocus(if (d.rows.isNotEmpty() || !showBillboard) firstCardFr else playFr)
     // Once you move down into the rows the banner shrinks, giving the rows more room (like Netflix).
     var rowIdx by remember { mutableIntStateOf(0) }
     var bbBtn by remember { mutableIntStateOf(0) }
@@ -204,7 +205,12 @@ private fun HomeContent(d: HomeData) {
 
     Box(Modifier.fillMaxSize()) {
         HeroBackdrop(hero)
-        TvTopBar(Modifier.align(Alignment.TopEnd))
+        // ▼ from the clock / profile button goes to the banner (or the first row), not the card that happens to be below.
+        TvTopBar(Modifier.align(Alignment.TopEnd).onPreviewKeyEvent { ev ->
+            if (ev.type == KeyEventType.KeyDown && ev.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN) {
+                runCatching { (if (showBillboard) playFr else firstCardFr).requestFocus() }; true
+            } else false
+        })
         Column(Modifier.fillMaxSize()) {
             HeroInfoOf(hero, compact, Modifier.fillMaxWidth().height(heroH).padding(start = 20.dp, top = if (compact) 22.dp else 34.dp, end = if (LocalPortrait.current) 20.dp else 360.dp))
             if (showBillboard) {

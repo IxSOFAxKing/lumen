@@ -177,10 +177,12 @@ fun SettingsScreen() {
         item { SettingRow("Audio output", label("audioOutput", AUDIO_OUT, "auto"), hint = "Passthrough sends Dolby / DTS / Atmos untouched to a receiver or soundbar that supports them") { cycle("audioOutput", AUDIO_OUT, "auto", "Audio output") } }
         item { SettingRow("Maximum volume", label("maxVolume", MAX_VOL, 100)) { cycle("maxVolume", MAX_VOL, 100, "Maximum volume") } }
         item { SettingRow("Live TV audio track", label("liveAudioTrack", LIVE_AUDIO, "aac"), hint = "Channels with both AAC and Dolby (E-AC-3) sound start on AAC, which is usually louder") { cycle("liveAudioTrack", LIVE_AUDIO, "aac", "Live TV audio track") } }
+        item { SettingRow("Surround boost (TV speakers)", label("surroundBoost", SURROUND, 6), hint = "5.1 / 7.1 sound mixed down for the TV's speakers plays quieter than stereo: this evens it out") { cycle("surroundBoost", SURROUND, 6, "Surround boost") } }
         item { SettingRow("Live TV volume offset", label("liveVolumeOffset", VOL_OFFSET, 0), hint = "Make IPTV channels louder or quieter than everything else") { cycle("liveVolumeOffset", VOL_OFFSET, 0, "Live TV volume offset") } }
         item { SettingRow("Plex volume offset", label("plexVolumeOffset", VOL_OFFSET, 0), hint = "Make movies and shows louder or quieter than everything else") { cycle("plexVolumeOffset", VOL_OFFSET, 0, "Plex volume offset") } }
 
         item { Section("Subtitles") }
+        item { SettingRow("Subtitles listed", label("subtitleList", SUB_LIST, "mine"), hint = "Plex movies and shows: only your subtitle language (English unless you chose another) and tracks with no language") { cycle("subtitleList", SUB_LIST, "mine", "Subtitles listed") } }
         item { SettingRow("Subtitle size", label("subtitleSize", SUB_SIZE, 100)) { cycle("subtitleSize", SUB_SIZE, 100, "Subtitle size") } }
         item { SettingRow("Subtitle colour", label("subtitleColor", SUB_COLOR, "#ffffff")) { cycle("subtitleColor", SUB_COLOR, "#ffffff", "Subtitle colour") } }
         item { SettingRow("Subtitle background", label("subtitleBg", SUB_BG, 60)) { cycle("subtitleBg", SUB_BG, 60, "Subtitle background") } }
@@ -365,6 +367,8 @@ private fun Toggle(label: String, on: Boolean, onClick: () -> Unit) = SettingRow
 
 private val LIVE_AUDIO = listOf(Opt("aac", "AAC when available"), Opt("auto", "Automatic"))
 private val AUDIO_OUT = listOf(Opt("auto", "Decode in the app (like Plex)"), Opt("passthrough", "Passthrough to receiver / soundbar"), Opt("stereo", "Stereo (decode and mix down)"))
+private val SUB_LIST = listOf(Opt("mine", "Only my language"), Opt("all", "All languages"))
+private val SURROUND = listOf(Opt(0, "Off"), Opt(3, "+3 dB"), Opt(6, "+6 dB"), Opt(9, "+9 dB"), Opt(12, "+12 dB"))
 private val VOL_OFFSET = listOf(Opt(-6, "−6 dB (quieter)"), Opt(-3, "−3 dB"), Opt(0, "Off"), Opt(3, "+3 dB"), Opt(6, "+6 dB"), Opt(9, "+9 dB"), Opt(12, "+12 dB (loudest)"))
 private val MAX_VOL = listOf(Opt(100, "100%"), Opt(125, "125%"), Opt(150, "150%"), Opt(200, "200%"))
 private val SUB_SIZE = listOf(Opt(75, "Small"), Opt(100, "Normal"), Opt(125, "Large"), Opt(150, "Extra large"))

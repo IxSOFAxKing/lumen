@@ -553,7 +553,8 @@ object Plex {
                 JSONObject().put("index", i).put("label", "${res}${if (res.all { it.isDigit() } && res.isNotEmpty()) "p" else ""} ${m.optString("videoCodec")} ${m.optString("container")}".trim()).put("bitrate", m.optInt("bitrate"))
             }))
             .put("audio", JSONArray(streams.filter { it.optInt("streamType") == 2 }.map { s -> JSONObject().put("id", s.optInt("id")).put("label", s.str("displayTitle") ?: s.str("language") ?: "Track ${s.optInt("index")}").put("selected", s.optInt("id") == selAudio?.optInt("id")) }))
-            .put("subtitles", JSONArray(streams.filter { it.optInt("streamType") == 3 }.map { s -> JSONObject().put("id", s.optInt("id")).put("label", s.str("displayTitle") ?: s.str("language") ?: "Subtitle").put("selected", s.optInt("id") == selSub?.optInt("id")).put("key", s.str("key")) }))
+            .put("subtitles", JSONArray(streams.filter { it.optInt("streamType") == 3 }.map { s -> JSONObject().put("id", s.optInt("id")).put("lang", langOf(s))
+                .put("label", s.str("extendedDisplayTitle") ?: s.str("displayTitle") ?: s.str("language") ?: "Subtitle").put("selected", s.optInt("id") == selSub?.optInt("id")).put("key", s.str("key")) }))
             .put("quality", quality).put("sourceBitrate", media.optInt("bitrate")).put("network", if (isLocal) "local" else "remote")
 
         if (direct && wantsOriginal && !body.optBoolean("forceTranscode")) {

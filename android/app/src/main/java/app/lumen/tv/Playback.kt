@@ -34,7 +34,7 @@ data class Desc(
 }
 
 data class Marker(val type: String, val start: Double, val end: Double)
-data class StreamOpt(val id: Int, val label: String, val selected: Boolean)
+data class StreamOpt(val id: Int, val label: String, val selected: Boolean, val lang: String? = null)
 
 /** Next more-compatible way to play after an error: original file → Plex direct stream → Plex transcode. */
 fun nextMode(d: Desc): String? {
@@ -143,7 +143,7 @@ class PlexSource(override val ratingKey: String, private val queue: List<String>
         return if (force) fromChapters.ifEmpty { plex } else plex + fromChapters
     }
     override val audio get() = last.optJSONArray("audio").objects().map { StreamOpt(it.optInt("id"), it.optString("label"), it.optBoolean("selected")) }
-    override val subtitles get() = last.optJSONArray("subtitles").objects().map { StreamOpt(it.optInt("id"), it.optString("label"), it.optBoolean("selected")) }
+    override val subtitles get() = last.optJSONArray("subtitles").objects().map { StreamOpt(it.optInt("id"), it.optString("label"), it.optBoolean("selected"), it.str("lang")) }
     override val hasNext get() = nextItem != null
     override val hasPrev get() = prevItem != null
     override val poster get() = meta?.poster?.let { Net.plexImg(it, 240, 360) }

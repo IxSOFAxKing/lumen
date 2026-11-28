@@ -679,6 +679,14 @@ class PlayerActivity : ComponentActivity() {
         poke()
     }
 
+    /** Settings → Subtitles → Subtitles listed: only your subtitle language (default English) and tracks without a language. */
+    private fun subShown(lang: String?): Boolean {
+        if (AppState.uiStr("subtitleList", "mine") == "all") return true
+        val l = lang?.lowercase()?.takeIf { it.isNotBlank() && it != "und" } ?: return true
+        val want = AppState.uiStr("subtitleLang").ifBlank { "en" }.lowercase().take(2)
+        return l.take(2) == want
+    }
+
     private fun langName(f: Format): String? = f.language?.takeIf { it != "und" }?.let { Locale.forLanguageTag(it).displayLanguage.takeIf { n -> n.isNotBlank() } ?: it }
 
     private fun tracksPanel(src: Source): Panel {
@@ -691,7 +699,7 @@ class PlayerActivity : ComponentActivity() {
             src.audio.forEach { a -> items += PanelItem(a.label, a.selected) { src.choose(audioId = a.id); start(src, st.pos, keepState = true) } }
             items += PanelItem("Subtitles", header = true)
             items += PanelItem("Off", src.subtitles.none { it.selected }) { src.choose(subtitleId = 0); start(src, st.pos, keepState = true) }
-            src.subtitles.forEach { s -> items += PanelItem(s.label, s.selected) { src.choose(subtitleId = s.id); start(src, st.pos, keepState = true) } }
+            src.subtitles.filter { it.selected || subShown(it.lang) }.forEach { s -> items += PanelItem(s.label, s.selected) { src.choose(subtitleId = s.id); start(src, st.pos, keepState = true) } }
         } else {
             val groups = exo.currentTracks.groups
             items += PanelItem("Audio", header = true)
@@ -716,7 +724,12 @@ class PlayerActivity : ComponentActivity() {
             textGroups.forEach { g ->
                 for (i in 0 until g.length) {
                     val f = g.getTrackFormat(i)
-                    val label = listOfNotNull(f.label ?: langName(f) ?: "Subtitle", if ((f.selectionFlags and C.SELECTION_FLAG_FORCED) != 0) "Forced" else null).joinToString(" · ")
+                    if (!g.isTrackSelected(i) && !subShown(f.language)) continue
+                    // The language first, then the track's own title ("English · SDH"), so a track titled only "SDH" still says which language it is.
+                    val lang = langName(f) ?: "Unknown language"
+                    val label = listOfNotNull(lang, f.label?.takeIf { !it.equals(lang, true) },
+                        if ((f.roleFlags and C.ROLE_FLAG_DESCRIBES_MUSIC_AND_SOUND) != 0 && f.label?.contains("SDH", true) != true) "SDH" else null,
+                        if ((f.selectionFlags and C.SELECTION_FLAG_FORCED) != 0) "Forced" else null).joinToString(" · ")
                     items += PanelItem(label, g.isTrackSelected(i)) {
                         exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
                             .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, i)).build()
