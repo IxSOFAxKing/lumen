@@ -97,17 +97,28 @@ function startSession(req, res, account = null) {
 }
 
 // Slow down password guessing: after 5 failures from an address, wait a minute.
-const failures = new Map(); // ip -> { n, until }
+// Wrong passwords: 5 in a row from one address → wait a minute; 10 → 15 minutes. Addresses can be faked behind a
+// proxy, so there's also a limit for everyone together: after 30 wrong passwords in 15 minutes, logins pause for a minute.
+const failures = new Map(); // ip -> { n, until, last }
+let recentFails = [];
 function throttled(ip) {
+  const now = Date.now();
   const f = failures.get(ip);
-  return f && f.n >= 5 && Date.now() < f.until;
+  if (f && f.n >= 5 && now < f.until) return true;
+  recentFails = recentFails.filter(t => now - t < 15 * 60000);
+  return recentFails.length >= 30 && now - recentFails[recentFails.length - 1] < 60000;
 }
-function failed(ip) {
-  const f = failures.get(ip) || { n: 0, until: 0 };
-  if (Date.now() > f.until) f.n = 0;
-  f.n++; f.until = Date.now() + 60000;
+export function failed(ip) {
+  const now = Date.now();
+  const f = failures.get(ip) || { n: 0, until: 0, last: 0 };
+  if (now - f.last > 30 * 60000) f.n = 0; // forgotten after half an hour without mistakes
+  f.n++; f.last = now;
+  f.until = now + (f.n >= 10 ? 15 * 60000 : 60000);
   failures.set(ip, f);
+  recentFails.push(now);
+  if (f.n >= 5) console.warn(`[auth] ${f.n} wrong passwords from ${ip}: paused for ${f.n >= 10 ? '15 minutes' : 'a minute'}`);
 }
+export { throttled as loginThrottled };
 
 export function status(req, res) {
   const authed = isAuthed(req);

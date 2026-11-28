@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from './config.js';
+import { enc, dec, isEncrypted } from './secrets.js';
 
 export const db = new DatabaseSync(path.join(config.dataDir, 'lumen.db'));
 db.exec(`PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;`);
@@ -161,13 +162,33 @@ if (!db.prepare('PRAGMA table_info(favorites)').all().some(c => c.name === 'list
 const getStmt = db.prepare('SELECT value FROM settings WHERE key = ?');
 const setStmt = db.prepare('INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
 
+// Settings that hold tokens / keys are stored encrypted (see secrets.js).
+const SECRET_SETTINGS = new Set(['plex', 'overseerr']);
 export function getSetting(key, fallback = null) {
   const row = getStmt.get(key);
   if (!row) return fallback;
-  try { return JSON.parse(row.value); } catch { return row.value; }
+  const raw = SECRET_SETTINGS.has(key) ? dec(row.value) : row.value;
+  if (raw === null) return fallback;
+  try { return JSON.parse(raw); } catch { return raw; }
 }
 export function setSetting(key, value) {
-  setStmt.run(key, JSON.stringify(value));
+  const json = JSON.stringify(value);
+  setStmt.run(key, SECRET_SETTINGS.has(key) ? enc(json) : json);
+}
+
+// Encrypt what older versions stored in plain text (once; harmless to repeat).
+export function encryptStoredSecrets() {
+  for (const key of SECRET_SETTINGS) {
+    const row = getStmt.get(key);
+    if (row && !isEncrypted(row.value)) setStmt.run(key, enc(row.value));
+  }
+  for (const p of db.prepare("SELECT id, password FROM providers WHERE password IS NOT NULL AND password != ''").all())
+    if (!isEncrypted(p.password)) db.prepare('UPDATE providers SET password = ? WHERE id = ?').run(enc(p.password), p.id);
+  try {
+    for (const a of db.prepare('SELECT plex_id, plex_token, server_token FROM accounts').all())
+      if ((a.plex_token && !isEncrypted(a.plex_token)) || (a.server_token && !isEncrypted(a.server_token)))
+        db.prepare('UPDATE accounts SET plex_token = ?, server_token = ? WHERE plex_id = ?').run(enc(a.plex_token), enc(a.server_token), a.plex_id);
+  } catch { /* accounts table not created yet */ }
 }
 
 export function tx(fn) {

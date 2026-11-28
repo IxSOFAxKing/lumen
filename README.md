@@ -150,6 +150,15 @@ By default Plex content is transcoded by **your Plex Media Server**. That handle
 
 Volumes: `/config` (SQLite database, settings, EPG), `/recordings` (DVR files), `/transcode` (scratch space; a RAM `tmpfs` by default).
 
+## Backups and stored secrets
+
+- Every night Lumen saves a copy of its database to `data/backups/lumen-YYYY-MM-DD.db` and keeps the last 7. Favourites,
+  logins, per-user rules and settings are in it; the TV guide and channel lists are left out (they reload from your providers).
+- Plex tokens, the Overseerr API key and IPTV passwords are stored encrypted with the key in `data/secret.key`
+  (or the `LUMEN_SECRET_KEY` environment variable). **Keep `secret.key` with your backups**: without it those secrets
+  can't be read and have to be entered again (everything else still works).
+- To restore: stop Lumen, copy a backup over `data/lumen.db` (with the same `secret.key`), start it again.
+
 ## Keyboard shortcuts (player)
 
 | Key | Action |

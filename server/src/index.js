@@ -19,7 +19,8 @@ import { syncProvider, applyVodSwitch } from './services/iptv.js';
 import { syncEpg, purgeOldProgrammes } from './services/epg.js';
 import { initRecorder, stopAllRecordings } from './services/recorder.js';
 import { serveCachedImage } from './services/imgcache.js';
-import { exportAll, importAll } from './services/backup.js';
+import { exportAll, importAll, nightlyBackup } from './services/backup.js';
+import { encryptStoredSecrets } from './db.js';
 import { verifyImg } from './services/proxy.js';
 import { captureLogs, health } from './services/health.js';
 
@@ -167,7 +168,9 @@ function scheduler() {
     }
   }
   purgeOldProgrammes();
+  try { nightlyBackup(); } catch (e) { console.error('[backup]', e.message); }
 }
+try { encryptStoredSecrets(); } catch (e) { console.error('[secrets]', e.message); }
 setTimeout(scheduler, 20000);
 setInterval(scheduler, 15 * 60 * 1000).unref();
 initRecorder();

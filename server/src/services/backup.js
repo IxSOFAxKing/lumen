@@ -1,5 +1,6 @@
 // Export / import of Lumen settings and customisations.
 import { db, tx } from '../db.js';
+import { enc, dec } from '../secrets.js';
 import { allConfig, setConfig, DEFAULTS } from './settings.js';
 
 const SECTIONS = ['ui', 'iptv', 'transcode'];
@@ -13,7 +14,7 @@ export function exportAll({ includeProviders = false } = {}) {
     // Providers are referenced by url+username so imports can be matched on another install.
     providers: providers.map(p => ({
       id: p.id, name: p.name, type: p.type, url: p.url, username: p.username, epg_url: p.epg_url, output: p.output, user_agent: p.user_agent,
-      vod_enabled: p.vod_enabled, series_enabled: p.series_enabled, ...(includeProviders ? { password: p.password } : {}),
+      vod_enabled: p.vod_enabled, series_enabled: p.series_enabled, ...(includeProviders ? { password: dec(p.password) } : {}),
     })),
     favLists: db.prepare('SELECT * FROM fav_lists').all(),
     favorites: db.prepare('SELECT * FROM favorites').all(),
@@ -36,7 +37,7 @@ export function importAll(data) {
     if (match) { idMap.set(p.id, match.id); report.providersMatched++; continue; }
     if (p.type === 'm3u' || p.password) {
       const r = db.prepare('INSERT INTO providers(name, type, url, username, password, epg_url, output, user_agent, vod_enabled, series_enabled) VALUES (?,?,?,?,?,?,?,?,?,?)')
-        .run(p.name, p.type, p.url, p.username || null, p.password || null, p.epg_url || null, p.output || 'ts', p.user_agent || null, p.vod_enabled ?? 1, p.series_enabled ?? 1);
+        .run(p.name, p.type, p.url, p.username || null, enc(p.password) || null, p.epg_url || null, p.output || 'ts', p.user_agent || null, p.vod_enabled ?? 1, p.series_enabled ?? 1);
       idMap.set(p.id, Number(r.lastInsertRowid)); report.providersCreated++;
     }
   }
@@ -67,4 +68,34 @@ export function importAll(data) {
     }
   });
   return report;
+}
+
+// ---------- Nightly copy of the database ----------
+// data/backups/lumen-YYYY-MM-DD.db, the last 7 days. The TV guide and the channel / movie catalogues are left out
+// (they come back from the providers by themselves), so the copies stay small. Secrets in them are encrypted with
+// data/secret.key: keep that file together with the backups.
+import fs from 'node:fs';
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { config } from '../config.js';
+
+export function nightlyBackup({ keep = 7 } = {}) {
+  const dir = path.join(config.dataDir, 'backups');
+  const day = new Date().toISOString().slice(0, 10);
+  const file = path.join(dir, `lumen-${day}.db`);
+  if (fs.existsSync(file)) return null;
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = file + '.tmp';
+  fs.rmSync(tmp, { force: true });
+  db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
+  const b = new DatabaseSync(tmp);
+  try {
+    for (const t of ['programmes', 'programmes_stage', 'vod', 'channels']) { try { b.exec(`DELETE FROM ${t}`); } catch { /* table missing */ } }
+    b.exec('VACUUM');
+  } finally { b.close(); }
+  fs.renameSync(tmp, file);
+  const old = fs.readdirSync(dir).filter(f => /^lumen-\d{4}-\d\d-\d\d\.db$/.test(f)).sort();
+  for (const f of old.slice(0, Math.max(0, old.length - keep))) fs.rmSync(path.join(dir, f), { force: true });
+  console.log(`[backup] saved ${path.relative(config.dataDir, file)}`);
+  return file;
 }

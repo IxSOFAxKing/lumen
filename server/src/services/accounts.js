@@ -1,6 +1,7 @@
 // Plex accounts that may sign in to Lumen: the Plex server's owner, members of the owner's Plex Home, and friends
 // the server is shared with. Signing in with Plex is checked against plex.tv: the account must be able to reach
 // the Plex server Lumen is connected to. What each account may use (Live TV, Discover) is set per account.
+import { enc, dec } from '../secrets.js';
 import { db } from '../db.js';
 import * as plex from './plex.js';
 
@@ -56,12 +57,14 @@ export async function verify(token) {
     VALUES (?,?,?,?,?,?,?,?,unixepoch(),unixepoch())
     ON CONFLICT(plex_id) DO UPDATE SET uuid=excluded.uuid, username=excluded.username, title=excluded.title, thumb=excluded.thumb, role=excluded.role,
       plex_token=excluded.plex_token, server_token=excluded.server_token, verified_at=unixepoch(), last_seen=unixepoch()`)
-    .run(me.id, me.uuid, me.username, me.title, me.thumb, role, token, server.accessToken || (role === 'owner' ? c.token : null));
+    .run(me.id, me.uuid, me.username, me.title, me.thumb, role, enc(token), enc(server.accessToken || (role === 'owner' ? c.token : null)));
   return get(me.id);
 }
 
 export function get(id) {
-  return id ? db.prepare('SELECT * FROM accounts WHERE plex_id = ?').get(String(id)) || null : null;
+  const a = id ? db.prepare('SELECT * FROM accounts WHERE plex_id = ?').get(String(id)) || null : null;
+  // Tokens are stored encrypted (secrets.js).
+  return a ? { ...a, plex_token: dec(a.plex_token), server_token: dec(a.server_token) } : null;
 }
 
 /** What an account may use. Home members get everything; friends get Plex only unless the owner allows more. */

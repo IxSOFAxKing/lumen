@@ -13,6 +13,7 @@ import { selectedUser } from './plex.js';
 import * as plexSvc from '../services/plex.js';
 import * as accounts from '../services/accounts.js';
 import { getSetting, setSetting } from '../db.js';
+import { enc } from '../secrets.js';
 
 const r = Router();
 // Route remote channel logos / posters through Lumen's image cache (faster, and avoids mixed-content on HTTPS).
@@ -79,7 +80,7 @@ r.post('/providers', ah(async (req, res) => {
     await iptv.testXtream({ type, url, username, password, user_agent });
   }
   const r2 = db.prepare('INSERT INTO providers(name, type, url, username, password, epg_url, output, user_agent, vod_enabled, series_enabled) VALUES (?,?,?,?,?,?,?,?,?,?)')
-    .run(name || (type === 'xtream' ? new URL(iptv.baseUrl({ url })).hostname : 'M3U Playlist'), type, url.trim(), username || null, password || null, epg_url || null, output, user_agent || null,
+    .run(name || (type === 'xtream' ? new URL(iptv.baseUrl({ url })).hostname : 'M3U Playlist'), type, url.trim(), username || null, enc(password) || null, epg_url || null, output, user_agent || null,
       vod_enabled ? 1 : 0, series_enabled ? 1 : 0);
   const id = Number(r2.lastInsertRowid);
   try { await iptv.syncProvider(id); }
@@ -99,7 +100,7 @@ r.put('/providers/:id', ah(async (req, res) => {
     series_enabled: b.series_enabled === undefined ? p.series_enabled : (b.series_enabled ? 1 : 0),
   };
   db.prepare('UPDATE providers SET name=?, url=?, username=?, password=?, epg_url=?, output=?, user_agent=?, enabled=?, vod_enabled=?, series_enabled=? WHERE id=?')
-    .run(next.name, next.url, next.username, next.password, next.epg_url || null, next.output, next.user_agent || null, next.enabled, next.vod_enabled, next.series_enabled, p.id);
+    .run(next.name, next.url, next.username, enc(next.password), next.epg_url || null, next.output, next.user_agent || null, next.enabled, next.vod_enabled, next.series_enabled, p.id);
   // Drop content that was just disabled; fetch content that was just enabled.
   for (const [flag, kind, catKind] of [['vod_enabled', 'movie', 'vod'], ['series_enabled', 'series', 'series']]) {
     if (!next[flag] && p[flag]) {

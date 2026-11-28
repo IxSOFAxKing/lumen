@@ -8,6 +8,8 @@ import { ah, pipeFetch, srtToVtt } from '../util.js';
 import { serveCachedImage } from '../services/imgcache.js';
 import { cookies } from '../auth.js';
 import { setDevicePlexUser } from '../services/devices.js';
+import { failed as authFailed, loginThrottled } from '../auth.js';
+import { preferredTracks, selectedTracks, canPlayOriginal, langOf } from '../services/playdecide.js';
 
 const r = Router();
 const MC = j => j?.MediaContainer || {};
@@ -72,7 +74,10 @@ r.post('/users/switch', ah(async (req, res) => {
   if (!token) token = (await plex.sharedTokens().catch(() => new Map())).get(u.id) || null;
   if (!token) {
     if (u.protected && !pin) return res.status(403).json({ error: 'This user needs a PIN', needsPin: true });
-    token = await plex.switchHomeUser(u, pin);
+    // Wrong PINs count like wrong passwords (a 4-digit PIN is quick to guess otherwise).
+    if (loginThrottled(req.ip)) return res.status(429).json({ error: 'Too many wrong PINs. Wait a minute and try again.' });
+    try { token = await plex.switchHomeUser(u, pin); }
+    catch (e) { if (e.status === 401 || /PIN/i.test(e.message)) authFailed(req.ip); throw e; }
   }
   const prev = c.homeUsers?.[u.uuid] || {};
   // With the PIN at hand, also keep the user's plex.tv token (their Plex watchlist needs it).
@@ -339,29 +344,11 @@ r.get('/image', ah(async (req, res) => {
 
 // ---------- Playback ----------
 
-const DIRECT_CONTAINERS = ['mp4', 'm4v', 'mov', 'webm'];
-const DIRECT_VIDEO = ['h264', 'vp9', 'av1', 'vp8'];
-const DIRECT_AUDIO = ['aac', 'mp3', 'opus', 'vorbis', 'flac'];
-const TEXT_SUBS = ['srt', 'vtt', 'webvtt', 'subrip'];
-// The Android TV app's native player (ExoPlayer) can direct-play far more than a browser.
-const NATIVE = {
-  containers: ['mp4', 'm4v', 'mov', 'webm', 'mkv', 'mpegts', 'ts', 'avi'],
-  video: ['h264', 'hevc', 'h265', 'vp9', 'av1', 'vp8', 'mpeg2video', 'mpeg4'],
-  audio: ['aac', 'mp3', 'opus', 'vorbis', 'flac', 'ac3', 'eac3', 'dca', 'dts', 'truehd', 'pcm', 'alac'],
-  subs: ['srt', 'vtt', 'webvtt', 'subrip', 'ass', 'ssa', 'pgs', 'dvd_subtitle'],
-};
-
 const QUALITY = {
   20000: { bitrate: 20000, res: '1920x1080' }, 12000: { bitrate: 12000, res: '1920x1080' }, 8000: { bitrate: 8000, res: '1920x1080' },
   4000: { bitrate: 4000, res: '1280x720' }, 2000: { bitrate: 2000, res: '1280x720' }, 720: { bitrate: 1500, res: '854x480' },
 };
 
-// 3-letter → 2-letter language codes for matching Plex streams against preferences
-const LANG3 = { eng: 'en', spa: 'es', fre: 'fr', fra: 'fr', ger: 'de', deu: 'de', ita: 'it', por: 'pt', jpn: 'ja', kor: 'ko', chi: 'zh', zho: 'zh', rus: 'ru', ara: 'ar', hin: 'hi',
-  dut: 'nl', nld: 'nl', swe: 'sv', nor: 'no', nob: 'no', dan: 'da', fin: 'fi', pol: 'pl', tur: 'tr', gre: 'el', ell: 'el', heb: 'he', tha: 'th', vie: 'vi', ind: 'id', ces: 'cs', cze: 'cs', hun: 'hu', ukr: 'uk', ron: 'ro', rum: 'ro' };
-const langOf = s => { const t = String(s.languageTag || '').slice(0, 2).toLowerCase(); if (t) return t; const c = String(s.languageCode || '').toLowerCase(); return LANG3[c] || c.slice(0, 2); };
-/** Commentary / audio-description tracks: never picked automatically. */
-const isExtraAudio = s => /comment|descri|narrat/i.test(`${s.title || ''} ${s.displayTitle || ''} ${s.extendedDisplayTitle || ''}`);
 const isPrivateIp = ip => /^(::ffff:)?(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.)|^::1$|^f[cd][0-9a-f]{2}:/i.test(ip || '');
 
 r.post('/play', ah(async (req, res) => {
@@ -379,27 +366,7 @@ r.post('/play', ah(async (req, res) => {
   if (!part) return res.status(404).json({ error: 'No playable media' });
 
   // Preferred audio / subtitle languages (only when the user hasn't picked tracks explicitly)
-  {
-    const sts = part.Stream || [];
-    const audios = sts.filter(s => s.streamType === 2), subs = sts.filter(s => s.streamType === 3);
-    let audio = audios.find(s => s.selected) || audios.find(s => !isExtraAudio(s)) || audios[0];
-    // Preferred language: the main track in that language (never a commentary), unless the current one already fits.
-    if (audioStreamID === undefined && prefs.audioLang && !(audio && langOf(audio) === prefs.audioLang && !isExtraAudio(audio))) {
-      const want = audios.find(s => langOf(s) === prefs.audioLang && !isExtraAudio(s));
-      if (want && want !== audio) { audioStreamID = want.id; audio = want; }
-    }
-    if (subtitleStreamID === undefined && prefs.subtitleMode && prefs.subtitleMode !== 'plex') {
-      const subLang = prefs.subtitleLang || prefs.audioLang || 'en';
-      const pick = subs.find(s => langOf(s) === subLang && !s.forced) || subs.find(s => langOf(s) === subLang);
-      const forced = subs.find(s => s.forced && langOf(s) === subLang);
-      const current = subs.find(s => s.selected);
-      let want = null;
-      if (prefs.subtitleMode === 'always') want = pick || null;
-      else if (prefs.subtitleMode === 'foreign') want = audio && langOf(audio) && langOf(audio) !== subLang ? (pick || null) : (forced || null);
-      else if (prefs.subtitleMode === 'never') want = null;
-      if ((want?.id || 0) !== (current?.id || 0)) subtitleStreamID = want?.id || 0;
-    }
-  }
+  ({ audioStreamID, subtitleStreamID } = preferredTracks(part.Stream || [], prefs, { audioStreamID, subtitleStreamID }));
 
   // Persist stream selection on the Plex server so its transcoder honours it.
   if (audioStreamID !== undefined || subtitleStreamID !== undefined) {
@@ -409,20 +376,9 @@ r.post('/play', ah(async (req, res) => {
     await plex.plexFetch(`/library/parts/${part.id}`, { method: 'PUT', params }).catch(() => null);
   }
   const streams = part.Stream || [];
-  const selAudio = streams.find(s => s.streamType === 2 && (audioStreamID ? s.id === Number(audioStreamID) : s.selected))
-    || streams.find(s => s.streamType === 2 && !isExtraAudio(s)) || streams.find(s => s.streamType === 2);
-  const subId = subtitleStreamID !== undefined ? Number(subtitleStreamID) : (streams.find(s => s.streamType === 3 && s.selected)?.id || 0);
-  const selSub = streams.find(s => s.streamType === 3 && s.id === subId) || null;
-
+  const { selAudio, selSub } = selectedTracks(streams, audioStreamID, subtitleStreamID);
   const isNative = req.body.client === 'native';
-  const direct = isNative
-    ? NATIVE.containers.includes(media.container) && NATIVE.video.includes(media.videoCodec) && NATIVE.audio.includes(selAudio?.codec || media.audioCodec)
-      // The app says which sound formats the device really plays (phones: usually no DTS / TrueHD); otherwise Plex converts the sound.
-      && (!Array.isArray(req.body.audioCodecs) || req.body.audioCodecs.includes(selAudio?.codec || media.audioCodec))
-      && (!Array.isArray(req.body.videoCodecs) || req.body.videoCodecs.includes(media.videoCodec))
-    : DIRECT_CONTAINERS.includes(media.container) && DIRECT_VIDEO.includes(media.videoCodec)
-      && DIRECT_AUDIO.includes(selAudio?.codec || media.audioCodec) && (!selAudio || selAudio === streams.find(s => s.streamType === 2))
-      && (!selSub || (selSub.key && TEXT_SUBS.includes(selSub.codec)));
+  const direct = canPlayOriginal({ native: isNative, media, streams, selAudio, selSub, audioCodecs: req.body.audioCodecs, videoCodecs: req.body.videoCodecs });
   const wantsOriginal = quality === 'original' || quality === 'auto';
 
   const base = {

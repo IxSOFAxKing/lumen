@@ -1,3 +1,4 @@
+import { dec } from '../secrets.js';
 import crypto from 'node:crypto';
 import { db, tx } from '../db.js';
 import { getConfig } from './settings.js';
@@ -22,13 +23,15 @@ export function applyVodSwitch(on) {
   }
 }
 
+// Passwords are stored encrypted (secrets.js); everything here gets them decrypted.
+const plain = p => (p ? { ...p, password: dec(p.password) } : p);
 export function getProvider(id) {
   const p = db.prepare('SELECT * FROM providers WHERE id = ?').get(Number(id));
   if (!p) { const e = new Error('Provider not found'); e.status = 404; throw e; }
-  return p;
+  return plain(p);
 }
 export function listProviders() {
-  return db.prepare('SELECT * FROM providers ORDER BY id').all();
+  return db.prepare('SELECT * FROM providers ORDER BY id').all().map(plain);
 }
 
 export function baseUrl(p) {
