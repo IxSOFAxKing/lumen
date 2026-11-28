@@ -106,27 +106,27 @@ class PlayerState {
  */
 @OptIn(UnstableApi::class)
 class PlayerActivity : ComponentActivity() {
-    private lateinit var exo: ExoPlayer
-    private lateinit var view: PlayerView
+    internal lateinit var exo: ExoPlayer
+    internal lateinit var view: PlayerView
     val st = PlayerState()
-    private var source: Source? = null
-    private var desc: Desc? = null
-    private var openJob: Job? = null
-    private var fallbacks = 0
-    private var hideAt = 0L
-    private var scrubCommitAt = 0L
-    private var lastReport = 0L
-    private var lastPing = 0L
-    private var bufferingSince = 0L
-    private var digitsAt = 0L
-    private var upNextDismissed = false
-    private var upNextTick = 0L
-    private val skippedMarkers = HashSet<String>()
-    private var zapJob: Job? = null
-    private var prevChannel: Channel? = null
-    private var closed = false
+    internal var source: Source? = null
+    internal var desc: Desc? = null
+    internal var openJob: Job? = null
+    internal var fallbacks = 0
+    internal var hideAt = 0L
+    internal var scrubCommitAt = 0L
+    internal var lastReport = 0L
+    internal var lastPing = 0L
+    internal var bufferingSince = 0L
+    internal var digitsAt = 0L
+    internal var upNextDismissed = false
+    internal var upNextTick = 0L
+    internal val skippedMarkers = HashSet<String>()
+    internal var zapJob: Job? = null
+    internal var prevChannel: Channel? = null
+    internal var closed = false
 
-    private val hideMs get() = ((if (st.live) AppState.uiNum("zapOverlaySeconds", 4.0) else AppState.uiNum("controlsHideSeconds", 3.0) + 1) * 1000).toLong().coerceAtLeast(2500)
+    internal val hideMs get() = ((if (st.live) AppState.uiNum("zapOverlaySeconds", 4.0) else AppState.uiNum("controlsHideSeconds", 3.0) + 1) * 1000).toLong().coerceAtLeast(2500)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -244,7 +244,7 @@ class PlayerActivity : ComponentActivity() {
         lifecycleScope.launch { while (isActive) { tick(); delay(250) } }
     }
 
-    private fun styleSubtitles(sv: SubtitleView) {
+    internal fun styleSubtitles(sv: SubtitleView) {
         val size = AppState.uiNum("subtitleSize", 100.0).toFloat() / 100f
         val bgAlpha = (AppState.uiNum("subtitleBg", 60.0).coerceIn(0.0, 100.0) * 2.55).toInt()
         val fg = runCatching { AColor.parseColor(AppState.uiStr("subtitleColor", "#ffffff")) }.getOrDefault(AColor.WHITE)
@@ -259,15 +259,15 @@ class PlayerActivity : ComponentActivity() {
     }
 
     // ------------------------------------------------------------------ loading
-    private fun absPos(): Double = exo.currentPosition / 1000.0 + (desc?.startOffset ?: 0.0)
-    private fun duration(): Double {
+    internal fun absPos(): Double = exo.currentPosition / 1000.0 + (desc?.startOffset ?: 0.0)
+    internal fun duration(): Double {
         val s = source?.duration ?: 0.0
         if (s > 0) return s
         val d = exo.duration
         return if (d != C.TIME_UNSET && d > 0) d / 1000.0 + (desc?.startOffset ?: 0.0) else 0.0
     }
 
-    private fun start(src: Source, offset: Double, mode: String? = null, keepState: Boolean = false) {
+    internal fun start(src: Source, offset: Double, mode: String? = null, keepState: Boolean = false) {
         openJob?.cancel()
         val old = source
         val oldDesc = desc
@@ -314,7 +314,7 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
-    private fun play(d: Desc) {
+    internal fun play(d: Desc) {
         val b = MediaItem.Builder().setUri(Uri.parse(d.url))
         when (d.type) {
             "hls" -> b.setMimeType(MimeTypes.APPLICATION_M3U8)
@@ -329,13 +329,13 @@ class PlayerActivity : ComponentActivity() {
         exo.playWhenReady = true
     }
 
-    private fun showError(msg: String) {
+    internal fun showError(msg: String) {
         st.error = msg
         st.buffering = false
         st.controls = false
     }
 
-    private fun buildButtons(src: Source): List<Btn> {
+    internal fun buildButtons(src: Source): List<Btn> {
         if (src.isLive) return emptyList()
         // Same controls as Plex: previous / rewind / play / forward / next, then audio & subtitles, episodes, chapters, settings.
         val l = mutableListOf<Btn>()
@@ -350,11 +350,11 @@ class PlayerActivity : ComponentActivity() {
         return l
     }
 
-    private fun seekBack() = AppState.uiNum("seekBack", 10.0)
-    private fun seekFwd() = AppState.uiNum("seekForward", 30.0)
+    internal fun seekBack() = AppState.uiNum("seekBack", 10.0)
+    internal fun seekFwd() = AppState.uiNum("seekForward", 30.0)
 
     // ------------------------------------------------------------------ player events
-    private val listener = object : Player.Listener {
+    internal val listener = object : Player.Listener {
         override fun onPlaybackStateChanged(state: Int) {
             st.buffering = state == Player.STATE_BUFFERING || state == Player.STATE_IDLE && st.error == null && desc == null
             if (state == Player.STATE_BUFFERING) { if (bufferingSince == 0L) bufferingSince = System.currentTimeMillis() } else bufferingSince = 0L
@@ -414,7 +414,7 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
-    private fun onEnded() {
+    internal fun onEnded() {
         val src = source ?: return
         if (src.isLive) { start(src, 0.0); return }
         report("stopped")
@@ -423,21 +423,21 @@ class PlayerActivity : ComponentActivity() {
     }
 
     // ---------- "Are you still watching?" (Settings → Player) ----------
-    private var lastInput = System.currentTimeMillis()
-    private var inputThisItem = false
-    private var autoCount = 0
-    private var stillContinue: (() -> Unit)? = null
-    private var stillSince = 0L
-    private var idleStop = false
-    private fun userInput() { lastInput = System.currentTimeMillis(); inputThisItem = true }
+    internal var lastInput = System.currentTimeMillis()
+    internal var inputThisItem = false
+    internal var autoCount = 0
+    internal var stillContinue: (() -> Unit)? = null
+    internal var stillSince = 0L
+    internal var idleStop = false
+    internal fun userInput() { lastInput = System.currentTimeMillis(); inputThisItem = true }
     /** The next episode starts by itself, unless several already have in a row without anyone touching the remote. */
-    private fun autoNext() {
+    internal fun autoNext() {
         if (inputThisItem) autoCount = 0
         autoCount++
         val n = AppState.uiNum("stillWatchingEpisodes", 3.0).toInt()
         if (n > 0 && autoCount > n) askStill { playNext() } else playNext()
     }
-    private fun askStill(onContinue: (() -> Unit)? = null) {
+    internal fun askStill(onContinue: (() -> Unit)? = null) {
         if (st.still) return
         if (!st.live || onContinue != null) exo.pause()
         stillContinue = onContinue; stillSince = System.currentTimeMillis()
@@ -446,7 +446,7 @@ class PlayerActivity : ComponentActivity() {
         // Nobody may be watching: let the TV go to its screen saver / sleep as usual while the question waits.
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
-    private fun answerStill(cont: Boolean) {
+    internal fun answerStill(cont: Boolean) {
         if (!st.still) return
         st.still = false
         lastInput = System.currentTimeMillis(); autoCount = 0
@@ -459,7 +459,7 @@ class PlayerActivity : ComponentActivity() {
         }
         if (c != null) c() else exo.play()
     }
-    private fun checkStill(now: Long) {
+    internal fun checkStill(now: Long) {
         if (st.still) {
             // No answer within a minute: live TV stops (frees the provider connection); anything else stays paused.
             if (st.live && now - stillSince > 60_000) { idleStop = true; answerStill(false) }
@@ -469,7 +469,7 @@ class PlayerActivity : ComponentActivity() {
         if (hrs > 0 && exo.isPlaying && now - lastInput > hrs * 3_600_000) askStill()
     }
 
-    private fun playNext() {
+    internal fun playNext() {
         val src = source ?: return
         st.upNext = null
         if (src is WebSource) { PlayerBus.ended(); return }
@@ -479,7 +479,7 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
-    private fun report(state: String) {
+    internal fun report(state: String) {
         val src = source ?: return
         if (src.isLive || desc == null) return
         lastReport = System.currentTimeMillis()
@@ -489,7 +489,7 @@ class PlayerActivity : ComponentActivity() {
     }
 
     // ------------------------------------------------------------------ tick (4× a second)
-    private fun tick() {
+    internal fun tick() {
         val now = System.currentTimeMillis()
         checkStill(now)
         val src = source
@@ -517,9 +517,9 @@ class PlayerActivity : ComponentActivity() {
         if (src is LiveSource && now - lastEpg > 60_000) refreshEpg(src)
     }
 
-    private var lastEpg = 0L
+    internal var lastEpg = 0L
     /** Keep the banner's now/next current during long viewing. */
-    private fun refreshEpg(src: LiveSource) {
+    internal fun refreshEpg(src: LiveSource) {
         lastEpg = System.currentTimeMillis()
         val ch = st.channel ?: return
         val p = ch.onAir
@@ -534,19 +534,19 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
-    private var markerSince: Pair<String, Long>? = null
+    internal var markerSince: Pair<String, Long>? = null
 
     // ---------- volume (Settings → Audio → Maximum volume, Live TV / Plex volume offset) ----------
-    private var boostLive: Boolean? = null
-    private fun applyVolumeBoost(session: Int) {
+    internal var boostLive: Boolean? = null
+    internal fun applyVolumeBoost(session: Int) {
         val live = source?.isLive == true
         boostLive = live
         Volume.apply(exo, live, session)
     }
 
     // ---------- match content frame rate (Settings → Player) ----------
-    private var matchedFor = 0f
-    private fun matchFrameRate() {
+    internal var matchedFor = 0f
+    internal fun matchFrameRate() {
         if (!AppState.uiBool("matchFrameRate", false) || android.os.Build.VERSION.SDK_INT < 23) return
         val fps = exo.videoFormat?.frameRate ?: return
         if (fps <= 1f || fps == matchedFor) return
@@ -580,7 +580,7 @@ class PlayerActivity : ComponentActivity() {
         window.attributes = lp
         st.message = "Brightness ${(lp.screenBrightness * 100).toInt()}%"; hideAt = System.currentTimeMillis()
     }
-    private var volAcc = 0f
+    internal var volAcc = 0f
     fun gestureVolume(delta: Float) {
         if (!AppState.uiBool("volumeSwipe", true)) return
         val am = getSystemService(AUDIO_SERVICE) as android.media.AudioManager
@@ -600,7 +600,7 @@ class PlayerActivity : ComponentActivity() {
         view.resizeMode = if (zoomIn) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
     }
 
-    private fun markersAndUpNext(src: Source, now: Long) {
+    internal fun markersAndUpNext(src: Source, now: Long) {
         val pos = st.pos
         val m = src.markers.firstOrNull { (it.type == "intro" || it.type == "credits") && pos >= it.start && pos < it.end - 1 }
         st.skip = m
@@ -634,7 +634,7 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
-    private fun skip(m: Marker) {
+    internal fun skip(m: Marker) {
         val src = source ?: return
         st.skip = null
         if (m.type == "credits" && src.hasNext) { autoNext(); return }
@@ -642,14 +642,14 @@ class PlayerActivity : ComponentActivity() {
     }
 
     // ------------------------------------------------------------------ actions
-    private fun poke(short: Boolean = false) {
+    internal fun poke(short: Boolean = false) {
         st.controls = true
         hideAt = System.currentTimeMillis() + if (short) minOf(hideMs, 2500) else hideMs
     }
 
-    private fun togglePause() { if (exo.isPlaying) exo.pause() else exo.play(); poke() }
+    internal fun togglePause() { if (exo.isPlaying) exo.pause() else exo.play(); poke() }
 
-    private fun seekAbs(t: Double) {
+    internal fun seekAbs(t: Double) {
         val d = desc ?: return
         val src = source ?: return
         val max = if (st.dur > 2) st.dur - 2 else Double.MAX_VALUE
@@ -658,7 +658,7 @@ class PlayerActivity : ComponentActivity() {
         else exo.seekTo(((target - d.startOffset).coerceAtLeast(0.0) * 1000).toLong())
     }
 
-    private fun scrubBy(delta: Double, repeat: Int) {
+    internal fun scrubBy(delta: Double, repeat: Int) {
         val base = st.scrub ?: st.pos
         val accel = 1 + (repeat / 4).coerceAtMost(8)
         st.scrub = (base + delta * accel).coerceIn(0.0, if (st.dur > 0) st.dur else Double.MAX_VALUE)
@@ -666,14 +666,14 @@ class PlayerActivity : ComponentActivity() {
         poke()
     }
 
-    private fun commitScrub() {
+    internal fun commitScrub() {
         val t = st.scrub ?: return
         st.scrub = null
         seekAbs(t)
         poke()
     }
 
-    private fun activate(id: String) {
+    internal fun activate(id: String) {
         val src = source ?: return
         when (id) {
             "play" -> togglePause()
@@ -692,331 +692,31 @@ class PlayerActivity : ComponentActivity() {
         poke()
     }
 
-    /** Plex looks for subtitles online (OpenSubtitles) in your subtitle language; picking one adds it to the title. */
-    private fun subtitleSearch(src: PlexSource) {
-        val parent = st.panel
-        val lang = AppState.uiStr("subtitleLang").ifBlank { "en" }.take(2)
-        st.panel = Panel("Search for subtitles", listOf(PanelItem("Searching…")), 0, parent)
-        lifecycleScope.launch {
-            val found = runCatching { Plex.searchSubtitles(src.ratingKey, lang) }
-            val list = found.getOrNull()
-            st.panel = when {
-                list == null -> Panel("Search for subtitles", listOf(PanelItem("Plex couldn't search: ${found.exceptionOrNull()?.message ?: "error"}")), 0, parent)
-                list.isEmpty() -> Panel("Search for subtitles", listOf(PanelItem("Nothing found")), 0, parent)
-                else -> Panel("Subtitles found", list.take(40).map { s ->
-                    val label = listOfNotNull(s.str("displayTitle") ?: s.str("language"), if (s.optBoolean("hearingImpaired")) "SDH" else null,
-                        s.str("title")?.take(70), s.str("providerTitle")).joinToString(" · ")
-                    PanelItem(label) { downloadSubtitle(src, s) }
-                }, 0, parent)
-            }
-        }
-    }
-
-    private fun downloadSubtitle(src: PlexSource, s: JSONObject) {
-        st.panel = null
-        st.message = "Adding subtitles…"; hideAt = System.currentTimeMillis() + 20_000
-        lifecycleScope.launch {
-            val before = runCatching { Plex.subtitleIds(src.ratingKey) }.getOrDefault(emptySet())
-            val ok = runCatching { Plex.downloadSubtitle(src.ratingKey, s) }
-            if (ok.isFailure) { st.message = "Couldn't add them: ${ok.exceptionOrNull()?.message}"; hideAt = System.currentTimeMillis(); return@launch }
-            // Plex downloads them in the background: wait for the new track to appear, then switch to it.
-            var added: Int? = null
-            for (i in 0 until 20) {
-                delay(1000)
-                added = runCatching { Plex.subtitleIds(src.ratingKey) }.getOrNull()?.firstOrNull { it !in before }
-                if (added != null) break
-            }
-            hideAt = System.currentTimeMillis()
-            if (added == null) { st.message = "Plex is still fetching them — they'll be in the subtitle menu shortly"; return@launch }
-            st.message = "Subtitles added"
-            src.choose(subtitleId = added)
-            start(src, st.pos, keepState = true)
-        }
-    }
-
-    /** Settings → Subtitles → Subtitles listed: only your subtitle language (default English) and tracks without a language. */
-    private fun subShown(lang: String?): Boolean {
-        if (AppState.uiStr("subtitleList", "mine") == "all") return true
-        val l = lang?.lowercase()?.takeIf { it.isNotBlank() && it != "und" } ?: return true
-        val want = AppState.uiStr("subtitleLang").ifBlank { "en" }.lowercase().take(2)
-        return l.take(2) == want
-    }
-
-    private fun langName(f: Format): String? = f.language?.takeIf { it != "und" }?.let { Locale.forLanguageTag(it).displayLanguage.takeIf { n -> n.isNotBlank() } ?: it }
-
-    private fun tracksPanel(src: Source): Panel {
-        val items = mutableListOf<PanelItem>()
-        val d = desc
-        val serverSide = src.isPlex && d != null && !d.method.startsWith("direct")
-        if (serverSide) {
-            // Plex is transcoding: it picks the streams, so ask it for a different one.
-            items += PanelItem("Audio", header = true)
-            src.audio.forEach { a -> items += PanelItem(a.label, a.selected) { src.choose(audioId = a.id); start(src, st.pos, keepState = true) } }
-            items += PanelItem("Subtitles", header = true)
-            items += PanelItem("Off", src.subtitles.none { it.selected }) { src.choose(subtitleId = 0); start(src, st.pos, keepState = true) }
-            src.subtitles.filter { it.selected || subShown(it.lang) }.forEach { s -> items += PanelItem(s.label, s.selected) { src.choose(subtitleId = s.id); start(src, st.pos, keepState = true) } }
-        } else {
-            val groups = exo.currentTracks.groups
-            items += PanelItem("Audio", header = true)
-            groups.filter { it.type == C.TRACK_TYPE_AUDIO }.forEach { g ->
-                for (i in 0 until g.length) {
-                    if (!g.isTrackSupported(i)) continue
-                    val f = g.getTrackFormat(i)
-                    val codec = f.sampleMimeType?.substringAfter('/')?.uppercase()?.replace("VND.DTS", "DTS")
-                    val ch = when (f.channelCount) { 1 -> "Mono"; 2 -> "Stereo"; 6 -> "5.1"; 8 -> "7.1"; else -> if (f.channelCount > 0) "${f.channelCount}ch" else null }
-                    val label = listOfNotNull(f.label ?: langName(f) ?: "Track ${items.size}", codec, ch).joinToString(" · ")
-                    items += PanelItem(label, g.isTrackSelected(i)) {
-                        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, i)).build()
-                    }
-                }
-            }
-            items += PanelItem("Subtitles", header = true)
-            val textGroups = groups.filter { it.type == C.TRACK_TYPE_TEXT }
-            val anyText = textGroups.any { g -> (0 until g.length).any { g.isTrackSelected(it) } }
-            items += PanelItem("Off", !anyText) {
-                exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
-            }
-            textGroups.forEach { g ->
-                for (i in 0 until g.length) {
-                    val f = g.getTrackFormat(i)
-                    if (!g.isTrackSelected(i) && !subShown(f.language)) continue
-                    // The language first, then the track's own title ("English · SDH"), so a track titled only "SDH" still says which language it is.
-                    val lang = langName(f) ?: "Unknown language"
-                    val label = listOfNotNull(lang, f.label?.takeIf { !it.equals(lang, true) },
-                        if ((f.roleFlags and C.ROLE_FLAG_DESCRIBES_MUSIC_AND_SOUND) != 0 && f.label?.contains("SDH", true) != true) "SDH" else null,
-                        if ((f.selectionFlags and C.SELECTION_FLAG_FORCED) != 0) "Forced" else null).joinToString(" · ")
-                    items += PanelItem(label, g.isTrackSelected(i)) {
-                        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                            .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, i)).build()
-                    }
-                }
-            }
-            if (src.isPlex && src.subtitles.isNotEmpty() && textGroups.isEmpty()) {
-                items += PanelItem("Plex subtitles (switches to transcoding)", header = true)
-                src.subtitles.forEach { s -> items += PanelItem(s.label, s.selected) { src.choose(subtitleId = s.id); start(src, st.pos, keepState = true) } }
-            }
-        }
-        if (src is PlexSource) items += PanelItem("Search for subtitles…") { subtitleSearch(src) }
-        val first = items.indexOfFirst { !it.header && it.selected }.takeIf { it >= 0 } ?: items.indexOfFirst { !it.header }.coerceAtLeast(0)
-        return Panel("Audio & subtitles", items, first)
-    }
-
-    private fun qualityPanel(src: Source): Panel {
-        val cur = (desc?.raw?.optString("quality") ?: "auto")
-        val opts = listOf("auto" to "Auto (direct play when possible)", "original" to "Original", "20000" to "1080p · 20 Mbps", "12000" to "1080p · 12 Mbps",
-            "8000" to "1080p · 8 Mbps", "4000" to "720p · 4 Mbps", "2000" to "720p · 2 Mbps", "720" to "480p · 1.5 Mbps")
-        val items = opts.map { (v, l) -> PanelItem(l, v == cur) { src.choose(quality = v); start(src, st.pos, keepState = true) } }
-        val method = desc?.method ?: ""
-        return Panel("Quality  ·  now: $method", items, opts.indexOfFirst { it.first == cur }.coerceAtLeast(0))
-    }
-
     // ------------------------------------------------------------------ option menus
-    private var aspect = 0      // 0 fit, 1 fill (stretch), 2 zoom (crop)
-    private var speed = 1f
-    private var subScale = 1f
-
-    private fun sub(parent: Panel, title: String, items: List<PanelItem>): Panel =
-        Panel(title, items, items.indexOfFirst { !it.header && it.selected }.takeIf { it >= 0 } ?: items.indexOfFirst { !it.header }.coerceAtLeast(0), parent)
-
-    private fun aspectPanel(parent: Panel): Panel {
-        val opts = listOf("Fit (original)" to AspectRatioFrameLayout.RESIZE_MODE_FIT, "Stretch to fill" to AspectRatioFrameLayout.RESIZE_MODE_FILL, "Zoom (crop)" to AspectRatioFrameLayout.RESIZE_MODE_ZOOM)
-        return sub(parent, "Aspect ratio", opts.mapIndexed { i, (l, m) -> PanelItem(l, aspect == i) { aspect = i; view.resizeMode = m } })
-    }
-
-    private fun sleepPanel(parent: Panel): Panel {
-        val now = System.currentTimeMillis()
-        val left = if (st.sleepAt > now) ((st.sleepAt - now) / 60000 + 1) else 0
-        val opts = listOf(0, 15, 30, 45, 60, 90, 120, 180)
-        return sub(parent, "Sleep timer" + if (left > 0) "  ·  $left min left" else "", opts.map { m ->
-            PanelItem(if (m == 0) "Off" else "$m minutes", if (m == 0) st.sleepAt == 0L else false) {
-                st.sleepAt = if (m == 0) 0L else System.currentTimeMillis() + m * 60_000L
-                Toast.makeText(this, if (m == 0) "Sleep timer off" else "Stopping in $m minutes", Toast.LENGTH_SHORT).show()
-            }
-        })
-    }
-
-    private fun speedPanel(parent: Panel): Panel {
-        val opts = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
-        return sub(parent, "Playback speed", opts.map { v -> PanelItem(if (v == 1f) "Normal" else "${v}×", speed == v) { speed = v; exo.setPlaybackSpeed(v) } })
-    }
+    internal var aspect = 0      // 0 fit, 1 fill (stretch), 2 zoom (crop)
+    internal var speed = 1f
+    internal var subScale = 1f
 
     // ---------- seek-bar thumbnails ----------
-    private var bif: Bif? = null
-    private var bifFor: String? = null
-    private var thumbIdx = -1
-    private var thumbJob: Job? = null
-    private var noThumbs = false
-    private var singleFailed = false
-
-    private fun loadThumbnails(src: Source, d: Desc) {
-        if (!src.isPlex) { bif = null; bifFor = null; st.thumb = null; return }
-        val part = d.raw.str("partId") ?: return
-        if (bifFor == part) return
-        bifFor = part; bif = null; thumbIdx = -1; st.thumb = null; noThumbs = false; singleFailed = false
-        lifecycleScope.launch {
-            val b = Bif.load(this@PlayerActivity, part)
-            if (bifFor == part) bif = b
-            if (b == null) noThumbs = true
-        }
-    }
-
-    private fun updateThumb() {
-        val t = st.scrub
-        val b = bif
-        if (t == null) { if (st.thumb != null) { st.thumb = null; thumbIdx = -1 }; return }
-        if (b == null) {
-            // No BIF file: fetch single preview frames (every 10 s) instead.
-            val part = bifFor ?: return
-            if (!noThumbs || singleFailed) return
-            val i = (t / 10).toInt()
-            if (i == thumbIdx || thumbJob?.isActive == true) return
-            thumbIdx = i
-            thumbJob = lifecycleScope.launch {
-                val img = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    runCatching {
-                        Net.http.newCall(okhttp3.Request.Builder().url(Plex.thumbUrl(part.toString(), i * 10000L) ?: return@runCatching null).build()).execute().use { r ->
-                            if (!r.isSuccessful) null else r.body?.bytes()?.let { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
-                        }
-                    }.getOrNull()
-                }
-                if (img != null) { if (st.scrub != null) st.thumb = img }
-                else if (!singleFailed) {
-                    singleFailed = true
-                    Toast.makeText(this@PlayerActivity, "No preview thumbnails for this video. In Plex, turn on \"Generate video preview thumbnails\" for the library (Manage Library → Edit → Advanced).", Toast.LENGTH_LONG).show()
-                }
-            }
-            return
-        }
-        val i = b.indexAt(t)
-        if (i == thumbIdx || thumbJob?.isActive == true) return
-        thumbIdx = i
-        thumbJob = lifecycleScope.launch { b.image(i)?.let { if (st.scrub != null) st.thumb = it } }
-    }
+    internal var bif: Bif? = null
+    internal var bifFor: String? = null
+    internal var thumbIdx = -1
+    internal var thumbJob: Job? = null
+    internal var noThumbs = false
+    internal var singleFailed = false
 
     // ---------- subtitle sync ----------
-    private var pickSynced = false
+    internal var pickSynced = false
     /** The Live TV preview's stream, carried on instead of opening the channel again. */
-    private var adoptedDesc: Desc? = null
+    internal var adoptedDesc: Desc? = null
     /** The audio decoder in use (null = passthrough / none), for Playback info. */
-    private var audioDecoder: String? = null
-    private var noSoundFor: Desc? = null
+    internal var audioDecoder: String? = null
+    internal var noSoundFor: Desc? = null
 
-    /** Once per stream: reopen it with the sound converted (Plex for the library, the Lumen server for IPTV). */
-    private fun noSoundFallback() {
-        val src = source ?: return
-        val d = desc ?: return
-        if (noSoundFor === d) return
-        noSoundFor = d
-        if (src is WebSource) { PlayerBus.error("audio format not supported on this device"); return }
-        val mode = nextMode(d) ?: return
-        st.message = "This device can't play this sound format — converting it…"
-        start(src, if (src.isLive) 0.0 else absPos().coerceAtLeast(d.startPosition), mode, keepState = true)
-    }
     /** Original-file playback: which audio track (in file order) to start on, once the tracks are known. */
-    private var pendingAudio: Int? = null
+    internal var pendingAudio: Int? = null
 
-    private fun syncPanel(src: Source, parent: Panel): Panel {
-        val steps = listOf(-5000, -3000, -2000, -1500, -1000, -750, -500, -250, 0, 250, 500, 750, 1000, 1500, 2000, 3000, 5000)
-        val items = steps.map { ms ->
-            val label = when { ms == 0 -> "In sync (0 s)"; ms < 0 -> "Show ${"%.2f".format(-ms / 1000.0).trimEnd('0').trimEnd('.')} s earlier"; else -> "Show ${"%.2f".format(ms / 1000.0).trimEnd('0').trimEnd('.')} s later" }
-            PanelItem(label, st.subOffsetMs == ms) { applySubtitleSync(src, ms) }
-        }
-        return sub(parent, "Subtitle sync", items)
-    }
-
-    /** Re-load the subtitles shifted by [ms] (the server shifts the cue times), keeping the playback position. */
-    private fun applySubtitleSync(src: Source, ms: Int) {
-        val d = desc ?: return
-        if (!d.method.startsWith("direct") && src.isPlex) {
-            Toast.makeText(this, "These subtitles are burned into the video while transcoding, so they can't be shifted. Set Quality to Auto/Original to sync them.", Toast.LENGTH_LONG).show()
-            return
-        }
-        val subId = src.subtitles.firstOrNull { it.selected }?.id
-        if (subId == null && d.subtitleUrl == null) { Toast.makeText(this, "Choose a subtitle first (Audio & subtitles).", Toast.LENGTH_LONG).show(); return }
-        // The subtitle is fetched from Plex, shifted on this device and loaded next to the video.
-        lifecycleScope.launch {
-            val file = runCatching { if (subId != null) Plex.subtitleFile(subId, null, ms) else null }.getOrNull()
-            if (file == null) { Toast.makeText(this@PlayerActivity, "Couldn't load these subtitles to shift them.", Toast.LENGTH_LONG).show(); return@launch }
-            loadSyncedSubtitle(d, Uri.parse(file), ms)
-        }
-    }
-
-    private fun loadSyncedSubtitle(d: Desc, u: Uri, ms: Int) {
-        st.subOffsetMs = ms
-        val item = MediaItem.Builder().setUri(Uri.parse(d.url)).apply {
-            when (d.type) { "hls" -> setMimeType(MimeTypes.APPLICATION_M3U8); "mpegts" -> setMimeType(MimeTypes.VIDEO_MP2T) }
-            setSubtitleConfigurations(listOf(MediaItem.SubtitleConfiguration.Builder(u).setId("lumen-sync").setLabel("Subtitles (synced)")
-                .setMimeType(MimeTypes.TEXT_VTT).setSelectionFlags(C.SELECTION_FLAG_DEFAULT or C.SELECTION_FLAG_FORCED).build()))
-        }.build()
-        val pos = exo.currentPosition
-        pickSynced = true
-        exo.setMediaItem(item, pos)
-        exo.prepare()
-        exo.playWhenReady = true
-        Toast.makeText(this, if (ms == 0) "Subtitle offset cleared" else "Subtitles shifted ${if (ms > 0) "+" else ""}${ms} ms", Toast.LENGTH_SHORT).show()
-    }
-
-    private fun subtitleSizePanel(parent: Panel): Panel {
-        val opts = listOf(0.75f to "Small", 1f to "Normal", 1.25f to "Large", 1.5f to "Extra large")
-        return sub(parent, "Subtitle size", opts.map { (v, l) -> PanelItem(l, subScale == v) {
-            subScale = v
-            val base = AppState.uiNum("subtitleSize", 100.0).toFloat() / 100f
-            view.subtitleView?.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * base * v)
-        } })
-    }
-
-    /** Technical details of what's playing (like Plex's "Playback info" / TiviMate's stream info). */
-    private fun infoPanel(parent: Panel): Panel {
-        val v = exo.videoFormat; val a = exo.audioFormat; val d = desc
-        val lines = listOfNotNull(
-            "Method: ${d?.method ?: "?"}",
-            v?.let { "Video: ${it.width}×${it.height}${if (it.frameRate > 0) " @ ${"%.2f".format(it.frameRate)} fps" else ""} · ${it.sampleMimeType?.substringAfter('/') ?: it.codecs ?: "?"}" },
-            v?.bitrate?.takeIf { it > 0 }?.let { "Video bitrate: ${it / 1000} kbps" },
-            a?.let { "Audio: ${it.sampleMimeType?.substringAfter('/') ?: "?"} · ${it.channelCount} ch · ${it.sampleRate} Hz" },
-            a?.let { "Audio decoder: ${audioDecoder ?: "none — passthrough to the TV / receiver"}" },
-            "Audio output: ${AppState.uiStr("audioOutput", "auto").let { if (it == "passthrough") "passthrough" else if (it == "stereo") "stereo (decoded)" else "decoded in the app" }}",
-            d?.raw?.optString("quality")?.takeIf { it.isNotBlank() }?.let { "Quality setting: $it" },
-            d?.raw?.optString("network")?.takeIf { it.isNotBlank() }?.let { "Network: $it" },
-            "Buffered: ${"%.1f".format((exo.totalBufferedDuration) / 1000.0)} s",
-            "Dropped frames: ${exo.videoDecoderCounters?.droppedBufferCount ?: 0}",
-            d?.url?.let { "Stream: ${Uri.parse(it).path}" },
-        )
-        return Panel("Playback info", lines.map { PanelItem(it) }, 0, parent)
-    }
-
-    /** Plex player ⚙ menu. */
-    private fun vodSettings(src: Source): Panel {
-        lateinit var me: Panel
-        val items = mutableListOf<PanelItem>()
-        if (src.isPlex) items += PanelItem("Quality  ›") { st.panel = qualityPanel(src).copy(parent = me) }
-        items += PanelItem("Audio & subtitles  ›") { st.panel = tracksPanel(src).copy(parent = me) }
-        items += PanelItem("Subtitle size  ›") { st.panel = subtitleSizePanel(me) }
-        items += PanelItem("Subtitle sync  ·  ${if (st.subOffsetMs == 0) "0 s" else "${st.subOffsetMs} ms"}  ›") { st.panel = syncPanel(src, me) }
-        items += PanelItem("Playback speed  ·  ${if (speed == 1f) "Normal" else "${speed}×"}  ›") { st.panel = speedPanel(me) }
-        items += PanelItem("Aspect ratio  ›") { st.panel = aspectPanel(me) }
-        items += PanelItem("Sleep timer  ›") { st.panel = sleepPanel(me) }
-        if (src.chapters.size > 1) items += PanelItem("Chapters  ›") { st.panel = chaptersPanel(src).copy(parent = me) }
-        if (src is PlexSource && src.versions.size > 1) items += PanelItem("Version  ·  ${src.versions.getOrNull(src.versionIndex) ?: ""}  ›") {
-            st.panel = sub(me, "Version", src.versions.mapIndexed { i, v -> PanelItem(v, i == src.versionIndex) { src.chooseVersion(i); start(src, st.pos, keepState = true) } })
-        }
-        if (src is PlexSource) items += PanelItem("Audio boost  ·  ${if (src.audioBoost == 100) "Off" else "${src.audioBoost}%"}  ›") {
-            st.panel = sub(me, "Audio boost (Plex transcodes the audio)", listOf(100 to "Off", 150 to "Small (150%)", 200 to "Medium (200%)", 300 to "Large (300%)").map { (v, l) ->
-                PanelItem(l, src.audioBoost == v) { src.chooseBoost(v); start(src, st.pos, keepState = true) }
-            })
-        }
-        items += PanelItem("Playback info  ›") { st.panel = infoPanel(me) }
-        me = Panel("Settings", items, 0)
-        return me
-    }
-
-    private fun chaptersPanel(src: Source): Panel {
-        val pos = st.pos
-        val ch = src.chapters
-        val cur = ch.indexOfLast { pos >= it.start }
-        return Panel("Chapters", ch.mapIndexed { i, c -> PanelItem("${fmtClock(c.start)}   ${c.type}", i == cur) { seekAbs(c.start) } }, cur.coerceAtLeast(0))
-    }
-
-    private suspend fun episodesPanel(src: Source): Panel? {
+    internal suspend fun episodesPanel(src: Source): Panel? {
         val eps = src.siblings()
         if (eps.isEmpty()) { Toast.makeText(this, "No other episodes", Toast.LENGTH_SHORT).show(); return null }
         val cur = eps.indexOfFirst { it.ratingKey == src.ratingKey }
@@ -1025,51 +725,8 @@ class PlayerActivity : ComponentActivity() {
         }, cur.coerceAtLeast(0))
     }
 
-    /** TiviMate-style options for live TV (MENU, or long-press OK). */
-    private fun liveOptions(src: Source): Panel {
-        lateinit var me: Panel
-        val ch = (src as? LiveSource)?.channel
-        val p = st.channel?.onAir
-        val items = mutableListOf<PanelItem>()
-        items += PanelItem("Programme guide  ›") { lifecycleScope.launch { programmesPanel()?.let { st.panel = it.copy(parent = me); poke() } } }
-        items += PanelItem("Channel list  ›") { st.chList = true; st.controls = false }
-        if (ch != null && p != null && ch.archive) items += PanelItem("Watch from start") { start(CatchupSource(ch.providerId, ch.id, p.start, p.stop, p.title, ch.name), 0.0) }
-        if (ch != null && p != null) items += PanelItem("Record this programme") {
-            lifecycleScope.launch { runCatching { Repo.record(ch, p) }.onSuccess { Toast.makeText(this@PlayerActivity, it, Toast.LENGTH_SHORT).show() }.onFailure { Toast.makeText(this@PlayerActivity, it.message, Toast.LENGTH_LONG).show() } }
-        }
-        if (ch != null) items += PanelItem(if (ch.isFav) "Remove from favourites" else "Add to favourites") {
-            lifecycleScope.launch { runCatching { Repo.toggleFavorite(ch) }.onSuccess { added -> Toast.makeText(this@PlayerActivity, if (added) "Added to favourites" else "Removed from favourites", Toast.LENGTH_SHORT).show() } }
-        }
-        prevChannel?.let { pc -> items += PanelItem("Previous channel: ${pc.name}") { Playback.zapList.indexOfFirst { it.id == pc.id }.takeIf { it >= 0 }?.let { zapTo(it) } } }
-        items += PanelItem("Audio track  ›") { st.panel = tracksPanel(src).copy(parent = me) }
-        items += PanelItem("Subtitles  ›") { st.panel = tracksPanel(src).copy(parent = me) }
-        items += PanelItem("Video track  ›") { st.panel = videoPanel(me) }
-        items += PanelItem("Aspect ratio  ›") { st.panel = aspectPanel(me) }
-        items += PanelItem("Sleep timer  ›") { st.panel = sleepPanel(me) }
-        items += PanelItem("Reload stream") { start(src, 0.0) }
-        items += PanelItem("Stream info  ›") { st.panel = infoPanel(me) }
-        me = Panel(ch?.name ?: "Options", items, 0)
-        return me
-    }
-
-    private fun videoPanel(parent: Panel): Panel {
-        val items = mutableListOf(PanelItem("Auto", exo.trackSelectionParameters.overrides.isEmpty()) {
-            exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_VIDEO).build()
-        })
-        exo.currentTracks.groups.filter { it.type == C.TRACK_TYPE_VIDEO }.forEach { g ->
-            for (i in 0 until g.length) {
-                if (!g.isTrackSupported(i)) continue
-                val f = g.getTrackFormat(i)
-                items += PanelItem("${f.width}×${f.height}${if (f.bitrate > 0) " · ${f.bitrate / 1000} kbps" else ""}", g.isTrackSelected(i) && items.size > 0 && !exo.trackSelectionParameters.overrides.isEmpty()) {
-                    exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, i)).build()
-                }
-            }
-        }
-        return sub(parent, "Video track", items)
-    }
-
     /** Programme list for the current channel (▶ while watching): now, upcoming and catch-up. */
-    private suspend fun programmesPanel(): Panel? {
+    internal suspend fun programmesPanel(): Panel? {
         val ch = st.channel ?: return null
         val n = nowS()
         val from = if (ch.archive) n - 3 * 86400 else n - 3600
@@ -1097,7 +754,7 @@ class PlayerActivity : ComponentActivity() {
     }
 
     // ------------------------------------------------------------------ live TV
-    private fun zap(dir: Int) {
+    internal fun zap(dir: Int) {
         val list = Playback.zapList
         if (list.size < 2) { poke(); return }
         val wrap = AppState.uiBool("zapWrap", true)
@@ -1106,7 +763,7 @@ class PlayerActivity : ComponentActivity() {
         zapTo(i, debounce = true)
     }
 
-    private fun zapTo(i: Int, debounce: Boolean = false) {
+    internal fun zapTo(i: Int, debounce: Boolean = false) {
         val list = Playback.zapList
         val ch = list.getOrNull(i) ?: return
         val cur = (source as? LiveSource)?.channel
@@ -1122,7 +779,7 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
-    private fun liveAction(i: Int) {
+    internal fun liveAction(i: Int) {
         val ch = st.channel
         val p = ch?.onAir
         val src = source
@@ -1150,7 +807,7 @@ class PlayerActivity : ComponentActivity() {
     }
 
     /** FHD / 60 FPS / STEREO badges from the stream that is actually playing. */
-    private fun updateBadges() {
+    internal fun updateBadges() {
         val v = exo.videoFormat; val a = exo.audioFormat
         val l = mutableListOf<String>()
         v?.height?.takeIf { it > 0 }?.let { h -> l += when { h >= 2000 -> "4K"; h >= 1000 -> "FHD"; h >= 700 -> "HD"; else -> "SD" } }
@@ -1160,7 +817,7 @@ class PlayerActivity : ComponentActivity() {
         if (l != st.badges) st.badges = l
     }
 
-    private fun commitDigits() {
+    internal fun commitDigits() {
         val n = st.digits.toIntOrNull()
         st.digits = ""
         if (n == null) return
@@ -1188,10 +845,10 @@ class PlayerActivity : ComponentActivity() {
         return onKey(code, event.repeatCount) || super.dispatchKeyEvent(event)
     }
 
-    private var backDownSeen = false
-    private fun isOk(code: Int) = code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_NUMPAD_ENTER
+    internal var backDownSeen = false
+    internal fun isOk(code: Int) = code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_NUMPAD_ENTER
 
-    private fun onKey(code: Int, repeat: Int): Boolean {
+    internal fun onKey(code: Int, repeat: Int): Boolean {
         val back = code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE
         // Error screen
         st.error?.let {
@@ -1241,12 +898,12 @@ class PlayerActivity : ComponentActivity() {
         return if (st.live) liveKey(code, repeat, back) else vodKey(code, repeat, back)
     }
 
-    private fun nextItem(p: Panel, from: Int): Int { var i = from + 1; while (i < p.items.size && p.items[i].header) i++; return if (i < p.items.size) i else from }
-    private fun prevItem(p: Panel, from: Int): Int { var i = from - 1; while (i >= 0 && p.items[i].header) i--; return if (i >= 0) i else from }
+    internal fun nextItem(p: Panel, from: Int): Int { var i = from + 1; while (i < p.items.size && p.items[i].header) i++; return if (i < p.items.size) i else from }
+    internal fun prevItem(p: Panel, from: Int): Int { var i = from - 1; while (i >= 0 && p.items[i].header) i--; return if (i >= 0) i else from }
 
-    private fun openLiveOverlay() { st.liveBtn = 2; st.liveZone = 0; st.liveOverlay = true; poke() }
+    internal fun openLiveOverlay() { st.liveBtn = 2; st.liveZone = 0; st.liveOverlay = true; poke() }
 
-    private fun liveKey(code: Int, repeat: Int, back: Boolean): Boolean {
+    internal fun liveKey(code: Int, repeat: Int, back: Boolean): Boolean {
         val ov = st.controls && st.liveOverlay
         if (code in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9) {
             st.digits = (st.digits + (code - KeyEvent.KEYCODE_0)).takeLast(5); digitsAt = System.currentTimeMillis(); poke(); return true
@@ -1289,7 +946,7 @@ class PlayerActivity : ComponentActivity() {
         return true
     }
 
-    private fun vodKey(code: Int, repeat: Int, back: Boolean): Boolean {
+    internal fun vodKey(code: Int, repeat: Int, back: Boolean): Boolean {
         val btns = st.buttons
         when {
             back -> when {
@@ -1329,8 +986,8 @@ class PlayerActivity : ComponentActivity() {
     }
 
     /** Leaving live TV for the Live TV / Guide screen: hand the running stream to the preview window (no reload). */
-    private var handedOff = false
-    private var liveAudio: LiveAudio? = null
+    internal var handedOff = false
+    internal var liveAudio: LiveAudio? = null
     override fun finish() {
         val src = source; val d = desc
         // Live preview window: TV only (phones go straight back to the channel list).
@@ -1348,12 +1005,12 @@ class PlayerActivity : ComponentActivity() {
     }
 
     // ---------- Chromecast (phones) ----------
-    private val castListener = object : Cast.Listener() {
+    internal val castListener = object : Cast.Listener() {
         override fun onSessionStarted(session: com.google.android.gms.cast.framework.CastSession, sessionId: String) = castHere(session)
         override fun onSessionResumed(session: com.google.android.gms.cast.framework.CastSession, wasSuspended: Boolean) = castHere(session)
         override fun onSessionEnded(session: com.google.android.gms.cast.framework.CastSession, error: Int) { st.message = "Stopped casting"; hideAt = System.currentTimeMillis() }
     }
-    private fun castHere(session: com.google.android.gms.cast.framework.CastSession) {
+    internal fun castHere(session: com.google.android.gms.cast.framework.CastSession) {
         val src = source as? PlexSource ?: run { Toast.makeText(this, "Casting works for Plex movies and shows.", Toast.LENGTH_LONG).show(); return }
         val pos = st.pos
         lifecycleScope.launch {
@@ -1378,7 +1035,7 @@ class PlayerActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    private fun close() {
+    internal fun close() {
         if (closed) return
         closed = true
         val src = source
